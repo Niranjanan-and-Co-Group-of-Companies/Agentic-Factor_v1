@@ -1,0 +1,21 @@
+▲ Next.js 16.2.4 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.1.69:3000
+- Environments: .env.local
+✓ Ready in 1768ms
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of /Users/niranjanant/package-lock.json as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * /Users/niranjanant/.gemini/antigravity/scratch/agent-factory/package-lock.json
+
+⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+
+ GET / 200 in 10.1s (next.js: 3.3s, proxy.ts: 1547ms, application-code: 5.2s)
+ GET / 200 in 510ms (next.js: 53ms, proxy.ts: 15ms, application-code: 442ms)
+ GET /pricing 200 in 6.4s (next.js: 1552ms, proxy.ts: 204ms, application-code: 4.6s)
+✓ Finished filesystem cache database compaction in 22.7s
+✓ Finished filesystem cache database compaction in 10.0s
+[browser] Image with src "/logo.png" was detected as the Largest Contentful Paint (LCP). Please add the `loading="eager"` property if this image is above the fold.
+Read more: https://nextjs.org/docs/app/api-reference/components/image#loading

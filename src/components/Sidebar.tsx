@@ -123,9 +123,8 @@ export default function Sidebar() {
 
   return (
     <nav className="sidebar">
-      <div className="sidebar-logo">
-        <Image src="/logo.png" alt="Agentic Factor" width={32} height={32} style={{ borderRadius: 6 }} />
-        <span>Agentic Factor</span>
+      <div className="sidebar-logo" style={{ padding: "0 var(--space-md)", justifyContent: "center", marginBottom: "var(--space-md)" }}>
+        <Image src="/logo.png" alt="Agentic Factor" width={160} height={87} style={{ objectFit: "contain" }} />
       </div>
       <Link href="/dashboard" className="nav-link">
         <span className="icon">📊</span> Dashboard

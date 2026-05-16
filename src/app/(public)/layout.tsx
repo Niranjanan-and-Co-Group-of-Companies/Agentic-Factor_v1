@@ -12,8 +12,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
       <nav className="public-navbar">
         <div className="public-navbar-inner">
           <a href="/" className="public-logo">
-            <img src="/logo.png" alt="Agentic Factor" width={28} height={28} style={{ borderRadius: 4 }} className="public-logo-icon" />
-            <span className="public-logo-text">Agentic Factor</span>
+            <img src="/logo.png" alt="Agentic Factor" style={{ height: "40px", width: "auto" }} />
           </a>
           <div className="public-nav-links">
             <a href="/pricing" className="public-nav-link">Pricing</a>
@@ -36,8 +35,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
       <footer className="public-footer">
         <div className="public-footer-inner">
           <div className="public-footer-brand">
-            <img src="/logo.png" alt="Agentic Factor" width={24} height={24} style={{ borderRadius: 4 }} className="public-logo-icon" />
-            <span className="public-logo-text">Agentic Factor</span>
+            <img src="/logo.png" alt="Agentic Factor" style={{ height: "48px", width: "auto", marginBottom: "var(--space-sm)" }} />
             <p className="public-footer-tagline">Build autonomous AI agent teams that execute complex missions.</p>
           </div>
           <div className="public-footer-links">

@@ -100,13 +100,7 @@ export default function LoginPage() {
       <div style={{ width: "100%", maxWidth: 480 }}>
         {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: "var(--space-2xl)" }}>
-          <img src="/logo.png" alt="Agentic Factor" width={64} height={64} style={{ marginBottom: "var(--space-sm)" }} />
-          <h1 style={{ fontSize: "1.8rem", fontWeight: 800, background: "linear-gradient(135deg, var(--accent), var(--purple))", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-            Agentic Factor
-          </h1>
-          <p style={{ color: "var(--text-secondary)", marginTop: "var(--space-xs)" }}>
-            Multi-agent teams from natural language
-          </p>
+          <img src="/logo.png" alt="Agentic Factor" style={{ width: "100%", maxWidth: "300px", height: "auto", marginBottom: "var(--space-md)" }} />
         </div>
 
         {/* OAuth Buttons */}
