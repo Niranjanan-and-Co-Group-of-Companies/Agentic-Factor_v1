@@ -10,11 +10,13 @@ import { useEffect, useRef } from "react";
 const FEATURES = [
   { icon: "🤖", title: "AI Agent Teams", desc: "Autonomous multi-agent systems that decompose and execute complex goals" },
   { icon: "🧠", title: "Powered by Claude", desc: "Claude Sonnet 4 for best code generation, with Gemini & GPT fallback" },
-  { icon: "🔌", title: "40+ Connectors", desc: "Google, Slack, Notion, GitHub, Zoho, Discord and more" },
+  { icon: "🔌", title: "100+ Connectors", desc: "Google, Slack, Notion, GitHub, Zoho, Discord and more" },
   { icon: "📚", title: "RAG Memory", desc: "Vector-powered knowledge base with PDF/DOCX ingestion" },
   { icon: "⚡", title: "E2B Sandboxing", desc: "Secure code execution in isolated cloud environments" },
   { icon: "💳", title: "Credit-Based Billing", desc: "Pay only for what your agents consume — no waste" },
   { icon: "🔒", title: "Enterprise Security", desc: "AES-256 encryption, RLS, OAuth 2.0, RBAC governance" },
+  { icon: "⏸️", title: "Human In The Loop (HITL)", desc: "Agents automatically pause and wait for your manual approval before performing any high-risk actions or sending emails." },
+  { icon: "⚙️", title: "100% Automated Agents", desc: "Set it and forget it. Run fully autonomous background agents for monitoring, data syncing, and continuous repetitive operations." },
   { icon: "📊", title: "Real-Time Dashboard", desc: "Live agent status, token usage, mission timeline" },
   { icon: "📧", title: "Agent Email Inbox", desc: "Email your agents tasks — they read, process, and reply" },
 ];
