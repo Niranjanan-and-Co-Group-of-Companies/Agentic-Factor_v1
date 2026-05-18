@@ -31,6 +31,32 @@ export async function POST(
       );
     }
 
+    // --- FIX: CLEAR CACHE FOR FRESH RUNS ---
+    // If the user clicks "Start Mission", "Run Again", or "Force Restart", we must clear the old 
+    // agent.completed events for this mission's agents so they actually run again instead of instantly returning cached data.
+    const { createServiceClient } = await import('@/lib/supabase/server');
+    const supabase = createServiceClient();
+    
+    const { data: missionData } = await supabase
+      .from('missions')
+      .select('mission_json')
+      .eq('id', missionId)
+      .eq('tenant_id', tenantId)
+      .single();
+      
+    if (missionData && missionData.mission_json?.agents) {
+      const agentIds = missionData.mission_json.agents.map((a: any) => a.id);
+      if (agentIds.length > 0) {
+        await supabase
+          .from('events')
+          .delete()
+          .eq('tenant_id', tenantId)
+          .eq('event_type', 'agent.completed')
+          .in('entity_id', agentIds);
+      }
+    }
+    // ----------------------------------------
+
     // Use Next.js `after()` to keep the function alive after sending the response.
     // This is the production-ready way to run background work on Vercel.
     // The mission execution continues even after the HTTP response is sent.
