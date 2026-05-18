@@ -80,7 +80,7 @@ export default function DashboardPage() {
         agentCount: 0,
         pattern: "sequential",
         score: null,
-        createdAt: formatTimeAgo(m.created_at as string),
+        createdAt: m.created_at as string,
       })));
     }
 
