@@ -107,7 +107,7 @@ export async function callLLM(
 // ── Gemini (via REST API — no SDK dependency) ──
 async function callGemini(messages: LLMMessage[], temperature: number, jsonMode: boolean, tier: number): Promise<LLMResponse> {
   const apiKey = process.env.GEMINI_API_KEY!;
-  const model = tier === 1 ? 'gemini-1.5-pro-latest' : tier === 2 ? 'gemini-1.5-flash-latest' : 'gemini-1.5-flash-latest';
+  const model = tier === 1 ? 'gemini-1.5-pro' : tier === 2 ? 'gemini-1.5-flash' : 'gemini-1.5-flash';
 
   // Convert messages to Gemini format
   const systemInstruction = messages.find(m => m.role === 'system')?.content || '';
@@ -159,6 +159,16 @@ async function callOpenAI(messages: LLMMessage[], temperature: number, jsonMode:
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const modelName = tier === 1 ? 'gpt-4o' : tier === 2 ? 'gpt-4o-mini' : 'gpt-3.5-turbo';
 
+  // OpenAI strictly requires the word "json" in the prompt when using json_object format
+  if (jsonMode) {
+    const sysMsg = messages.find(m => m.role === 'system');
+    if (sysMsg && !sysMsg.content.toLowerCase().includes('json')) {
+      sysMsg.content += '\\n\\nPlease output valid JSON.';
+    } else if (!sysMsg) {
+      messages.unshift({ role: 'system', content: 'Please output valid JSON.' });
+    }
+  }
+
   const completion = await openai.chat.completions.create({
     model: modelName,
     temperature,
@@ -190,7 +200,7 @@ async function callAnthropic(messages: LLMMessage[], temperature: number, tier: 
     role: m.role as 'user' | 'assistant',
     content: m.content,
   }));
-  const modelName = tier === 1 ? 'claude-3-5-sonnet-20240620' : tier === 2 ? 'claude-3-5-sonnet-20240620' : 'claude-3-haiku-20240307';
+  const modelName = tier === 1 ? 'claude-3-opus-20240229' : tier === 2 ? 'claude-3-sonnet-20240229' : 'claude-3-haiku-20240307';
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
