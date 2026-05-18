@@ -147,7 +147,8 @@ INSTRUCTIONS:
    (e.g., use os.environ.get("GOOGLE_ACCESS_TOKEN"))
 5. **CRITICAL STRICT RULE**: NEVER output simulated, mocked, or placeholder data. You MUST execute the real API requests using the provided credentials and real logic. If you output mock data, the entire mission will fail.
 6. Enclose your Python code inside a triple-backtick block with 'python' as the language identifier.
-`;
+7. **WARNING ON WEB SCRAPING**: If you use \`requests\` to fetch generic web pages or news sites, remember they return HTML! Do NOT call \`.json()\` on the response unless you are querying a dedicated JSON API. Use BeautifulSoup to parse HTML.
+8. **DO NOT CATCH FATAL ERRORS**: If your script fails or encounters an exception, DO NOT catch it and print it as JSON to stdout! Let the script crash naturally. The orchestrator will catch the traceback and allow you to fix your code in the next attempt.`;
 
       const response = await callLLM(
         [{ role: 'system', content: systemPrompt }], 
