@@ -6,8 +6,8 @@
 
 -- Add credit-based columns
 ALTER TABLE public.tenant_billing
-    ADD COLUMN IF NOT EXISTS credits_remaining INTEGER DEFAULT 50,
-    ADD COLUMN IF NOT EXISTS credits_total INTEGER DEFAULT 50,
+    ADD COLUMN IF NOT EXISTS credits_remaining INTEGER DEFAULT 30,
+    ADD COLUMN IF NOT EXISTS credits_total INTEGER DEFAULT 30,
     ADD COLUMN IF NOT EXISTS credits_used_this_month INTEGER DEFAULT 0,
     ADD COLUMN IF NOT EXISTS max_active_missions INTEGER DEFAULT 1,
     ADD COLUMN IF NOT EXISTS model_tier TEXT DEFAULT 'flash',
@@ -16,8 +16,8 @@ ALTER TABLE public.tenant_billing
 
 -- Update existing free users to trial defaults
 UPDATE public.tenant_billing
-SET credits_remaining = 50,
-    credits_total = 50,
+SET credits_remaining = 30,
+    credits_total = 30,
     max_active_missions = 1,
     model_tier = 'flash',
     governance = 'none',

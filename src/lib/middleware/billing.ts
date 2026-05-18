@@ -77,7 +77,7 @@ export async function checkCredits(tenantId: string, cost: number = 1): Promise<
     .single();
 
   const plan = billing?.plan || 'free';
-  const creditsRemaining = billing?.credits_remaining ?? PLAN_DEFAULTS[plan]?.credits ?? 50;
+  const creditsRemaining = billing?.credits_remaining ?? PLAN_DEFAULTS[plan]?.credits ?? 30;
 
   if (billing?.billing_status === 'past_due') {
     return { allowed: false, plan, reason: 'Account has past-due billing. Please update your payment method.' };
@@ -95,7 +95,7 @@ export async function checkCredits(tenantId: string, cost: number = 1): Promise<
       plan,
       reason: msg,
       creditsRemaining,
-      creditsTotal: billing?.credits_total ?? 50,
+      creditsTotal: billing?.credits_total ?? 30,
     };
   }
 
@@ -103,7 +103,7 @@ export async function checkCredits(tenantId: string, cost: number = 1): Promise<
     allowed: true,
     plan,
     creditsRemaining,
-    creditsTotal: billing?.credits_total ?? 50,
+    creditsTotal: billing?.credits_total ?? 30,
     modelTier: (billing?.model_tier as ModelTier) || 'flash',
   };
 }
@@ -138,11 +138,11 @@ export async function checkActiveMissions(tenantId: string): Promise<BillingChec
       plan,
       reason: `Active mission limit reached (${activeMissions}/${maxActive}). Complete or cancel a mission before starting a new one. Upgrade for more.`,
       creditsRemaining: billing?.credits_remaining ?? 0,
-      creditsTotal: billing?.credits_total ?? 50,
+      creditsTotal: billing?.credits_total ?? 30,
     };
   }
 
-  return { allowed: true, plan, creditsRemaining: billing?.credits_remaining ?? 0, creditsTotal: billing?.credits_total ?? 50 };
+  return { allowed: true, plan, creditsRemaining: billing?.credits_remaining ?? 0, creditsTotal: billing?.credits_total ?? 30 };
 }
 
 /**
