@@ -107,7 +107,7 @@ export async function callLLM(
 // ── Gemini (via REST API — no SDK dependency) ──
 async function callGemini(messages: LLMMessage[], temperature: number, jsonMode: boolean, tier: number): Promise<LLMResponse> {
   const apiKey = process.env.GEMINI_API_KEY!;
-  const model = tier === 1 ? 'gemini-1.5-pro' : tier === 2 ? 'gemini-1.5-flash' : 'gemini-1.5-flash-8b';
+  const model = tier === 1 ? 'gemini-1.5-pro-latest' : tier === 2 ? 'gemini-1.5-flash-latest' : 'gemini-1.5-flash-latest';
 
   // Convert messages to Gemini format
   const systemInstruction = messages.find(m => m.role === 'system')?.content || '';
@@ -190,7 +190,7 @@ async function callAnthropic(messages: LLMMessage[], temperature: number, tier: 
     role: m.role as 'user' | 'assistant',
     content: m.content,
   }));
-  const modelName = tier === 1 ? 'claude-sonnet-4-20250514' : tier === 2 ? 'claude-3-5-sonnet-20241022' : 'claude-3-5-haiku-20241022';
+  const modelName = tier === 1 ? 'claude-3-5-sonnet-20240620' : tier === 2 ? 'claude-3-5-sonnet-20240620' : 'claude-3-haiku-20240307';
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
