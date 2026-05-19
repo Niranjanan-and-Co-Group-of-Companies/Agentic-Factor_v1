@@ -39,6 +39,7 @@ You must decompose the user's intent into:
    - "scope": string
    - "confidentialityLevel": one of "public", "internal", "confidential", "restricted"
 11. **Discovery Questions**: Generate 3 or more highly specific "discoveryQuestions" to ask the user. These questions must gather missing context or exact preferences needed to refine the agents' system prompts before deployment.
+12. **Expected Output Format**: Generate a highly specific string ("expectedOutputFormat") containing a sample format of what the final output should look like based on the user's request. This will be shown to the user so they can edit it. If it's a JSON array, provide an example array. If it's a markdown report, provide a sample markdown skeleton.
 
 IMPORTANT RULES:
 - Each agent must have a unique agentIndex starting from 0.
@@ -91,6 +92,7 @@ Example 1 — User says: "Monitor my AWS costs and alert on Slack if spending ex
     "Alert threshold is correctly configured at $1000/day",
     "Alert message contains cost breakdown"
   ],
+  "expectedOutputFormat": "{\\n  \\"status\\": \\"sent\\",\\n  \\"channel\\": \\"#alerts\\"\\n}",
   "permissions": [
     {"type": "api_key", "service": "AWS", "scope": "cloudwatch:read", "confidentialityLevel": "confidential"},
     {"type": "oauth_token", "service": "Slack", "scope": "chat:write", "confidentialityLevel": "internal"}

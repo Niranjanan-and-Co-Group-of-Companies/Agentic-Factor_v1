@@ -20,6 +20,7 @@ interface Blueprint {
   agents: BlueprintAgent[];
   orchestration: { pattern: string; timeoutSeconds: number; entryAgent: string; edges: { from: string; to: string; condition?: string }[] };
   validationChecklist: string[];
+  expectedOutputFormat?: string;
   permissions: { type: string; service: string; scope: string; confidentialityLevel: string; granted: boolean }[];
   discoveryQuestions?: string[];
 }
@@ -557,6 +558,24 @@ function MissionCreatorInner() {
                 </div>
               </div>
             )}
+
+            {/* Expected Output Format */}
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">📝 Expected Final Output</span>
+                <span className="badge badge-emerald">Validation</span>
+              </div>
+              <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: "var(--space-md)" }}>
+                The final agent will strictly format its output to match this schema. Edit if needed.
+              </p>
+              <textarea
+                className="textarea"
+                style={{ minHeight: "120px", fontSize: "0.82rem", fontFamily: "monospace", width: "100%", background: "var(--bg-glass)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "var(--space-sm)", color: "var(--text-bright)" }}
+                value={blueprint.expectedOutputFormat || ""}
+                onChange={(e) => setBlueprint({ ...blueprint, expectedOutputFormat: e.target.value })}
+                placeholder="e.g. { 'status': 'success', 'data': [...] }"
+              />
+            </div>
 
             <div className="card">
               <div className="card-header">

@@ -81,6 +81,7 @@ export const MissionSchema = z.object({
   agents: z.array(AgentDefinitionSchema).min(1, 'At least one agent is required'),
   orchestration: OrchestrationSchema,
   validationChecklist: z.array(z.string()).min(1, 'At least one validation check is required'),
+  expectedOutputFormat: z.string().optional(),
   permissions: z.array(PermissionRequirementSchema).default([]),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -114,6 +115,7 @@ export const LLMOutputSchema = z.object({
     ).default([]),
   }),
   validationChecklist: z.array(z.string()).min(1),
+  expectedOutputFormat: z.string().optional(),
   permissions: z.array(PermissionRequirementSchema).default([]),
   discoveryQuestions: z.array(z.string()).min(3).default([]),
 });

@@ -82,7 +82,11 @@ export async function executeMission(missionId: string, tenantId: string) {
           return;
         }
 
-        const result = await executeAgent(tenantId, missionId, agent, currentContext, tokens);
+        // Determine if this is the final agent (no outgoing edges)
+        const outEdges = orchestration.edges?.filter((e: any) => e.from === agent.id) || [];
+        const isFinalAgent = outEdges.length === 0 && orchestration.pattern !== 'supervisor';
+
+        const result = await executeAgent(tenantId, missionId, agent, currentContext, tokens, isFinalAgent, mission.expectedOutputFormat);
         output = result.output;
 
         // Deduct credits based on ACTUAL model tier (not always flash)
@@ -171,7 +175,9 @@ export async function executeMission(missionId: string, tenantId: string) {
               if (!parallelAgent) throw new Error(`Agent ${edge.to} not found`);
               
               console.log(`[Executor] [Parallel] Starting agent: ${parallelAgent.role}`);
-              const result = await executeAgent(tenantId, missionId, parallelAgent, output, tokens);
+              const pOutEdges = orchestration.edges?.filter((e: any) => e.from === parallelAgent.id) || [];
+              const pIsFinalAgent = pOutEdges.length === 0;
+              const result = await executeAgent(tenantId, missionId, parallelAgent, output, tokens, pIsFinalAgent, mission.expectedOutputFormat);
               return { agentId: edge.to, role: parallelAgent.role, output: result.output };
             })
           );

@@ -18,7 +18,9 @@ export async function executeAgent(
   missionId: string,
   agent: AgentConfig,
   inputContext: string,
-  tokens: { provider: string, access_token: string }[] = []
+  tokens: { provider: string, access_token: string }[] = [],
+  isFinalAgent: boolean = false,
+  expectedOutputFormat?: string
 ): Promise<{ output: string; finalCode: string }> {
   const supabase = createServiceClient();
   
@@ -40,7 +42,7 @@ export async function executeAgent(
   const envString = Object.entries(envVars).map(([k, v]) => `-e ${k}="${v}"`).join(' ');
 
   let attempts = 0;
-  const maxAttempts = 3;
+  const maxAttempts = 5;
   let lastError = '';
   let lastPythonCode = '';
 
@@ -139,6 +141,11 @@ ${strictBoundaries || 'None.'}
 
 ${errorContext}
 
+${isFinalAgent && expectedOutputFormat ? `CRITICAL FINAL OUTPUT FORMAT REQUIREMENT:
+You are the final agent in this mission. Your final JSON output MUST structurally match this expected format/schema:
+${expectedOutputFormat}
+Do NOT output literal data from the sample if it doesn't make sense, but you MUST follow its JSON schema, keys, and structure exactly.` : ''}
+
 INSTRUCTIONS:
 1. Write a complete, self-contained Python script to accomplish this task.
 2. The script MUST print the final output as a valid JSON string to standard output (stdout).
@@ -222,6 +229,29 @@ ${pythonCode}`;
           JSON.parse(finalOutputJSON);
         } catch (e) {
           throw new Error(`Script succeeded but output was not valid JSON. Output was: ${stdout}`);
+        }
+
+        // --- PHASE 3: STRUCTURAL VALIDATION ---
+        if (isFinalAgent && expectedOutputFormat) {
+          console.log(`[Agent ${agent.id}] Validating final output against expected format...`);
+          const validationPrompt = `
+You are a strict data validation agent. 
+The user requested the final output to follow this expected structural format/schema:
+${expectedOutputFormat}
+
+The agent generated this JSON output:
+${finalOutputJSON}
+
+Does the generated output structurally match the requested format and fulfill the core requirements? 
+Check for schema compliance, correct keys, and data types. Do NOT check for literal data matching (the actual data values can differ from the sample).
+Respond with a JSON object: {"valid": boolean, "reason": "string explaining why if invalid"}
+          `;
+          const validationResult = await callLLM([{ role: 'user', content: validationPrompt }], { temperature: 0, jsonMode: true, tier: 1 });
+          const validationParsed = JSON.parse(validationResult.content);
+          if (!validationParsed.valid) {
+            throw new Error(`Output failed structural validation against the expected format. Reason: ${validationParsed.reason}`);
+          }
+          console.log(`[Agent ${agent.id}] Validation passed!`);
         }
 
         // True Payload Approval: Pause AFTER execution if manual
