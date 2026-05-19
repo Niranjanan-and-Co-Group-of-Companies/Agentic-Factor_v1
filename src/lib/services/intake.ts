@@ -281,6 +281,7 @@ export async function generateMissionJSON(
       edges: hydratedEdges,
     },
     validationChecklist: llmOutput.validationChecklist,
+    expectedOutputFormat: llmOutput.expectedOutputFormat,
     permissions: llmOutput.permissions,
     createdAt: now,
     updatedAt: now,

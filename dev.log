@@ -90,3 +90,7 @@ Read more: https://nextjs.org/docs/app/api-reference/components/image#loading
  GET / 200 in 73ms (next.js: 2ms, proxy.ts: 3ms, application-code: 68ms)
  GET / 200 in 51ms (next.js: 1984µs, proxy.ts: 2ms, application-code: 47ms)
  GET / 200 in 28ms (next.js: 2ms, proxy.ts: 4ms, application-code: 22ms)
+ GET / 200 in 497ms (next.js: 220ms, proxy.ts: 73ms, application-code: 204ms)
+ GET / 200 in 112ms (next.js: 5ms, proxy.ts: 5ms, application-code: 103ms)
+ GET / 200 in 75ms (next.js: 4ms, proxy.ts: 3ms, application-code: 68ms)
+ GET / 200 in 51ms (next.js: 3ms, proxy.ts: 3ms, application-code: 46ms)
