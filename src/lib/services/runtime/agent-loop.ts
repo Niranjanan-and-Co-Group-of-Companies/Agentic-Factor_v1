@@ -74,6 +74,16 @@ export async function executeAgent(
   while (attempts < maxAttempts) {
     attempts++;
     
+    // ── Billing Enforcement: Burn 1 execution credit per attempt ──
+    try {
+      const { deductCredits } = await import('@/lib/middleware/billing');
+      // Using a flat 2 credits per attempt for E2B + LLM fallback
+      await deductCredits(tenantId, 2, `agent_attempt_${attempts}:${agent.role}`);
+    } catch (err) {
+      console.warn(`[Agent ${agent.id}] Failed to deduct credits, pausing.`, err);
+      throw new Error('InsufficientCredits');
+    }
+
     let pythonCode = null;
     
     if (existingAction && existingAction.status === 'approved' && existingAction.payload && existingAction.payload.pythonCode) {
@@ -155,7 +165,8 @@ INSTRUCTIONS:
 5. **CRITICAL STRICT RULE**: NEVER output simulated, mocked, or placeholder data. You MUST execute the real API requests using the provided credentials and real logic. If you output mock data, the entire mission will fail.
 6. Enclose your Python code inside a triple-backtick block with 'python' as the language identifier.
 7. **WARNING ON WEB SCRAPING**: If you use \`requests\` to fetch generic web pages or news sites, remember they return HTML! Do NOT call \`.json()\` on the response unless you are querying a dedicated JSON API. Use BeautifulSoup to parse HTML.
-8. **DO NOT CATCH FATAL ERRORS**: If your script fails or encounters an exception, DO NOT catch it and print it as JSON to stdout! Let the script crash naturally. The orchestrator will catch the traceback and allow you to fix your code in the next attempt.`;
+8. **DO NOT CATCH FATAL ERRORS**: If your script fails or encounters an exception, DO NOT catch it and print it as JSON to stdout! Let the script crash naturally. The orchestrator will catch the traceback and allow you to fix your code in the next attempt.
+9. **DEPENDENCY MANAGEMENT**: The E2B execution environment is completely barebones. It only has standard library python packages. If you need external packages like \`requests\`, \`beautifulsoup4\`, or \`openai\`, you MUST use \`subprocess.check_call([sys.executable, "-m", "pip", "install", "package_name"])\` at the very top of your script to install them before importing them.`;
 
       const response = await callLLM(
         [{ role: 'system', content: systemPrompt }], 

@@ -42,8 +42,19 @@ export async function POST(request: NextRequest) {
 
     // ── Phase 1: Generate Blueprint (NO persistence) ──
     if (action === 'blueprint') {
+      const { checkCredits, deductCredits } = await import('@/lib/middleware/billing');
+      const creditCheck = await checkCredits(tenantId, 1);
+      if (!creditCheck.allowed) {
+        return NextResponse.json({ error: creditCheck.reason }, { status: 402 });
+      }
+
       const { intent } = GenerateBlueprintRequest.parse(body);
       const { mission, rawLLMOutput, isDiscovery, question } = await generateMissionJSON(intent, tenantId);
+      
+      // Deduct 1 credit for the LLM generation (only if not a discovery question)
+      if (!isDiscovery) {
+        await deductCredits(tenantId, 1, 'blueprint_generation').catch(() => {});
+      }
 
       if (isDiscovery) {
         return NextResponse.json({
@@ -76,10 +87,19 @@ export async function POST(request: NextRequest) {
 
     // ── Phase 4.2: Edit Blueprint via Chat ──
     if (action === 'edit') {
+      const { checkCredits, deductCredits } = await import('@/lib/middleware/billing');
+      const creditCheck = await checkCredits(tenantId, 1);
+      if (!creditCheck.allowed) {
+        return NextResponse.json({ error: creditCheck.reason }, { status: 402 });
+      }
+
       const { blueprint, instruction } = EditBlueprintRequest.parse(body);
       const parsedBlueprint = MissionSchema.parse(blueprint); // validate structure
       
       const updatedMission = await editBlueprint(parsedBlueprint as Mission, instruction);
+      
+      // Deduct 1 credit for the LLM generation
+      await deductCredits(tenantId, 1, 'blueprint_edit').catch(() => {});
       
       return NextResponse.json({
         success: true,

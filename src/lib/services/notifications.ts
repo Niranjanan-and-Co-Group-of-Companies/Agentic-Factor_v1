@@ -29,7 +29,7 @@ export async function sendEmail(options: EmailOptions): Promise<{ success: boole
   try {
     const res = await fetch('https://api.smtp2go.com/v3/email/send', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
+      headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': apiKey },
       body: JSON.stringify({
         sender,
         to: [options.to],

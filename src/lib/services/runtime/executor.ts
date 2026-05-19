@@ -89,11 +89,6 @@ export async function executeMission(missionId: string, tenantId: string) {
         const result = await executeAgent(tenantId, missionId, agent, currentContext, tokens, isFinalAgent, mission.expectedOutputFormat);
         output = result.output;
 
-        // Deduct credits based on ACTUAL model tier (not always flash)
-        const actualLLMCost = getLLMCostForTier(creditCheck.modelTier || 'flash');
-        const totalCost = CREDIT_COSTS.code_execution + actualLLMCost;
-        await deductCredits(tenantId, totalCost, `agent_execution:${agent.role}`).catch(() => {});
-        
         // --- PHASE 1.3: Working Code Lock ---
         if (result.finalCode && result.finalCode !== agent.pythonScript) {
           console.log(`[Executor] Code healed for Agent ${agent.id}. Locking new code into blueprint...`);
