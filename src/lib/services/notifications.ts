@@ -16,7 +16,7 @@ interface EmailOptions {
  */
 export async function sendEmail(options: EmailOptions): Promise<{ success: boolean; error?: string }> {
   const apiKey = process.env.SMTP2GO_API_KEY;
-  const sender = options.from || process.env.SMTP2GO_SENDER || 'noreply@agentfactory.dev';
+  const sender = options.from || process.env.SMTP2GO_SENDER || 'noreply@agenticfactor.io';
 
   // If no SMTP2GO key, log and succeed silently
   if (!apiKey) {

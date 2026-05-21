@@ -188,7 +188,14 @@ export async function deductCredits(tenantId: string, amount: number, actionType
     .single();
 
   if (data) {
-    const newRemaining = Math.max(0, (data.credits_remaining || 0) - amount);
+    const currentCredits = data.credits_remaining || 0;
+    
+    // Hard stop: refuse to deduct if credits are insufficient
+    if (currentCredits < amount) {
+      throw new Error(`Insufficient credits: ${currentCredits} remaining, ${amount} needed for ${actionType}`);
+    }
+
+    const newRemaining = currentCredits - amount;
     const newUsed = (data.credits_used_this_month || 0) + amount;
 
     await supabase
@@ -210,6 +217,9 @@ export async function deductCredits(tenantId: string, amount: number, actionType
         payload: { amount, actionType, remainingAfter: newRemaining },
       });
     } catch { /* non-critical */ }
+  } else {
+    // No billing record found — block the action
+    throw new Error('No billing record found. Cannot deduct credits.');
   }
 }
 
