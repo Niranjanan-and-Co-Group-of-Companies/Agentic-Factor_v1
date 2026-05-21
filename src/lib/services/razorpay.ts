@@ -45,7 +45,8 @@ export const RAZORPAY_PLANS = {
 
 /**
  * Create a Razorpay subscription for a tenant.
- * Returns the subscription object with checkout URL.
+ * Pro plan: ₹2,299 base + ₹2,249/seat (base added as recurring addon).
+ * Individual plan: flat ₹2,499/month.
  */
 export async function createSubscription(
   tenantId: string,
@@ -77,6 +78,23 @@ export async function createSubscription(
       notify_email: email,
     },
   } as any);
+
+  // Pro plan: Add ₹2,299 recurring base fee as an addon
+  if (planId === 'pro') {
+    try {
+      await (razorpay.subscriptions as any).createAddon(subscription.id, {
+        item: {
+          name: 'Pro Base Fee',
+          amount: 229900, // ₹2,299 in paise
+          currency: 'INR',
+        },
+        quantity: 1,
+      });
+      console.log(`[Razorpay] Added ₹2,299 base addon to Pro subscription ${subscription.id}`);
+    } catch (addonErr) {
+      console.warn('[Razorpay] Failed to add base addon (non-fatal):', addonErr);
+    }
+  }
 
   return {
     subscriptionId: subscription.id,

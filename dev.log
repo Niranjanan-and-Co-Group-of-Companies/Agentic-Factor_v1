@@ -142,3 +142,29 @@ Read more: https://nextjs.org/docs/app/api-reference/components/image#loading
  GET / 200 in 153ms (next.js: 7ms, proxy.ts: 7ms, application-code: 140ms)
  GET / 200 in 97ms (next.js: 7ms, proxy.ts: 5ms, application-code: 85ms)
  GET / 200 in 49ms (next.js: 5ms, proxy.ts: 4ms, application-code: 40ms)
+Persisting failed: Unable to write SST file 00006921.sst
+
+Caused by:
+    0: Failed to write small value block
+    1: Failed to write block data
+    2: No space left on device (os error 28)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Persisting failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Persisting failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+ GET / 200 in 404ms (next.js: 119ms, proxy.ts: 107ms, application-code: 178ms)
+ GET / 200 in 47ms (next.js: 6ms, proxy.ts: 4ms, application-code: 36ms)
+Persisting failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+  Reload env: .env.local
+ GET / 200 in 258ms (next.js: 100ms, proxy.ts: 29ms, application-code: 129ms)
+ GET / 200 in 33ms (next.js: 4ms, proxy.ts: 4ms, application-code: 26ms)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
