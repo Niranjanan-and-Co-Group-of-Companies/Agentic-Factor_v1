@@ -1,9 +1,12 @@
 // ============================================================
-// LLM Router — Multi-provider support
+// LLM Router — Self-Healing Multi-Provider Support
 //
 // Priority: Anthropic (Claude) → Gemini → OpenAI
-// Claude is best for code generation & agentic reasoning.
-// Falls back gracefully based on which API keys are available.
+// Each provider has a fallback chain of models per tier.
+// If a model is deprecated/unavailable (404), the system:
+//   1. Automatically tries the next model in the chain
+//   2. Caches the working model for 1 hour
+//   3. After cache expires, retries the best model first
 // ============================================================
 
 interface LLMMessage {
@@ -14,13 +17,72 @@ interface LLMMessage {
 interface LLMResponse {
   content: string;
   provider: string;
+  model: string;        // Actual model used (for credit billing)
   tokensUsed: number;
 }
 
+// ── Self-Healing Model Fallback Chains ──
+// Each tier has a priority-ordered list of models per provider.
+// Best model first → fallback → last resort.
+// When a model returns 404, we skip to the next one and cache the result.
+const MODEL_CHAINS: Record<string, Record<number, string[]>> = {
+  anthropic: {
+    1: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
+    2: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
+    3: ['claude-3-5-haiku-20241022'],
+  },
+  gemini: {
+    1: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
+    2: ['gemini-2.5-flash', 'gemini-2.0-flash'],
+    3: ['gemini-2.0-flash'],
+  },
+  openai: {
+    1: ['gpt-4o', 'gpt-4o-mini'],
+    2: ['gpt-4o', 'gpt-4o-mini'],
+    3: ['gpt-4o-mini'],
+  },
+};
+
+// ── Model Health Cache ──
+// Remembers which model worked for each provider+tier combo.
+// Expires after 1 hour so we periodically retry better models.
+const MODEL_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const modelHealthCache = new Map<string, { model: string; timestamp: number }>();
+
+function getCachedModel(provider: string, tier: number): string | null {
+  const key = `${provider}:${tier}`;
+  const cached = modelHealthCache.get(key);
+  if (cached && (Date.now() - cached.timestamp) < MODEL_CACHE_TTL_MS) {
+    return cached.model;
+  }
+  // Cache expired or doesn't exist — return null to force retry from top
+  modelHealthCache.delete(key);
+  return null;
+}
+
+function setCachedModel(provider: string, tier: number, model: string): void {
+  modelHealthCache.set(`${provider}:${tier}`, { model, timestamp: Date.now() });
+}
+
+// ── Credit cost mapping based on actual model used ──
+// This ensures billing matches the ACTUAL model, not the requested tier.
+export function getModelCreditCost(model: string): number {
+  // Premium models (5 credits)
+  const premiumModels = ['claude-sonnet-4', 'gemini-2.5-pro', 'gpt-4o'];
+  // Pro models (3 credits)
+  const proModels = ['claude-3-5-sonnet', 'gemini-2.5-flash'];
+  // Flash models (1 credit)
+  const flashModels = ['claude-3-5-haiku', 'gemini-2.0-flash', 'gpt-4o-mini'];
+
+  if (premiumModels.some(m => model.includes(m))) return 5;
+  if (proModels.some(m => model.includes(m))) return 3;
+  if (flashModels.some(m => model.includes(m))) return 1;
+  return 1; // Default to flash cost
+}
+
 /**
- * Call the best available LLM provider.
- * Returns parsed JSON content string.
- * If budgetContext is provided, enforces token/cost budgets via circuit breaker.
+ * Call the best available LLM provider with self-healing fallback.
+ * Returns the response including the actual model used for credit billing.
  */
 export async function callLLM(
   messages: LLMMessage[],
@@ -43,21 +105,15 @@ export async function callLLM(
 
   // ═══════════════════════════════════════════════════════════
   // LLM Priority: Anthropic (Claude) → Gemini → OpenAI
-  //
-  // Why this order:
-  // 1. Claude — Best for code generation, structured reasoning,
-  //    and agentic tasks. Produces the most reliable Python scripts.
-  // 2. Gemini — Strong general reasoning, fast, good JSON mode.
-  //    Excellent cost/quality for blueprint generation.
-  // 3. OpenAI — Reliable fallback with broad compatibility.
+  // Each provider now has self-healing model fallback chains.
   // ═══════════════════════════════════════════════════════════
 
-  // ── 1st: Try Anthropic Claude (best for code generation) ──
+  // ── 1st: Try Anthropic Claude ──
   if (!result && process.env.ANTHROPIC_API_KEY) {
     try {
-      result = await callAnthropic(messages, temperature, tier, jsonMode);
+      result = await callAnthropicWithFallback(messages, temperature, tier, jsonMode);
     } catch (err) {
-      console.warn('[LLM] Anthropic (Claude) failed, trying Gemini fallback:', (err as Error).message);
+      console.warn('[LLM] All Anthropic models failed, trying Gemini:', (err as Error).message);
       if (budgetContext) {
         const { recordFailure } = await import('@/lib/middleware/circuit-breaker');
         recordFailure(budgetContext.tenantId);
@@ -65,12 +121,12 @@ export async function callLLM(
     }
   }
 
-  // ── 2nd: Try Gemini (strong reasoning, fast) ──
+  // ── 2nd: Try Gemini ──
   if (!result && process.env.GEMINI_API_KEY) {
     try {
-      result = await callGemini(messages, temperature, jsonMode, tier);
+      result = await callGeminiWithFallback(messages, temperature, jsonMode, tier);
     } catch (err) {
-      console.warn('[LLM] Gemini failed, trying OpenAI fallback:', (err as Error).message);
+      console.warn('[LLM] All Gemini models failed, trying OpenAI:', (err as Error).message);
       if (budgetContext) {
         const { recordFailure } = await import('@/lib/middleware/circuit-breaker');
         recordFailure(budgetContext.tenantId);
@@ -78,12 +134,12 @@ export async function callLLM(
     }
   }
 
-  // ── 3rd: Try OpenAI (reliable fallback) ──
+  // ── 3rd: Try OpenAI ──
   if (!result && process.env.OPENAI_API_KEY) {
     try {
-      result = await callOpenAI(messages, temperature, jsonMode, tier);
+      result = await callOpenAIWithFallback(messages, temperature, jsonMode, tier);
     } catch (err) {
-      console.warn('[LLM] OpenAI failed, no more fallbacks:', (err as Error).message);
+      console.warn('[LLM] All OpenAI models failed, no more fallbacks:', (err as Error).message);
       if (budgetContext) {
         const { recordFailure } = await import('@/lib/middleware/circuit-breaker');
         recordFailure(budgetContext.tenantId);
@@ -92,7 +148,7 @@ export async function callLLM(
   }
 
   if (!result) {
-    throw new Error('No LLM provider available. Set ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY.');
+    throw new Error('No LLM provider available. All models in all providers failed. Check API keys and model availability.');
   }
 
   // Record successful usage
@@ -104,16 +160,115 @@ export async function callLLM(
   return result;
 }
 
-// ── Gemini (via REST API — no SDK dependency) ──
-async function callGemini(messages: LLMMessage[], temperature: number, jsonMode: boolean, tier: number): Promise<LLMResponse> {
-  const apiKey = process.env.GEMINI_API_KEY!;
-  // Model tier mapping (2025+ stable identifiers):
-  // Tier 1 (Pro/Enterprise): Best quality — gemini-2.5-pro
-  // Tier 2 (Individual):     Balanced     — gemini-2.5-flash
-  // Tier 3 (Free):           Fast/cheap   — gemini-2.0-flash
-  const model = tier === 1 ? 'gemini-2.5-pro' : tier === 2 ? 'gemini-2.5-flash' : 'gemini-2.0-flash';
+// ═══════════════════════════════════════════════════════════
+// Self-Healing Provider Functions
+// Each tries models in priority order with caching.
+// ═══════════════════════════════════════════════════════════
 
-  // Convert messages to Gemini format
+// ── Anthropic with Fallback Chain ──
+async function callAnthropicWithFallback(messages: LLMMessage[], temperature: number, tier: number, jsonMode: boolean): Promise<LLMResponse> {
+  const chain = MODEL_CHAINS.anthropic[tier] || MODEL_CHAINS.anthropic[3];
+  const cachedModel = getCachedModel('anthropic', tier);
+  
+  // Reorder chain: put cached model first if it exists
+  const modelsToTry = cachedModel 
+    ? [cachedModel, ...chain.filter(m => m !== cachedModel)]
+    : chain;
+
+  let lastError: Error | null = null;
+
+  for (const modelName of modelsToTry) {
+    try {
+      const result = await callAnthropicDirect(messages, temperature, modelName, jsonMode);
+      setCachedModel('anthropic', tier, modelName);
+      console.log(`[LLM] Anthropic model ${modelName} succeeded`);
+      return result;
+    } catch (err) {
+      const errMsg = (err as Error).message;
+      // Only try next model if it's a model-not-found error (404)
+      if (errMsg.includes('404') || errMsg.includes('not_found') || errMsg.includes('not found')) {
+        console.warn(`[LLM] Anthropic model ${modelName} unavailable (404), trying next in chain...`);
+        lastError = err as Error;
+        continue;
+      }
+      // For non-404 errors (rate limit, auth, etc.), throw immediately
+      throw err;
+    }
+  }
+
+  throw lastError || new Error('All Anthropic models exhausted');
+}
+
+// ── Gemini with Fallback Chain ──
+async function callGeminiWithFallback(messages: LLMMessage[], temperature: number, jsonMode: boolean, tier: number): Promise<LLMResponse> {
+  const chain = MODEL_CHAINS.gemini[tier] || MODEL_CHAINS.gemini[3];
+  const cachedModel = getCachedModel('gemini', tier);
+  
+  const modelsToTry = cachedModel 
+    ? [cachedModel, ...chain.filter(m => m !== cachedModel)]
+    : chain;
+
+  let lastError: Error | null = null;
+
+  for (const modelName of modelsToTry) {
+    try {
+      const result = await callGeminiDirect(messages, temperature, jsonMode, modelName);
+      setCachedModel('gemini', tier, modelName);
+      console.log(`[LLM] Gemini model ${modelName} succeeded`);
+      return result;
+    } catch (err) {
+      const errMsg = (err as Error).message;
+      if (errMsg.includes('404') || errMsg.includes('NOT_FOUND') || errMsg.includes('not found')) {
+        console.warn(`[LLM] Gemini model ${modelName} unavailable (404), trying next in chain...`);
+        lastError = err as Error;
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw lastError || new Error('All Gemini models exhausted');
+}
+
+// ── OpenAI with Fallback Chain ──
+async function callOpenAIWithFallback(messages: LLMMessage[], temperature: number, jsonMode: boolean, tier: number): Promise<LLMResponse> {
+  const chain = MODEL_CHAINS.openai[tier] || MODEL_CHAINS.openai[3];
+  const cachedModel = getCachedModel('openai', tier);
+  
+  const modelsToTry = cachedModel 
+    ? [cachedModel, ...chain.filter(m => m !== cachedModel)]
+    : chain;
+
+  let lastError: Error | null = null;
+
+  for (const modelName of modelsToTry) {
+    try {
+      const result = await callOpenAIDirect(messages, temperature, jsonMode, modelName);
+      setCachedModel('openai', tier, modelName);
+      console.log(`[LLM] OpenAI model ${modelName} succeeded`);
+      return result;
+    } catch (err) {
+      const errMsg = (err as Error).message;
+      if (errMsg.includes('404') || errMsg.includes('model_not_found') || errMsg.includes('does not exist')) {
+        console.warn(`[LLM] OpenAI model ${modelName} unavailable (404), trying next in chain...`);
+        lastError = err as Error;
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw lastError || new Error('All OpenAI models exhausted');
+}
+
+// ═══════════════════════════════════════════════════════════
+// Direct Provider Calls (single model, no fallback logic)
+// ═══════════════════════════════════════════════════════════
+
+// ── Gemini Direct ──
+async function callGeminiDirect(messages: LLMMessage[], temperature: number, jsonMode: boolean, model: string): Promise<LLMResponse> {
+  const apiKey = process.env.GEMINI_API_KEY!;
+
   const systemInstruction = messages.find(m => m.role === 'system')?.content || '';
   let contents = messages
     .filter(m => m.role !== 'system')
@@ -154,18 +309,13 @@ async function callGemini(messages: LLMMessage[], temperature: number, jsonMode:
   const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   const tokensUsed = data.usageMetadata?.totalTokenCount || 0;
 
-  return { content, provider: 'gemini', tokensUsed };
+  return { content, provider: 'gemini', model, tokensUsed };
 }
 
-// ── OpenAI ──
-async function callOpenAI(messages: LLMMessage[], temperature: number, jsonMode: boolean, tier: number): Promise<LLMResponse> {
+// ── OpenAI Direct ──
+async function callOpenAIDirect(messages: LLMMessage[], temperature: number, jsonMode: boolean, modelName: string): Promise<LLMResponse> {
   const OpenAI = (await import('openai')).default;
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  // Model tier mapping (2025+ stable identifiers):
-  // Tier 1 (Pro/Enterprise): Best quality — gpt-4o
-  // Tier 2 (Individual):     Balanced     — gpt-4o
-  // Tier 3 (Free):           Fast/cheap   — gpt-4o-mini
-  const modelName = tier === 1 ? 'gpt-4o' : tier === 2 ? 'gpt-4o' : 'gpt-4o-mini';
 
   // OpenAI strictly requires the word "json" in the prompt when using json_object format
   if (jsonMode) {
@@ -187,15 +337,13 @@ async function callOpenAI(messages: LLMMessage[], temperature: number, jsonMode:
   return {
     content: completion.choices[0].message.content || '',
     provider: 'openai',
+    model: modelName,
     tokensUsed: completion.usage?.total_tokens || 0,
   };
 }
 
-// ── Anthropic (via REST API) ──
-// NOTE: Claude has NO native JSON mode like OpenAI/Gemini.
-// We handle this by: (1) injecting JSON instruction in system prompt,
-// (2) post-processing to strip markdown code block wrappers.
-async function callAnthropic(messages: LLMMessage[], temperature: number, tier: number, jsonMode: boolean = false): Promise<LLMResponse> {
+// ── Anthropic Direct ──
+async function callAnthropicDirect(messages: LLMMessage[], temperature: number, modelName: string, jsonMode: boolean = false): Promise<LLMResponse> {
   const apiKey = process.env.ANTHROPIC_API_KEY!;
   let systemMsg = messages.find(m => m.role === 'system')?.content || '';
   
@@ -213,12 +361,6 @@ async function callAnthropic(messages: LLMMessage[], temperature: number, tier: 
   if (userMessages.length === 0) {
     userMessages.push({ role: 'user', content: 'Please proceed with the system instructions.' });
   }
-
-  // Model tier mapping (2025+ stable identifiers):
-  // Tier 1 (Pro/Enterprise): Best quality — claude-sonnet-4-20250514
-  // Tier 2 (Individual):     Balanced     — claude-3-5-sonnet-20241022
-  // Tier 3 (Free):           Fast/cheap   — claude-3-5-haiku-20241022
-  const modelName = tier === 1 ? 'claude-sonnet-4-20250514' : tier === 2 ? 'claude-3-5-sonnet-20241022' : 'claude-3-5-haiku-20241022';
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -250,7 +392,7 @@ async function callAnthropic(messages: LLMMessage[], temperature: number, tier: 
     content = extractJsonFromResponse(content);
   }
 
-  return { content, provider: 'anthropic', tokensUsed };
+  return { content, provider: 'anthropic', model: modelName, tokensUsed };
 }
 
 /**

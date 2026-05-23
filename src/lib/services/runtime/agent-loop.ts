@@ -74,13 +74,13 @@ export async function executeAgent(
   while (attempts < maxAttempts) {
     attempts++;
     
-    // ── Billing Enforcement: Burn 1 execution credit per attempt ──
+    // ── Billing Enforcement: Deduct E2B execution credit per attempt (2 credits) ──
+    // LLM model credit cost is deducted separately after we know which model was used.
     try {
       const { deductCredits } = await import('@/lib/middleware/billing');
-      // Using a flat 2 credits per attempt for E2B + LLM fallback
-      await deductCredits(tenantId, 2, `agent_attempt_${attempts}:${agent.role}`);
+      await deductCredits(tenantId, 2, `e2b_execution_attempt_${attempts}:${agent.role}`);
     } catch (err) {
-      console.warn(`[Agent ${agent.id}] Failed to deduct credits, pausing.`, err);
+      console.warn(`[Agent ${agent.id}] Insufficient credits for execution, stopping.`, err);
       throw new Error('InsufficientCredits');
     }
 
@@ -172,6 +172,18 @@ INSTRUCTIONS:
         [{ role: 'system', content: systemPrompt }], 
         { temperature: 0.1, jsonMode: false, tier: 1 }
       );
+
+      // ── Deduct LLM credit based on actual model used ──
+      try {
+        const { deductCredits } = await import('@/lib/middleware/billing');
+        const { getModelCreditCost } = await import('@/lib/services/llm-router');
+        const llmCost = getModelCreditCost(response.model);
+        await deductCredits(tenantId, llmCost, `llm_${response.provider}:${response.model}:${agent.role}`);
+        console.log(`[Agent ${agent.id}] LLM credit: ${llmCost} (model: ${response.model})`);
+      } catch (creditErr) {
+        console.warn(`[Agent ${agent.id}] LLM credit deduction failed:`, creditErr);
+        // Don't throw here — we already got the code, let the execution proceed
+      }
       
       const regex = new RegExp('```python\\n([\\s\\S]*?)```');
       const codeMatch = response.content.match(regex);
