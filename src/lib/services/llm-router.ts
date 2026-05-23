@@ -24,12 +24,13 @@ interface LLMResponse {
 // ── Self-Healing Model Fallback Chains ──
 // Each tier has a priority-ordered list of models per provider.
 // Best model first → fallback → last resort.
-// When a model returns 404, we skip to the next one and cache the result.
+// When a model returns 404 or 429 (rate limit), we skip to the next one and cache the result.
 const MODEL_CHAINS: Record<string, Record<number, string[]>> = {
   anthropic: {
-    1: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
-    2: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
-    3: ['claude-3-5-haiku-20241022'],
+    // Updated May 2026: claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5
+    1: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+    2: ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+    3: ['claude-haiku-4-5-20251001'],
   },
   gemini: {
     1: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
@@ -67,16 +68,17 @@ function setCachedModel(provider: string, tier: number, model: string): void {
 // ── Credit cost mapping based on actual model used ──
 // This ensures billing matches the ACTUAL model, not the requested tier.
 export function getModelCreditCost(model: string): number {
-  // Premium models (5 credits)
-  const premiumModels = ['claude-sonnet-4', 'gemini-2.5-pro', 'gpt-4o'];
-  // Pro models (3 credits)
-  const proModels = ['claude-3-5-sonnet', 'gemini-2.5-flash'];
-  // Flash models (1 credit)
-  const flashModels = ['claude-3-5-haiku', 'gemini-2.0-flash', 'gpt-4o-mini'];
+  // Premium models (5 credits) — Opus, Gemini Pro, GPT-4o
+  const premiumModels = ['claude-opus', 'gemini-2.5-pro', 'gpt-4o'];
+  // Pro models (3 credits) — Sonnet, Gemini Flash
+  const proModels = ['claude-sonnet', 'gemini-2.5-flash'];
+  // Flash models (1 credit) — Haiku, Gemini 2.0 Flash, GPT-4o-mini
+  const flashModels = ['claude-haiku', 'gemini-2.0-flash', 'gpt-4o-mini'];
 
+  // Check flash first (gpt-4o-mini must match before gpt-4o)
+  if (flashModels.some(m => model.includes(m))) return 1;
   if (premiumModels.some(m => model.includes(m))) return 5;
   if (proModels.some(m => model.includes(m))) return 3;
-  if (flashModels.some(m => model.includes(m))) return 1;
   return 1; // Default to flash cost
 }
 
@@ -185,13 +187,15 @@ async function callAnthropicWithFallback(messages: LLMMessage[], temperature: nu
       return result;
     } catch (err) {
       const errMsg = (err as Error).message;
-      // Only try next model if it's a model-not-found error (404)
-      if (errMsg.includes('404') || errMsg.includes('not_found') || errMsg.includes('not found')) {
-        console.warn(`[LLM] Anthropic model ${modelName} unavailable (404), trying next in chain...`);
+      // Try next model on 404 (not found) or 429 (rate limit / quota exceeded)
+      if (errMsg.includes('404') || errMsg.includes('not_found') || errMsg.includes('not found') ||
+          errMsg.includes('429') || errMsg.includes('rate_limit') || errMsg.includes('overloaded')) {
+        const errorType = errMsg.includes('429') || errMsg.includes('rate_limit') ? '429 rate-limited' : '404 unavailable';
+        console.warn(`[LLM] Anthropic model ${modelName} ${errorType}, trying next in chain...`);
         lastError = err as Error;
         continue;
       }
-      // For non-404 errors (rate limit, auth, etc.), throw immediately
+      // For auth errors (401), billing errors (402), etc., throw immediately
       throw err;
     }
   }
@@ -218,8 +222,11 @@ async function callGeminiWithFallback(messages: LLMMessage[], temperature: numbe
       return result;
     } catch (err) {
       const errMsg = (err as Error).message;
-      if (errMsg.includes('404') || errMsg.includes('NOT_FOUND') || errMsg.includes('not found')) {
-        console.warn(`[LLM] Gemini model ${modelName} unavailable (404), trying next in chain...`);
+      // Try next model on 404 (not found) or 429 (rate limit / quota exceeded)
+      if (errMsg.includes('404') || errMsg.includes('NOT_FOUND') || errMsg.includes('not found') ||
+          errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota')) {
+        const errorType = errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') ? '429 rate-limited' : '404 unavailable';
+        console.warn(`[LLM] Gemini model ${modelName} ${errorType}, trying next in chain...`);
         lastError = err as Error;
         continue;
       }
@@ -249,8 +256,11 @@ async function callOpenAIWithFallback(messages: LLMMessage[], temperature: numbe
       return result;
     } catch (err) {
       const errMsg = (err as Error).message;
-      if (errMsg.includes('404') || errMsg.includes('model_not_found') || errMsg.includes('does not exist')) {
-        console.warn(`[LLM] OpenAI model ${modelName} unavailable (404), trying next in chain...`);
+      // Try next model on 404 (not found) or 429 (rate limit)
+      if (errMsg.includes('404') || errMsg.includes('model_not_found') || errMsg.includes('does not exist') ||
+          errMsg.includes('429') || errMsg.includes('rate_limit') || errMsg.includes('Rate limit')) {
+        const errorType = errMsg.includes('429') || errMsg.includes('rate_limit') ? '429 rate-limited' : '404 unavailable';
+        console.warn(`[LLM] OpenAI model ${modelName} ${errorType}, trying next in chain...`);
         lastError = err as Error;
         continue;
       }
