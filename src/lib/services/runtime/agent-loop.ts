@@ -166,7 +166,7 @@ INSTRUCTIONS:
 6. Enclose your Python code inside a triple-backtick block with 'python' as the language identifier.
 7. **WARNING ON WEB SCRAPING**: If you use \`requests\` to fetch generic web pages or news sites, remember they return HTML! Do NOT call \`.json()\` on the response unless you are querying a dedicated JSON API. Use BeautifulSoup to parse HTML.
 8. **DO NOT CATCH FATAL ERRORS**: If your script fails or encounters an exception, DO NOT catch it and print it as JSON to stdout! Let the script crash naturally. The orchestrator will catch the traceback and allow you to fix your code in the next attempt.
-9. **DEPENDENCY MANAGEMENT**: The E2B execution environment is completely barebones. It only has standard library python packages. If you need external packages like \`requests\`, \`beautifulsoup4\`, or \`openai\`, you MUST use \`subprocess.check_call([sys.executable, "-m", "pip", "install", "package_name"])\` at the very top of your script to install them before importing them.`;
+9. **DEPENDENCY MANAGEMENT**: Common packages (requests, beautifulsoup4, openai, etc.) are PRE-INSTALLED in the execution sandbox. You can import them directly without installing. If you need a rare/uncommon package that is NOT pre-installed, install it silently: \`subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "package_name"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\` — you MUST redirect to DEVNULL to prevent pip output from polluting your JSON stdout.`;
 
       const response = await callLLM(
         [{ role: 'system', content: systemPrompt }], 
@@ -213,9 +213,9 @@ ${pythonCode}`;
       });
 
       try {
-        // Install common packages
+        // Install common packages (suppress all output to prevent stdout pollution)
         await sandbox.runCode(
-          'import subprocess; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "requests", "google-api-python-client", "google-auth-oauthlib", "openai", "anthropic"])',
+          'import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "requests", "beautifulsoup4", "google-api-python-client", "google-auth-oauthlib", "openai", "anthropic"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)',
           { envs: sandboxEnvs }
         );
 
