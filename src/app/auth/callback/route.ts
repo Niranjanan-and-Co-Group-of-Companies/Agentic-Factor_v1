@@ -43,10 +43,20 @@ export async function GET(request: NextRequest) {
   );
 
   try {
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
       console.error('[auth/callback] Exchange failed:', error.message);
       return NextResponse.redirect(new URL('/login?error=auth_failed', request.url));
+    }
+
+    // Auto-provision billing record for new users (free trial)
+    if (data?.user?.id) {
+      try {
+        const { ensureBillingRecord } = await import('@/lib/middleware/billing');
+        await ensureBillingRecord(data.user.id);
+      } catch (billingErr) {
+        console.warn('[auth/callback] Billing provisioning failed (non-fatal):', billingErr);
+      }
     }
   } catch (err) {
     console.error('[auth/callback] Exception:', err);

@@ -65,10 +65,48 @@ export interface BillingCheck {
 }
 
 /**
+ * Ensure a tenant has a billing record. If not, create one with free trial credits.
+ * Called automatically before any credit check or deduction.
+ */
+export async function ensureBillingRecord(tenantId: string): Promise<void> {
+  const supabase = createServiceClient();
+  
+  const { data: existing } = await supabase
+    .from('tenant_billing')
+    .select('tenant_id')
+    .eq('tenant_id', tenantId)
+    .single();
+  
+  if (!existing) {
+    const freeConfig = PLAN_DEFAULTS['free'];
+    await supabase.from('tenant_billing').insert({
+      tenant_id: tenantId,
+      plan: 'free',
+      credits_remaining: freeConfig.credits,
+      credits_total: freeConfig.credits,
+      credits_used_this_month: 0,
+      max_active_missions: freeConfig.maxActiveMissions,
+      model_tier: freeConfig.modelTier,
+      max_storage_mb: freeConfig.maxStorageMb,
+      governance: freeConfig.governance,
+      is_trial: true,
+      billing_status: 'active',
+      billing_period_start: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    console.log(`[Billing] Created free trial billing record for tenant ${tenantId} (${freeConfig.credits} credits)`);
+  }
+}
+
+/**
  * Check if a tenant has enough credits for an action.
  */
 export async function checkCredits(tenantId: string, cost: number = 1): Promise<BillingCheck> {
   const supabase = createServiceClient();
+
+  // Auto-provision billing record if missing
+  await ensureBillingRecord(tenantId);
 
   const { data: billing } = await supabase
     .from('tenant_billing')
@@ -180,6 +218,9 @@ export async function checkModelAccess(tenantId: string, requestedTier: ModelTie
  */
 export async function deductCredits(tenantId: string, amount: number, actionType: string): Promise<void> {
   const supabase = createServiceClient();
+
+  // Auto-provision billing record if missing
+  await ensureBillingRecord(tenantId);
 
   const { data } = await supabase
     .from('tenant_billing')
