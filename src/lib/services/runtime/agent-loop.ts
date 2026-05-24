@@ -166,7 +166,8 @@ INSTRUCTIONS:
 6. Enclose your Python code inside a triple-backtick block with 'python' as the language identifier.
 7. **WARNING ON WEB SCRAPING**: If you use \`requests\` to fetch generic web pages or news sites, remember they return HTML! Do NOT call \`.json()\` on the response unless you are querying a dedicated JSON API. Use BeautifulSoup to parse HTML.
 8. **DO NOT CATCH FATAL ERRORS**: If your script fails or encounters an exception, DO NOT catch it and print it as JSON to stdout! Let the script crash naturally. The orchestrator will catch the traceback and allow you to fix your code in the next attempt.
-9. **DEPENDENCY MANAGEMENT**: Common packages (requests, beautifulsoup4, openai, etc.) are PRE-INSTALLED in the execution sandbox. You can import them directly without installing. If you need a rare/uncommon package that is NOT pre-installed, install it silently: \`subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "package_name"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\` — you MUST redirect to DEVNULL to prevent pip output from polluting your JSON stdout.`;
+9. **DEPENDENCY MANAGEMENT**: Common packages (requests, beautifulsoup4, openai, etc.) are PRE-INSTALLED in the execution sandbox. You can import them directly without installing. If you need a rare/uncommon package that is NOT pre-installed, install it silently: \`subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "package_name"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\` — you MUST redirect to DEVNULL to prevent pip output from polluting your JSON stdout.
+10. **READING INPUT FROM PREVIOUS AGENTS**: If this agent receives data from a previous step, it is available via the environment variable \`INPUT_CONTEXT\`. Read it like this: \`input_data = json.loads(os.environ.get('INPUT_CONTEXT', '{}'))\`. Do NOT use sys.stdin.read(). Do NOT read from files. The \`_input\` variable is also pre-set with the raw string value of INPUT_CONTEXT for convenience.`;
 
       const response = await callLLM(
         [{ role: 'system', content: systemPrompt }], 
@@ -185,8 +186,10 @@ INSTRUCTIONS:
         // Don't throw here — we already got the code, let the execution proceed
       }
       
-      const regex = new RegExp('```python\\n([\\s\\S]*?)```');
-      const codeMatch = response.content.match(regex);
+      // More flexible regex: handles ```python, ``` python, and variations
+      const codeMatch = response.content.match(/```\s*python\s*\n([\s\S]*?)```/) 
+        || response.content.match(/```\n([\s\S]*?)```/)
+        || response.content.match(/```([\s\S]*?)```/);
       if (!codeMatch) {
         lastError = "Failed to extract Python code from LLM response. Make sure to use triple-backtick python blocks.";
         console.warn(`[Agent ${agent.id} attempt ${attempts}] LLM returned no python block.`);
@@ -209,12 +212,17 @@ INSTRUCTIONS:
         sandboxEnvs[envKey] = token.access_token;
       }
 
-      // Prepend import of input context from env
+      // Prepend import of input context from env — available as `_input` (raw string) and `_input_data` (parsed JSON)
       const wrappedCode = `import os, sys, json
 try:
     _input = os.environ.get('INPUT_CONTEXT', '{}')
+    try:
+        _input_data = json.loads(_input)
+    except:
+        _input_data = {}
 except:
     _input = '{}'
+    _input_data = {}
 
 ${pythonCode}`;
 

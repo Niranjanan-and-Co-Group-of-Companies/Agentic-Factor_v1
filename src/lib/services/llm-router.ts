@@ -187,10 +187,12 @@ async function callAnthropicWithFallback(messages: LLMMessage[], temperature: nu
       return result;
     } catch (err) {
       const errMsg = (err as Error).message;
-      // Try next model on 404 (not found) or 429 (rate limit / quota exceeded)
+      // Try next model on 404 (not found), 429 (rate limit), or 400 (deprecated param like temperature)
       if (errMsg.includes('404') || errMsg.includes('not_found') || errMsg.includes('not found') ||
-          errMsg.includes('429') || errMsg.includes('rate_limit') || errMsg.includes('overloaded')) {
-        const errorType = errMsg.includes('429') || errMsg.includes('rate_limit') ? '429 rate-limited' : '404 unavailable';
+          errMsg.includes('429') || errMsg.includes('rate_limit') || errMsg.includes('overloaded') ||
+          errMsg.includes('400') || errMsg.includes('invalid_request_error') || errMsg.includes('deprecated')) {
+        const errorType = errMsg.includes('429') || errMsg.includes('rate_limit') ? '429 rate-limited' 
+          : errMsg.includes('400') || errMsg.includes('deprecated') ? '400 bad-request' : '404 unavailable';
         console.warn(`[LLM] Anthropic model ${modelName} ${errorType}, trying next in chain...`);
         lastError = err as Error;
         continue;
@@ -372,6 +374,22 @@ async function callAnthropicDirect(messages: LLMMessage[], temperature: number, 
     userMessages.push({ role: 'user', content: 'Please proceed with the system instructions.' });
   }
 
+  // Claude 4.x models (opus-4, sonnet-4, haiku-4) deprecated the temperature parameter.
+  // Only include temperature for older models that still support it.
+  const isClaudeV4 = modelName.includes('claude-opus-4') || modelName.includes('claude-sonnet-4') || modelName.includes('claude-haiku-4');
+
+  const requestBody: Record<string, unknown> = {
+    model: modelName,
+    max_tokens: 4096,
+    system: systemMsg,
+    messages: userMessages,
+  };
+
+  // Only add temperature for non-v4 models
+  if (!isClaudeV4) {
+    requestBody.temperature = temperature;
+  }
+
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -379,13 +397,7 @@ async function callAnthropicDirect(messages: LLMMessage[], temperature: number, 
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({
-      model: modelName,
-      max_tokens: 4096,
-      temperature,
-      system: systemMsg,
-      messages: userMessages,
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!res.ok) {
