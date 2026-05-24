@@ -33,13 +33,46 @@ const PLAN_DEFAULTS: Record<string, PlanConfig> = {
 // Credit costs per action type
 export const CREDIT_COSTS = {
   llm_call_flash: 1,     // Claude Haiku, Gemini Flash, GPT-4o-mini
-  llm_call_pro: 3,       // Claude 3.5 Sonnet, Gemini Pro, GPT-4o
-  llm_call_premium: 5,   // Claude Sonnet 4
+  llm_call_pro: 3,       // Claude Sonnet, Gemini 2.5 Flash, GPT-4o
+  llm_call_premium: 5,   // Claude Opus, Gemini Pro
   code_execution: 2,     // E2B sandbox run
   embedding: 0.5,        // Embedding generation
   ingest_chunk: 0.1,     // RAG document chunk
   schedule_daily: 1,     // Per scheduled mission per day (cron maintenance)
 } as const;
+
+// ── Token-Based Billing: Real Cost per 1K tokens (USD) ──
+// These are our ACTUAL costs from each provider. Used for internal tracking.
+// Customer credits are our markup on top of these real costs.
+const TOKEN_COSTS_PER_1K: Record<string, { input: number; output: number }> = {
+  // Anthropic (https://docs.anthropic.com/en/docs/about-claude/pricing)
+  'claude-opus':    { input: 0.015,  output: 0.075 },
+  'claude-sonnet':  { input: 0.003,  output: 0.015 },
+  'claude-haiku':   { input: 0.001,  output: 0.005 },
+  // Gemini
+  'gemini-2.5-pro': { input: 0.00125, output: 0.005 },
+  'gemini-2.5-flash': { input: 0.000075, output: 0.0003 },
+  'gemini-2.0-flash': { input: 0.000075, output: 0.0003 },
+  // OpenAI
+  'gpt-4o':         { input: 0.0025, output: 0.01 },
+  'gpt-4o-mini':    { input: 0.00015, output: 0.0006 },
+};
+
+/**
+ * Calculate the real USD cost for an LLM call based on actual tokens used.
+ * Used for internal profit tracking — NOT shown to customers.
+ */
+export function calculateRealCostUsd(
+  model: string,
+  inputTokens: number,
+  outputTokens: number
+): number {
+  // Find matching cost entry
+  const matchKey = Object.keys(TOKEN_COSTS_PER_1K).find(k => model.includes(k));
+  if (!matchKey) return 0;
+  const costs = TOKEN_COSTS_PER_1K[matchKey];
+  return (inputTokens / 1000) * costs.input + (outputTokens / 1000) * costs.output;
+}
 
 /**
  * Get the correct LLM credit cost based on the tenant's model tier.
@@ -215,8 +248,14 @@ export async function checkModelAccess(tenantId: string, requestedTier: ModelTie
 /**
  * Deduct credits from a tenant's balance.
  * Call this after a successful action (LLM call, code execution, etc.)
+ * Optionally tracks real token costs for internal profit analysis.
  */
-export async function deductCredits(tenantId: string, amount: number, actionType: string): Promise<void> {
+export async function deductCredits(
+  tenantId: string,
+  amount: number,
+  actionType: string,
+  tokenMeta?: { provider: string; model: string; inputTokens?: number; outputTokens?: number }
+): Promise<void> {
   const supabase = createServiceClient();
 
   // Auto-provision billing record if missing
@@ -248,14 +287,36 @@ export async function deductCredits(tenantId: string, amount: number, actionType
       })
       .eq('tenant_id', tenantId);
 
-    // Log credit usage event (fire-and-forget)
+    // Calculate real USD cost if token metadata is provided
+    let realCostUsd: number | undefined;
+    if (tokenMeta?.inputTokens || tokenMeta?.outputTokens) {
+      realCostUsd = calculateRealCostUsd(
+        tokenMeta.model,
+        tokenMeta.inputTokens || 0,
+        tokenMeta.outputTokens || 0
+      );
+    }
+
+    // Log credit usage event with real cost tracking (fire-and-forget)
     try {
       await supabase.from('events').insert({
         tenant_id: tenantId,
         event_type: 'billing.credit_used',
         entity_type: 'billing',
         entity_id: tenantId,
-        payload: { amount, actionType, remainingAfter: newRemaining },
+        payload: {
+          amount,
+          actionType,
+          remainingAfter: newRemaining,
+          // Internal cost tracking (not exposed to customer)
+          ...(tokenMeta ? {
+            provider: tokenMeta.provider,
+            model: tokenMeta.model,
+            inputTokens: tokenMeta.inputTokens,
+            outputTokens: tokenMeta.outputTokens,
+            realCostUsd,
+          } : {}),
+        },
       });
     } catch { /* non-critical */ }
   } else {

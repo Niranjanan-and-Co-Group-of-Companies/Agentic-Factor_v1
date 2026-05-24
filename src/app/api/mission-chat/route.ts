@@ -69,9 +69,15 @@ You MUST respond in valid JSON format matching this schema:
     const response = await callLLM([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: message }
-    ], { jsonMode: true, temperature: 0.2, tier: 1 });
+    ], { jsonMode: true, temperature: 0.2, tier: 2 });
 
-    const parsedResponse = JSON.parse(response.content);
+    let parsedResponse;
+    try {
+      parsedResponse = JSON.parse(response.content);
+    } catch {
+      // LLM returned non-JSON, use content as-is
+      parsedResponse = { reply: response.content };
+    }
 
     // If the LLM decided we need to mutate the blueprint, apply it automatically!
     if (parsedResponse.mutation_instruction) {
@@ -90,7 +96,27 @@ You MUST respond in valid JSON format matching this schema:
     return NextResponse.json({ reply: parsedResponse.reply });
 
   } catch (err) {
-    console.error('[POST /api/mission-chat]', err);
-    return NextResponse.json({ error: 'Failed to process chat' }, { status: 500 });
+    const errMsg = (err as Error).message || 'Unknown error';
+    console.error('[POST /api/mission-chat]', errMsg);
+    
+    // Surface specific error types
+    if (errMsg.includes('Rate limit') || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota')) {
+      return NextResponse.json({ 
+        error: 'The AI is temporarily busy. Please try again in a few seconds.',
+        reply: 'I\'m temporarily unavailable due to high demand. Please try again in a moment.' 
+      }, { status: 429 });
+    }
+    
+    if (errMsg.includes('No LLM provider')) {
+      return NextResponse.json({ 
+        error: 'AI service unavailable',
+        reply: 'The AI service is currently down. Our team has been notified.' 
+      }, { status: 503 });
+    }
+    
+    return NextResponse.json({ 
+      error: 'Failed to process chat',
+      reply: 'Sorry, I encountered an error. Please try again.' 
+    }, { status: 500 });
   }
 }

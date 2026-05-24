@@ -179,8 +179,13 @@ INSTRUCTIONS:
         const { deductCredits } = await import('@/lib/middleware/billing');
         const { getModelCreditCost } = await import('@/lib/services/llm-router');
         const llmCost = getModelCreditCost(response.model);
-        await deductCredits(tenantId, llmCost, `llm_${response.provider}:${response.model}:${agent.role}`);
-        console.log(`[Agent ${agent.id}] LLM credit: ${llmCost} (model: ${response.model})`);
+        await deductCredits(tenantId, llmCost, `llm_${response.provider}:${response.model}:${agent.role}`, {
+          provider: response.provider,
+          model: response.model,
+          inputTokens: response.inputTokens,
+          outputTokens: response.outputTokens,
+        });
+        console.log(`[Agent ${agent.id}] LLM credit: ${llmCost} (model: ${response.model}, tokens: ${response.tokensUsed})`);
       } catch (creditErr) {
         console.warn(`[Agent ${agent.id}] LLM credit deduction failed:`, creditErr);
         // Don't throw here — we already got the code, let the execution proceed

@@ -19,6 +19,8 @@ interface LLMResponse {
   provider: string;
   model: string;        // Actual model used (for credit billing)
   tokensUsed: number;
+  inputTokens?: number;  // For token-based billing
+  outputTokens?: number; // For token-based billing
 }
 
 // ── Self-Healing Model Fallback Chains ──
@@ -319,9 +321,11 @@ async function callGeminiDirect(messages: LLMMessage[], temperature: number, jso
 
   const data = await res.json();
   const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const tokensUsed = data.usageMetadata?.totalTokenCount || 0;
+  const inputTokens = data.usageMetadata?.promptTokenCount || 0;
+  const outputTokens = data.usageMetadata?.candidatesTokenCount || 0;
+  const tokensUsed = data.usageMetadata?.totalTokenCount || (inputTokens + outputTokens);
 
-  return { content, provider: 'gemini', model, tokensUsed };
+  return { content, provider: 'gemini', model, tokensUsed, inputTokens, outputTokens };
 }
 
 // ── OpenAI Direct ──
@@ -351,6 +355,8 @@ async function callOpenAIDirect(messages: LLMMessage[], temperature: number, jso
     provider: 'openai',
     model: modelName,
     tokensUsed: completion.usage?.total_tokens || 0,
+    inputTokens: completion.usage?.prompt_tokens || 0,
+    outputTokens: completion.usage?.completion_tokens || 0,
   };
 }
 
@@ -407,14 +413,16 @@ async function callAnthropicDirect(messages: LLMMessage[], temperature: number, 
 
   const data = await res.json();
   let content = data.content?.[0]?.text || '';
-  const tokensUsed = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
+  const inputTokens = data.usage?.input_tokens || 0;
+  const outputTokens = data.usage?.output_tokens || 0;
+  const tokensUsed = inputTokens + outputTokens;
 
   // Post-process: extract JSON if Claude wraps it in markdown code blocks
   if (jsonMode) {
     content = extractJsonFromResponse(content);
   }
 
-  return { content, provider: 'anthropic', model: modelName, tokensUsed };
+  return { content, provider: 'anthropic', model: modelName, tokensUsed, inputTokens, outputTokens };
 }
 
 /**

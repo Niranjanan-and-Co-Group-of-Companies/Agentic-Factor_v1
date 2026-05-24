@@ -24,7 +24,8 @@ You must decompose the user's intent into:
    - DO NOT use fragile DOM scraping (BeautifulSoup, etc.) unless absolutely necessary.
    - PREFER WebMCP (Model Context Protocol) or Semantic APIs for data extraction.
    - If an API is unavailable, prefer Vision Models to "read" the page.
-   - The script must read from \`sys.stdin\` (the handoff payload from the previous agent) and print its final output to \`sys.stdout\` as a JSON string.
+   - **READING INPUT FROM PREVIOUS AGENTS**: The script MUST read input from the INPUT_CONTEXT environment variable: \`input_data = json.loads(os.environ.get('INPUT_CONTEXT', '{}'))\`. Do NOT use sys.stdin.read(). The \`_input\` and \`_input_data\` variables are also pre-set with the raw string and parsed JSON respectively.
+   - The script must print its final output to \`sys.stdout\` as a JSON string.
    - **CRITICAL: DO NOT EMPTY THE BUCKET.** The script MUST parse the input JSON and merge its new output into it. If the previous agent generated a newsletter, keep it in the final JSON alongside your new status receipts so the final output contains ALL accumulated content.
 7. **Orchestration Pattern**: Choose the optimal pattern:
    - "sequential" — linear pipeline (A → B → C)
@@ -67,7 +68,7 @@ Example 1 — User says: "Monitor my AWS costs and alert on Slack if spending ex
       "tools": [{"name": "AWS CloudWatch", "type": "api", "requiresAuth": true, "confidentialityLevel": "confidential"}],
       "systemPrompt": "You monitor AWS CloudWatch billing metrics. Fetch daily cost data and flag when spending exceeds the configured threshold.",
       "handoffProtocol": "Output MUST be a JSON object containing { 'thresholdExceeded': boolean, 'currentSpend': number, 'breakdown': string }.",
-      "pythonScript": "import sys, json, os, requests\\n\\ninput_data = sys.stdin.read()\\ntry:\\n  aws_token = os.environ.get('AWS_ACCESS_TOKEN')\\n  headers = {'Authorization': f'Bearer {aws_token}'}\\n  resp = requests.get('https://monitoring.us-east-1.amazonaws.com/billing', headers=headers)\\n  data = resp.json()\\n  current = data.get('daily_spend', 0)\\n  print(json.dumps({'thresholdExceeded': current > 1000, 'currentSpend': current, 'breakdown': data.get('breakdown', '')}))\\nexcept Exception as e:\\n  print(json.dumps({'error': str(e)}))"
+      "pythonScript": "import sys, json, os\\n\\ninput_data = json.loads(os.environ.get('INPUT_CONTEXT', '{}'))\\ntry:\\n  aws_token = os.environ.get('AWS_ACCESS_TOKEN')\\n  headers = {'Authorization': f'Bearer {aws_token}'}\\n  resp = requests.get('https://monitoring.us-east-1.amazonaws.com/billing', headers=headers)\\n  data = resp.json()\\n  current = data.get('daily_spend', 0)\\n  print(json.dumps({'thresholdExceeded': current > 1000, 'currentSpend': current, 'breakdown': data.get('breakdown', '')}))\\nexcept Exception as e:\\n  print(json.dumps({'error': str(e)}))"
     },
     {
       "agentIndex": 1,
@@ -77,7 +78,7 @@ Example 1 — User says: "Monitor my AWS costs and alert on Slack if spending ex
       "tools": [{"name": "Slack API", "type": "notification", "requiresAuth": true, "confidentialityLevel": "internal"}],
       "systemPrompt": "You send formatted alert messages to the configured Slack channel when triggered by the cost monitor.",
       "handoffProtocol": "Input MUST be the JSON object from the Cost Monitor. Do not execute if thresholdExceeded is false.",
-      "pythonScript": "import sys, json\\n\\ninput_data = sys.stdin.read()\\ntry:\\n  data = json.loads(input_data)\\n  if data.get('thresholdExceeded'):\\n    print(json.dumps({'status': 'sent', 'channel': '#alerts'}))\\nexcept:\\n  print(json.dumps({'error': 'invalid input'}))"
+      "pythonScript": "import sys, json, os\\n\\ninput_data = json.loads(os.environ.get('INPUT_CONTEXT', '{}'))\\ntry:\\n  data = input_data\\n  if data.get('thresholdExceeded'):\\n    print(json.dumps({'status': 'sent', 'channel': '#alerts'}))\\nexcept:\\n  print(json.dumps({'error': 'invalid input'}))"
     }
   ],
   "orchestration": {
@@ -231,7 +232,63 @@ export async function generateMissionJSON(
   ], { temperature: 0.3, jsonMode: true, tier: 1 }); // Tier 1 for complex code generation
 
   console.log(`[intake] LLM provider: ${llmResponse.provider}, tokens: ${llmResponse.tokensUsed}`);
-  const rawJSON = JSON.parse(llmResponse.content);
+
+  // ── JSON Auto-Retry with Local Repair ──
+  // Step 1: Try parsing as-is
+  // Step 2: Try local JSON repair (free, no LLM call)
+  // Step 3: Retry LLM with error context (costs credits)
+  let rawJSON: Record<string, unknown>;
+  
+  try {
+    rawJSON = JSON.parse(llmResponse.content);
+  } catch (parseError1) {
+    console.warn(`[intake] JSON parse failed, attempting local repair...`);
+    
+    // Step 2: Local JSON repair — fix common LLM JSON mistakes
+    try {
+      let repaired = llmResponse.content;
+      // Remove markdown code block wrappers
+      repaired = repaired.replace(/^```json?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+      // Remove trailing commas before ] or }
+      repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+      // Fix missing commas between array elements or object properties
+      repaired = repaired.replace(/}\s*{/g, '},{');
+      repaired = repaired.replace(/"\s*\n\s*"/g, '",\n"');
+      // Try to close unclosed brackets
+      const openBraces = (repaired.match(/{/g) || []).length;
+      const closeBraces = (repaired.match(/}/g) || []).length;
+      const openBrackets = (repaired.match(/\[/g) || []).length;
+      const closeBrackets = (repaired.match(/\]/g) || []).length;
+      repaired += '}'.repeat(Math.max(0, openBraces - closeBraces));
+      repaired += ']'.repeat(Math.max(0, openBrackets - closeBrackets));
+      
+      rawJSON = JSON.parse(repaired);
+      console.log(`[intake] Local JSON repair succeeded!`);
+    } catch (repairError) {
+      console.warn(`[intake] Local repair failed, retrying LLM...`);
+      
+      // Step 3: Retry LLM with error context
+      const retryResponse = await callLLM([
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `Generate a Mission JSON for: "${intent}"${memoryContext}${globalMemory}` },
+        { role: 'assistant', content: llmResponse.content.substring(0, 2000) },
+        { role: 'user', content: `Your previous response had a JSON syntax error: ${(parseError1 as Error).message}. Please regenerate the COMPLETE valid JSON response. Respond with ONLY valid JSON, no markdown.` }
+      ], { temperature: 0.1, jsonMode: true, tier: 1 });
+      
+      console.log(`[intake] LLM retry provider: ${retryResponse.provider}, tokens: ${retryResponse.tokensUsed}`);
+      
+      try {
+        rawJSON = JSON.parse(retryResponse.content);
+        console.log(`[intake] LLM retry succeeded!`);
+      } catch (parseError2) {
+        // Last attempt: clean the retry response too
+        let cleaned = retryResponse.content;
+        cleaned = cleaned.replace(/^```json?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+        cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+        rawJSON = JSON.parse(cleaned); // If this fails, the error propagates to the user
+      }
+    }
+  }
 
   // 3. Validate LLM output against schema
   const llmOutput = LLMOutputSchema.parse(rawJSON);
@@ -251,7 +308,7 @@ export async function generateMissionJSON(
       id: agentId,
       agentIndex: index,
       systemPrompt: agent.systemPrompt || `You are ${agent.role}. Execute your assigned tasks with precision and thoroughness.`,
-      pythonScript: agent.pythonScript || `import sys, json\n\n# Fallback generated agent logic\ninput_data = sys.stdin.read()\nprint(json.dumps({'status': 'executed', 'agent': '${agent.role}'}))`,
+      pythonScript: agent.pythonScript || `import sys, json, os\n\n# Read input from previous agent\ninput_data = json.loads(os.environ.get('INPUT_CONTEXT', '{}'))\nprint(json.dumps({'status': 'executed', 'agent': '${agent.role}'}))`,
     };
   });
 
