@@ -31,6 +31,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // ── Allow Inngest webhook (secured by signing key, not Supabase auth) ──
+  if (pathname === '/api/inngest') {
+    return NextResponse.next();
+  }
+
   // ── Allow API calls with Bearer token (route handler validates these) ──
   const authHeader = request.headers.get('Authorization');
   if (pathname.startsWith('/api/') && authHeader?.startsWith('Bearer ')) {
