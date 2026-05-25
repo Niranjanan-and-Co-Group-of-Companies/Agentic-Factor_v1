@@ -229,6 +229,9 @@ except:
     _input = '{}'
     _input_data = {}
 
+import matplotlib
+matplotlib.use('Agg')
+
 ${pythonCode}`;
 
       // Execute in E2B cloud sandbox (pre-warmed, <1s start time)
@@ -240,7 +243,7 @@ ${pythonCode}`;
       try {
         // Install common packages (suppress all output to prevent stdout pollution)
         await sandbox.runCode(
-          'import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "requests", "beautifulsoup4", "google-api-python-client", "google-auth-oauthlib", "openai", "anthropic"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)',
+          'import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "requests", "beautifulsoup4", "google-api-python-client", "google-auth-oauthlib", "openai", "anthropic", "matplotlib", "pandas", "numpy", "openpyxl"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)',
           { envs: sandboxEnvs }
         );
 
@@ -265,6 +268,91 @@ ${pythonCode}`;
           JSON.parse(finalOutputJSON);
         } catch (e) {
           throw new Error(`Script succeeded but output was not valid JSON. Output was: ${stdout}`);
+        }
+
+        // --- FILE OUTPUT EXTRACTION: Collect artifacts from E2B sandbox ---
+        const artifactUrls: { filename: string; url: string; contentType: string }[] = [];
+        try {
+          const artifactSupabase = createServiceClient();
+          const storageBucket = 'mission-artifacts';
+          const basePath = `${tenantId}/${missionId}/${agent.id}`;
+
+          // 1. Check execution.results for inline artifacts (e.g. matplotlib .png)
+          if (execution.results && execution.results.length > 0) {
+            for (let ri = 0; ri < execution.results.length; ri++) {
+              const result = execution.results[ri];
+              if (result.png) {
+                const filename = `chart_${ri}.png`;
+                const buffer = Buffer.from(result.png, 'base64');
+                const uploadPath = `${basePath}/${filename}`;
+                const { error: upErr } = await artifactSupabase.storage
+                  .from(storageBucket)
+                  .upload(uploadPath, buffer, { contentType: 'image/png', upsert: true });
+                if (!upErr) {
+                  const { data: { publicUrl } } = artifactSupabase.storage
+                    .from(storageBucket)
+                    .getPublicUrl(uploadPath);
+                  artifactUrls.push({ filename, url: publicUrl, contentType: 'image/png' });
+                  console.log(`[Agent ${agent.id}] Uploaded inline artifact: ${filename}`);
+                } else {
+                  console.warn(`[Agent ${agent.id}] Failed to upload inline artifact ${filename}:`, upErr.message);
+                }
+              }
+            }
+          }
+
+          // 2. Scan /tmp in sandbox for generated output files
+          const scanExec = await sandbox.runCode(
+            'import os, json; files = [f for f in os.listdir("/tmp") if f.endswith((".png", ".jpg", ".jpeg", ".pdf", ".csv", ".xlsx", ".html", ".svg", ".json"))]; print(json.dumps(files))',
+            { envs: sandboxEnvs }
+          );
+          const scanStdout = scanExec.logs.stdout.join('').trim();
+          if (scanStdout) {
+            const tmpFiles: string[] = JSON.parse(scanStdout);
+            const contentTypeMap: Record<string, string> = {
+              '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+              '.pdf': 'application/pdf', '.csv': 'text/csv',
+              '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              '.html': 'text/html', '.svg': 'image/svg+xml', '.json': 'application/json',
+            };
+            for (const fname of tmpFiles) {
+              try {
+                const fileContent = await sandbox.files.read(`/tmp/${fname}`);
+                const ext = '.' + fname.split('.').pop()!.toLowerCase();
+                const ct = contentTypeMap[ext] || 'application/octet-stream';
+                const uploadPath = `${basePath}/${fname}`;
+                // fileContent can be string or Uint8Array; ensure Buffer
+                const buf = typeof fileContent === 'string'
+                  ? Buffer.from(fileContent, 'base64')
+                  : Buffer.from(fileContent);
+                const { error: upErr } = await artifactSupabase.storage
+                  .from(storageBucket)
+                  .upload(uploadPath, buf, { contentType: ct, upsert: true });
+                if (!upErr) {
+                  const { data: { publicUrl } } = artifactSupabase.storage
+                    .from(storageBucket)
+                    .getPublicUrl(uploadPath);
+                  artifactUrls.push({ filename: fname, url: publicUrl, contentType: ct });
+                  console.log(`[Agent ${agent.id}] Uploaded sandbox file: ${fname}`);
+                } else {
+                  console.warn(`[Agent ${agent.id}] Failed to upload ${fname}:`, upErr.message);
+                }
+              } catch (fileErr: any) {
+                console.warn(`[Agent ${agent.id}] Failed to read/upload sandbox file ${fname}:`, fileErr.message);
+              }
+            }
+          }
+
+          // 3. Append artifact URLs to the output JSON
+          if (artifactUrls.length > 0) {
+            const parsed = JSON.parse(finalOutputJSON);
+            parsed._artifacts = artifactUrls;
+            finalOutputJSON = JSON.stringify(parsed);
+            console.log(`[Agent ${agent.id}] Appended ${artifactUrls.length} artifact(s) to output.`);
+          }
+        } catch (artifactErr: any) {
+          // Non-fatal: log and continue with original output
+          console.warn(`[Agent ${agent.id}] Artifact extraction failed (non-fatal):`, artifactErr.message);
         }
 
         // --- PHASE 3: STRUCTURAL VALIDATION ---
@@ -340,10 +428,10 @@ Respond with a JSON object: {"valid": boolean, "reason": "string explaining why 
           event_type: 'agent.completed',
           entity_type: 'agent',
           entity_id: agent.id,
-          payload: { missionId, output: stdout },
+          payload: { missionId, output: finalOutputJSON },
         });
 
-        return { output: stdout, finalCode: pythonCode };
+        return { output: finalOutputJSON, finalCode: pythonCode };
 
       } finally {
         // Always clean up the sandbox

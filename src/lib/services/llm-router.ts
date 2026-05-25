@@ -90,9 +90,9 @@ export function getModelCreditCost(model: string): number {
  */
 export async function callLLM(
   messages: LLMMessage[],
-  options: { temperature?: number; jsonMode?: boolean; tier?: 1 | 2 | 3; budgetContext?: { tenantId: string; missionId: string } } = {}
+  options: { temperature?: number; jsonMode?: boolean; tier?: 1 | 2 | 3; budgetContext?: { tenantId: string; missionId: string }; maxTokens?: number } = {}
 ): Promise<LLMResponse> {
-  const { temperature = 0.3, jsonMode = true, tier = 2, budgetContext } = options;
+  const { temperature = 0.3, jsonMode = true, tier = 2, budgetContext, maxTokens = 16384 } = options;
 
   // Circuit breaker gate: check before calling any LLM
   if (budgetContext) {
@@ -115,7 +115,7 @@ export async function callLLM(
   // ── 1st: Try Anthropic Claude ──
   if (!result && process.env.ANTHROPIC_API_KEY) {
     try {
-      result = await callAnthropicWithFallback(messages, temperature, tier, jsonMode);
+      result = await callAnthropicWithFallback(messages, temperature, tier, jsonMode, maxTokens);
     } catch (err) {
       console.warn('[LLM] All Anthropic models failed, trying Gemini:', (err as Error).message);
       if (budgetContext) {
@@ -128,7 +128,7 @@ export async function callLLM(
   // ── 2nd: Try Gemini ──
   if (!result && process.env.GEMINI_API_KEY) {
     try {
-      result = await callGeminiWithFallback(messages, temperature, jsonMode, tier);
+      result = await callGeminiWithFallback(messages, temperature, jsonMode, tier, maxTokens);
     } catch (err) {
       console.warn('[LLM] All Gemini models failed, trying OpenAI:', (err as Error).message);
       if (budgetContext) {
@@ -141,7 +141,7 @@ export async function callLLM(
   // ── 3rd: Try OpenAI ──
   if (!result && process.env.OPENAI_API_KEY) {
     try {
-      result = await callOpenAIWithFallback(messages, temperature, jsonMode, tier);
+      result = await callOpenAIWithFallback(messages, temperature, jsonMode, tier, maxTokens);
     } catch (err) {
       console.warn('[LLM] All OpenAI models failed, no more fallbacks:', (err as Error).message);
       if (budgetContext) {
@@ -170,7 +170,7 @@ export async function callLLM(
 // ═══════════════════════════════════════════════════════════
 
 // ── Anthropic with Fallback Chain ──
-async function callAnthropicWithFallback(messages: LLMMessage[], temperature: number, tier: number, jsonMode: boolean): Promise<LLMResponse> {
+async function callAnthropicWithFallback(messages: LLMMessage[], temperature: number, tier: number, jsonMode: boolean, maxTokens: number): Promise<LLMResponse> {
   const chain = MODEL_CHAINS.anthropic[tier] || MODEL_CHAINS.anthropic[3];
   const cachedModel = getCachedModel('anthropic', tier);
   
@@ -183,7 +183,7 @@ async function callAnthropicWithFallback(messages: LLMMessage[], temperature: nu
 
   for (const modelName of modelsToTry) {
     try {
-      const result = await callAnthropicDirect(messages, temperature, modelName, jsonMode);
+      const result = await callAnthropicDirect(messages, temperature, modelName, jsonMode, maxTokens);
       setCachedModel('anthropic', tier, modelName);
       console.log(`[LLM] Anthropic model ${modelName} succeeded`);
       return result;
@@ -208,7 +208,7 @@ async function callAnthropicWithFallback(messages: LLMMessage[], temperature: nu
 }
 
 // ── Gemini with Fallback Chain ──
-async function callGeminiWithFallback(messages: LLMMessage[], temperature: number, jsonMode: boolean, tier: number): Promise<LLMResponse> {
+async function callGeminiWithFallback(messages: LLMMessage[], temperature: number, jsonMode: boolean, tier: number, maxTokens: number): Promise<LLMResponse> {
   const chain = MODEL_CHAINS.gemini[tier] || MODEL_CHAINS.gemini[3];
   const cachedModel = getCachedModel('gemini', tier);
   
@@ -220,7 +220,7 @@ async function callGeminiWithFallback(messages: LLMMessage[], temperature: numbe
 
   for (const modelName of modelsToTry) {
     try {
-      const result = await callGeminiDirect(messages, temperature, jsonMode, modelName);
+      const result = await callGeminiDirect(messages, temperature, jsonMode, modelName, maxTokens);
       setCachedModel('gemini', tier, modelName);
       console.log(`[LLM] Gemini model ${modelName} succeeded`);
       return result;
@@ -242,7 +242,7 @@ async function callGeminiWithFallback(messages: LLMMessage[], temperature: numbe
 }
 
 // ── OpenAI with Fallback Chain ──
-async function callOpenAIWithFallback(messages: LLMMessage[], temperature: number, jsonMode: boolean, tier: number): Promise<LLMResponse> {
+async function callOpenAIWithFallback(messages: LLMMessage[], temperature: number, jsonMode: boolean, tier: number, maxTokens: number): Promise<LLMResponse> {
   const chain = MODEL_CHAINS.openai[tier] || MODEL_CHAINS.openai[3];
   const cachedModel = getCachedModel('openai', tier);
   
@@ -254,7 +254,7 @@ async function callOpenAIWithFallback(messages: LLMMessage[], temperature: numbe
 
   for (const modelName of modelsToTry) {
     try {
-      const result = await callOpenAIDirect(messages, temperature, jsonMode, modelName);
+      const result = await callOpenAIDirect(messages, temperature, jsonMode, modelName, maxTokens);
       setCachedModel('openai', tier, modelName);
       console.log(`[LLM] OpenAI model ${modelName} succeeded`);
       return result;
@@ -280,7 +280,7 @@ async function callOpenAIWithFallback(messages: LLMMessage[], temperature: numbe
 // ═══════════════════════════════════════════════════════════
 
 // ── Gemini Direct ──
-async function callGeminiDirect(messages: LLMMessage[], temperature: number, jsonMode: boolean, model: string): Promise<LLMResponse> {
+async function callGeminiDirect(messages: LLMMessage[], temperature: number, jsonMode: boolean, model: string, maxTokens: number = 16384): Promise<LLMResponse> {
   const apiKey = process.env.GEMINI_API_KEY!;
 
   const systemInstruction = messages.find(m => m.role === 'system')?.content || '';
@@ -300,7 +300,7 @@ async function callGeminiDirect(messages: LLMMessage[], temperature: number, jso
     systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
     generationConfig: {
       temperature,
-      maxOutputTokens: 4096,
+      maxOutputTokens: maxTokens,
       ...(jsonMode ? { responseMimeType: 'application/json' } : {}),
     },
   };
@@ -329,7 +329,7 @@ async function callGeminiDirect(messages: LLMMessage[], temperature: number, jso
 }
 
 // ── OpenAI Direct ──
-async function callOpenAIDirect(messages: LLMMessage[], temperature: number, jsonMode: boolean, modelName: string): Promise<LLMResponse> {
+async function callOpenAIDirect(messages: LLMMessage[], temperature: number, jsonMode: boolean, modelName: string, maxTokens: number = 16384): Promise<LLMResponse> {
   const OpenAI = (await import('openai')).default;
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -346,6 +346,7 @@ async function callOpenAIDirect(messages: LLMMessage[], temperature: number, jso
   const completion = await openai.chat.completions.create({
     model: modelName,
     temperature,
+    max_tokens: maxTokens,
     ...(jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
     messages,
   });
@@ -361,7 +362,7 @@ async function callOpenAIDirect(messages: LLMMessage[], temperature: number, jso
 }
 
 // ── Anthropic Direct ──
-async function callAnthropicDirect(messages: LLMMessage[], temperature: number, modelName: string, jsonMode: boolean = false): Promise<LLMResponse> {
+async function callAnthropicDirect(messages: LLMMessage[], temperature: number, modelName: string, jsonMode: boolean = false, maxTokens: number = 16384): Promise<LLMResponse> {
   const apiKey = process.env.ANTHROPIC_API_KEY!;
   let systemMsg = messages.find(m => m.role === 'system')?.content || '';
   
@@ -386,7 +387,7 @@ async function callAnthropicDirect(messages: LLMMessage[], temperature: number, 
 
   const requestBody: Record<string, unknown> = {
     model: modelName,
-    max_tokens: 4096,
+    max_tokens: maxTokens,
     system: systemMsg,
     messages: userMessages,
   };
