@@ -24,13 +24,13 @@ export interface RateLimitConfig {
   maxRequests: number;    // Max requests per window
 }
 
-// Plan-based rate limits
+// Plan-based rate limits (tuned for polling UI: mission page polls every 5s)
 export const RATE_LIMITS: Record<string, RateLimitConfig> = {
-  'free':       { windowMs: 60_000, maxRequests: 10 },     // 10 req/min
-  'individual': { windowMs: 60_000, maxRequests: 30 },     // 30 req/min
-  'pro':        { windowMs: 60_000, maxRequests: 60 },     // 60 req/min
-  'enterprise': { windowMs: 60_000, maxRequests: 200 },    // 200 req/min
-  'anonymous':  { windowMs: 60_000, maxRequests: 5 },      // 5 req/min for unauthenticated
+  'free':       { windowMs: 60_000, maxRequests: 60 },     // 60 req/min (1/sec)
+  'individual': { windowMs: 60_000, maxRequests: 120 },    // 120 req/min
+  'pro':        { windowMs: 60_000, maxRequests: 200 },    // 200 req/min
+  'enterprise': { windowMs: 60_000, maxRequests: 500 },    // 500 req/min
+  'anonymous':  { windowMs: 60_000, maxRequests: 20 },     // 20 req/min for unauthenticated
 };
 
 /**

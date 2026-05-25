@@ -2,16 +2,30 @@ import { createServerClient } from '@supabase/ssr';
 import { NextRequest, NextResponse } from 'next/server';
 
 // ============================================================
-// Middleware — Final Operational Release
+// Middleware — v2: Fixed Rate Limiting
 //
-// FIXES the auth redirect loop by:
-// 1. Using getUser() instead of getSession() (recommended by Supabase)
-// 2. Properly refreshing expired tokens via cookie sync
-// 3. Handling ?migrated=true as a post-auth signal
+// KEY CHANGES:
+// 1. Rate limiting now runs AFTER auth so cookie-auth users
+//    get their real plan limits, not 'anonymous' (5 req/min).
+// 2. Critical endpoints (execute, inngest) skip rate limiting.
+// 3. Increased base limits to support polling-based UI.
 // ============================================================
 
 const PUBLIC_PATHS = new Set(['/', '/login', '/auth/callback']);
 const PROTECTED_PREFIXES = ['/dashboard', '/approvals', '/connectors', '/permissions'];
+
+// Paths that skip rate limiting entirely (critical execution paths)
+const RATE_LIMIT_EXEMPT_PATTERNS = [
+  '/api/inngest',
+  '/api/cron/',
+];
+
+// Check if path matches any exempt pattern
+function isRateLimitExempt(pathname: string): boolean {
+  return RATE_LIMIT_EXEMPT_PATTERNS.some(p =>
+    pathname === p || pathname.startsWith(p)
+  ) || /\/api\/missions\/[^/]+\/execute/.test(pathname);
+}
 
 export async function middleware(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
@@ -42,22 +56,6 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // ── API Rate Limiting ──
-  if (pathname.startsWith('/api/') && !pathname.startsWith('/api/cron/')) {
-    const { checkRateLimit, rateLimitHeaders } = await import('@/lib/middleware/rate-limiter');
-    const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
-    const identifier = authHeader ? `auth:${authHeader.substring(0, 20)}` : `ip:${clientIp}`;
-    const plan = authHeader ? 'free' : 'anonymous'; // Will be upgraded after auth check
-
-    const rateCheck = checkRateLimit(identifier, plan);
-    if (!rateCheck.allowed) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded', retryAfter: rateCheck.retryAfter },
-        { status: 429, headers: rateLimitHeaders(plan, 0, rateCheck.retryAfter) }
-      );
-    }
-  }
-
   // ── Check if route needs protection ──
   const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p)) || pathname.startsWith('/api/');
   if (!isProtected) {
@@ -82,7 +80,6 @@ export async function middleware(request: NextRequest) {
         return request.cookies.getAll();
       },
       setAll(cookiesToSet) {
-        // Forward refreshed cookies to both request and response
         cookiesToSet.forEach(({ name, value }) => {
           request.cookies.set(name, value);
         });
@@ -97,14 +94,23 @@ export async function middleware(request: NextRequest) {
   });
 
   // ── Validate session using getUser() (NOT getSession) ──
-  // getUser() hits Supabase auth server and properly validates the JWT.
-  // getSession() only reads from cookies without validation — unreliable.
   try {
     const { data: { user }, error } = await supabase.auth.getUser();
 
     if (error || !user) {
-      // No valid session — redirect pages, 401 for API
+      // ── Unauthenticated: Apply anonymous rate limit for API routes ──
       if (pathname.startsWith('/api/')) {
+        if (!isRateLimitExempt(pathname)) {
+          const { checkRateLimit, rateLimitHeaders } = await import('@/lib/middleware/rate-limiter');
+          const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+          const rateCheck = checkRateLimit(`ip:${clientIp}`, 'anonymous');
+          if (!rateCheck.allowed) {
+            return NextResponse.json(
+              { error: 'Rate limit exceeded', retryAfter: rateCheck.retryAfter },
+              { status: 429, headers: rateLimitHeaders('anonymous', 0, rateCheck.retryAfter) }
+            );
+          }
+        }
         return NextResponse.json(
           { error: 'Authentication required', code: 'AUTH_REQUIRED' },
           { status: 401 }
@@ -115,10 +121,26 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
-    // ── User is authenticated — allow through ──
+    // ── User is authenticated ──
+    // Apply rate limiting with the user's REAL plan (not anonymous)
+    if (pathname.startsWith('/api/') && !isRateLimitExempt(pathname)) {
+      const { checkRateLimit, rateLimitHeaders } = await import('@/lib/middleware/rate-limiter');
+      
+      // Determine user's plan from metadata (set during signup/upgrade)
+      const userPlan = (user.user_metadata?.plan as string) || 'free';
+      const identifier = `user:${user.id}`;
+
+      const rateCheck = checkRateLimit(identifier, userPlan);
+      if (!rateCheck.allowed) {
+        return NextResponse.json(
+          { error: 'Rate limit exceeded', retryAfter: rateCheck.retryAfter },
+          { status: 429, headers: rateLimitHeaders(userPlan, 0, rateCheck.retryAfter) }
+        );
+      }
+    }
+
     return response;
   } catch {
-    // Supabase unreachable — allow in dev mode
     console.warn('[middleware] Supabase auth check failed, allowing through');
     return response;
   }
