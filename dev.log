@@ -1685,3 +1685,1180 @@ Compaction failed: Another write batch or compaction is already active (Only a s
 Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
 Persisting failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
 Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+✓ Compiled in 4.1s
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+ GET / 500 in 759ms (next.js: 406ms, proxy.ts: 182ms, application-code: 171ms)
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+ GET / 500 in 27ms (next.js: 15ms, proxy.ts: 4ms, application-code: 8ms)
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+ GET / 500 in 22ms (next.js: 9ms, proxy.ts: 4ms, application-code: 9ms)
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+ GET / 500 in 23ms (next.js: 10ms, proxy.ts: 3ms, application-code: 9ms)
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+ GET / 500 in 27ms (next.js: 12ms, proxy.ts: 4ms, application-code: 12ms)
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+ GET / 500 in 35ms (next.js: 15ms, proxy.ts: 3ms, application-code: 16ms)
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+ GET / 500 in 63ms (next.js: 39ms, proxy.ts: 8ms, application-code: 15ms)
+ GET / 500 in 57ms (next.js: 31ms, proxy.ts: 12ms, application-code: 13ms)
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+ GET / 500 in 29ms (next.js: 9ms, proxy.ts: 4ms, application-code: 15ms)
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+ GET / 500 in 153ms (next.js: 85ms, proxy.ts: 11ms, application-code: 57ms)
+ GET / 500 in 172ms (next.js: 60ms, proxy.ts: 7ms, application-code: 105ms)
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+ GET / 500 in 63ms (next.js: 21ms, proxy.ts: 31ms, application-code: 12ms)
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m     [31m[1m^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  [90m124 |[0m         </div>
+  [90m125 |[0m       )}
+[31m[1m>[0m [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m    |[0m      [31m[1m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  [90m127 |[0m   );
+  [90m128 |[0m }
+  [90m129 |[0m
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+ GET / 500 in 56ms (next.js: 29ms, proxy.ts: 5ms, application-code: 22ms)
+[browser] Uncaught Error: ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+    at <unknown> (Error: ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5)
+    at <unknown> (Error: (./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5)
+[browser] Uncaught Error: ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+    at <unknown> (Error: ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5)
+    at <unknown> (Error: (./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5)
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:5
+Expected a semicolon
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |     ^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:126:6
+Unterminated regexp literal
+  124 |         </div>
+  125 |       )}
+> 126 |     </AuthPopupContext.Provider>
+      |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  127 |   );
+  128 | }
+  129 |
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+Persisting failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  123 |         </div>
+  124 |       );
+> 125 |       })()}
+      |           ^
+  126 |     </AuthPopupContext.Provider>
+  127 |   );
+  128 | }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:7
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  [90m123 |[0m         </div>
+  [90m124 |[0m       );
+[31m[1m>[0m [90m125 |[0m       })()}
+  [90m    |[0m       [31m[1m^[0m
+  [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m127 |[0m   );
+  [90m128 |[0m }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  [90m123 |[0m         </div>
+  [90m124 |[0m       );
+[31m[1m>[0m [90m125 |[0m       })()}
+  [90m    |[0m           [31m[1m^[0m
+  [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m127 |[0m   );
+  [90m128 |[0m }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  123 |         </div>
+  124 |       );
+> 125 |       })()}
+      |           ^
+  126 |     </AuthPopupContext.Provider>
+  127 |   );
+  128 | }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+ GET / 500 in 115ms (next.js: 27ms, proxy.ts: 8ms, application-code: 80ms)
+⨯ ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:7
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  [90m123 |[0m         </div>
+  [90m124 |[0m       );
+[31m[1m>[0m [90m125 |[0m       })()}
+  [90m    |[0m       [31m[1m^[0m
+  [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m127 |[0m   );
+  [90m128 |[0m }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+
+./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  [90m123 |[0m         </div>
+  [90m124 |[0m       );
+[31m[1m>[0m [90m125 |[0m       })()}
+  [90m    |[0m           [31m[1m^[0m
+  [90m126 |[0m     </[33mAuthPopupContext[0m.[33mProvider[0m>
+  [90m127 |[0m   );
+  [90m128 |[0m }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  123 |         </div>
+  124 |       );
+> 125 |       })()}
+      |           ^
+  126 |     </AuthPopupContext.Provider>
+  127 |   );
+  128 | }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  123 |         </div>
+  124 |       );
+> 125 |       })()}
+      |           ^
+  126 |     </AuthPopupContext.Provider>
+  127 |   );
+  128 | }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  123 |         </div>
+  124 |       );
+> 125 |       })()}
+      |           ^
+  126 |     </AuthPopupContext.Provider>
+  127 |   );
+  128 | }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+ GET / 500 in 323ms (next.js: 188ms, proxy.ts: 56ms, application-code: 79ms)
+[browser] Uncaught Error: ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  123 |         </div>
+  124 |       );
+> 125 |       })()}
+      |           ^
+  126 |     </AuthPopupContext.Provider>
+  127 |   );
+  128 | }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+    at <unknown> (Error: ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11)
+    at <unknown> (Error: (./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11)
+[browser] Uncaught Error: ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  123 |         </div>
+  124 |       );
+> 125 |       })()}
+      |           ^
+  126 |     </AuthPopupContext.Provider>
+  127 |   );
+  128 | }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx
+
+
+    at <unknown> (Error: ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11)
+    at <unknown> (Error: (./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11)
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  123 |         </div>
+  124 |       );
+> 125 |       })()}
+      |           ^
+  126 |     </AuthPopupContext.Provider>
+  127 |   );
+  128 | }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  123 |         </div>
+  124 |       );
+> 125 |       })()}
+      |           ^
+  126 |     </AuthPopupContext.Provider>
+  127 |   );
+  128 | }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+[browser] ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx:125:11
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+  123 |         </div>
+  124 |       );
+> 125 |       })()}
+      |           ^
+  126 |     </AuthPopupContext.Provider>
+  127 |   );
+  128 | }
+
+Parsing ecmascript source code failed
+
+Import trace:
+  Server Component:
+    ./.gemini/antigravity/scratch/agent-factory/src/components/providers/AuthProvider.tsx
+    ./.gemini/antigravity/scratch/agent-factory/src/app/layout.tsx 
+Persisting failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+✓ Compiled in 1391ms
+Persisting failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+ GET / 200 in 778ms (next.js: 184ms, proxy.ts: 6ms, application-code: 588ms)
+ GET / 200 in 151ms (next.js: 10ms, proxy.ts: 6ms, application-code: 134ms)
+Persisting failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)
+Compaction failed: Another write batch or compaction is already active (Only a single write operations is allowed at a time)

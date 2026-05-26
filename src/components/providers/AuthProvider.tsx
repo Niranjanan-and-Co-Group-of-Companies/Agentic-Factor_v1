@@ -52,17 +52,29 @@ export function AuthPopupProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthPopupContext.Provider value={{ triggerAuth }}>
       {children}
-      {show && (
+      {show && (() => {
+        // Clean display names for OAuth providers
+        const DISPLAY_NAMES: Record<string, string> = {
+          linkedin_oidc: 'LinkedIn', linkedin: 'LinkedIn',
+          github: 'GitHub', slack: 'Slack', google: 'Google',
+          notion: 'Notion', zoho: 'Zoho', discord: 'Discord',
+          slack_oidc: 'Slack',
+        };
+        const displayName = provider 
+          ? DISPLAY_NAMES[provider] || provider.charAt(0).toUpperCase() + provider.slice(1)
+          : null;
+
+        return (
         <div className="auth-overlay" onClick={() => setShow(false)} style={{ zIndex: 9999 }}>
           <div className="auth-popup" onClick={(e) => e.stopPropagation()}>
             <div style={{ textAlign: "center", marginBottom: "var(--space-lg)" }}>
               <div style={{ fontSize: "2rem", marginBottom: "var(--space-sm)" }}>🔒</div>
               <h2 style={{ fontSize: "1.3rem", fontWeight: 700 }}>
-                {provider ? `Connect ${provider.charAt(0).toUpperCase() + provider.slice(1)}` : "Sign In to Continue"}
+                {displayName ? `Connect ${displayName}` : "Sign In to Continue"}
               </h2>
               <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", marginTop: "var(--space-xs)" }}>
-                {provider 
-                  ? `The AI Agents require access to ${provider} to complete this mission.` 
+                {displayName 
+                  ? `The AI Agents require access to ${displayName} to complete this mission.` 
                   : "Please sign in to proceed."}
               </p>
             </div>
@@ -75,7 +87,7 @@ export function AuthPopupProvider({ children }: { children: React.ReactNode }) {
                     window.open(`/api/oauth/${provider}`, 'oauth_window', 'width=500,height=600');
                   }}
                 >
-                  <span className="oauth-name">Connect {provider.charAt(0).toUpperCase() + provider.slice(1)} Account</span>
+                  <span className="oauth-name">Connect {displayName} Account</span>
                   <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>→</span>
                 </button>
               ) : (
@@ -110,7 +122,8 @@ export function AuthPopupProvider({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         </div>
-      )}
+      );
+      })()}
     </AuthPopupContext.Provider>
   );
 }

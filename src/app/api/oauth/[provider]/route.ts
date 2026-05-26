@@ -67,6 +67,13 @@ const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
     clientIdEnv: 'DISCORD_CLIENT_ID',
     scopes: ['identify', 'guilds', 'bot'],
   },
+  // Aliases — so /api/oauth/linkedin_oidc also works (returned by verifyMissionPermissions)
+  linkedin_oidc: {
+    authUrl: 'https://www.linkedin.com/oauth/v2/authorization',
+    clientIdEnv: 'LINKEDIN_CLIENT_ID',
+    scopes: ['openid', 'profile', 'email', 'w_member_social'],
+    callbackProviderKey: 'linkedin_oidc',
+  },
 };
 
 export async function GET(
