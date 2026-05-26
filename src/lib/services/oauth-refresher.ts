@@ -116,6 +116,8 @@ export async function getValidTokens(tenantId: string, provider: string): Promis
 export async function verifyMissionPermissions(missionId: string, tenantId: string): Promise<string[]> {
   const supabase = createServiceClient();
   
+  console.log(`[VerifyPermissions] Checking mission=${missionId}, tenant=${tenantId}`);
+  
   // 1. Fetch the mission
   const { data: missionData, error: missionError } = await supabase
     .from('missions')
@@ -131,7 +133,10 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
   const mission = missionData.mission_json;
   const requiredPermissions = mission.permissions || [];
   
+  console.log(`[VerifyPermissions] Required permissions:`, JSON.stringify(requiredPermissions));
+  
   if (requiredPermissions.length === 0) {
+    console.log(`[VerifyPermissions] No permissions required — all clear`);
     return []; // No permissions required
   }
 
@@ -154,14 +159,30 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
       // Check aliases first
       for (const [alias, dbKey] of Object.entries(PROVIDER_ALIASES)) {
         if (serviceLower.includes(alias)) {
+          console.log(`[VerifyPermissions] Mapped service "${p.service}" → DB key "${dbKey}" (via alias "${alias}")`);
           requiredProviders.add(dbKey);
           return;
         }
       }
       // Fallback: use the service name as-is
+      console.log(`[VerifyPermissions] No alias for "${p.service}" — using as-is: "${serviceLower}"`);
       requiredProviders.add(serviceLower);
     }
   });
+
+  console.log(`[VerifyPermissions] Resolved providers to check: [${[...requiredProviders].join(', ')}]`);
+
+  // Also log what's actually in tenant_permissions for this tenant
+  const { data: allPerms, error: permsError } = await supabase
+    .from('tenant_permissions')
+    .select('provider, access_token, expires_at')
+    .eq('tenant_id', tenantId);
+  
+  if (permsError) {
+    console.error(`[VerifyPermissions] ❌ Failed to query tenant_permissions: ${permsError.message}`);
+  } else {
+    console.log(`[VerifyPermissions] Tenant has ${allPerms?.length || 0} stored permissions: [${allPerms?.map(p => `${p.provider}(token:${p.access_token ? p.access_token.substring(0, 10) + '...' : 'NULL'})`).join(', ')}]`);
+  }
 
   // 3. Verify each provider
   const missingProviders: string[] = [];
@@ -169,9 +190,13 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
   for (const provider of requiredProviders) {
     const token = await getValidTokens(tenantId, provider);
     if (!token) {
+      console.log(`[VerifyPermissions] ❌ Provider "${provider}" — NO valid token found`);
       missingProviders.push(provider);
+    } else {
+      console.log(`[VerifyPermissions] ✅ Provider "${provider}" — valid token found (${token.access_token.substring(0, 10)}...)`);
     }
   }
 
+  console.log(`[VerifyPermissions] Result: ${missingProviders.length === 0 ? '✅ ALL CLEAR' : `❌ Missing: [${missingProviders.join(', ')}]`}`);
   return missingProviders;
 }

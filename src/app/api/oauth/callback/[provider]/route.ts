@@ -177,28 +177,71 @@ export async function GET(
     // The tenant_id is passed as the OAuth state parameter
     const tenantId = searchParams.get('state');
     
+    console.log(`[OAuth ${provider}] Attempting to store token. tenantId=${tenantId}, hasAccessToken=${!!accessToken}, tokenLength=${accessToken?.length || 0}`);
+    
     if (tenantId) {
-      // Store bot/primary token
-      await supabase
+      // Store bot/primary token — with full error handling
+      const upsertPayload = {
+        tenant_id: tenantId,
+        provider: provider,
+        access_token: accessToken,
+        refresh_token: refreshToken || null,
+        expires_at: expiresIn > 0 
+          ? new Date(Date.now() + expiresIn * 1000).toISOString() 
+          : null,
+        scopes: scope,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Try upsert first
+      const { error: upsertError } = await supabase
         .from('tenant_permissions')
-        .upsert({
-          tenant_id: tenantId,
-          provider: provider,
-          access_token: accessToken,
-          refresh_token: refreshToken || null,
-          expires_at: expiresIn > 0 
-            ? new Date(Date.now() + expiresIn * 1000).toISOString() 
-            : null,
-          scopes: scope,
-          updated_at: new Date().toISOString(),
-        }, {
+        .upsert(upsertPayload, {
           onConflict: 'tenant_id,provider',
         });
 
-      // For Slack: also store user token separately if present
-      // This enables "acting as user" and "reading user DMs" capabilities
-      if (provider === 'slack' && tokenData.authed_user?.access_token) {
+      if (upsertError) {
+        console.error(`[OAuth ${provider}] Upsert FAILED: ${upsertError.message} (code: ${upsertError.code}, details: ${upsertError.details})`);
+        
+        // Fallback: try delete + insert if upsert fails (missing unique constraint)
+        console.log(`[OAuth ${provider}] Attempting fallback: delete + insert...`);
+        
         await supabase
+          .from('tenant_permissions')
+          .delete()
+          .eq('tenant_id', tenantId)
+          .eq('provider', provider);
+        
+        const { error: insertError } = await supabase
+          .from('tenant_permissions')
+          .insert(upsertPayload);
+        
+        if (insertError) {
+          console.error(`[OAuth ${provider}] INSERT also FAILED: ${insertError.message} (code: ${insertError.code}, details: ${insertError.details})`);
+        } else {
+          console.log(`[OAuth ${provider}] ✅ Fallback INSERT succeeded for tenant ${tenantId}`);
+        }
+      } else {
+        console.log(`[OAuth ${provider}] ✅ Upsert succeeded for tenant ${tenantId}`);
+      }
+
+      // Verify the token was actually stored
+      const { data: verifyRow, error: verifyError } = await supabase
+        .from('tenant_permissions')
+        .select('provider, access_token')
+        .eq('tenant_id', tenantId)
+        .eq('provider', provider)
+        .single();
+      
+      if (verifyError || !verifyRow) {
+        console.error(`[OAuth ${provider}] ❌ VERIFICATION FAILED — token NOT in DB! Error: ${verifyError?.message}`);
+      } else {
+        console.log(`[OAuth ${provider}] ✅ VERIFIED — token exists in DB. provider=${verifyRow.provider}, tokenLength=${verifyRow.access_token?.length || 0}`);
+      }
+
+      // For Slack: also store user token separately if present
+      if (provider === 'slack' && tokenData.authed_user?.access_token) {
+        const { error: slackUserError } = await supabase
           .from('tenant_permissions')
           .upsert({
             tenant_id: tenantId,
@@ -211,10 +254,14 @@ export async function GET(
           }, {
             onConflict: 'tenant_id,provider',
           });
-        console.log(`[OAuth slack] Both bot AND user tokens stored for tenant ${tenantId}`);
-      } else {
-        console.log(`[OAuth ${provider}] Token stored for tenant ${tenantId}`);
+        if (slackUserError) {
+          console.error(`[OAuth slack_user] Upsert FAILED: ${slackUserError.message}`);
+        } else {
+          console.log(`[OAuth slack] Both bot AND user tokens stored for tenant ${tenantId}`);
+        }
       }
+    } else {
+      console.error(`[OAuth ${provider}] ❌ No tenantId in state parameter! Cannot store token.`);
     }
 
     // ── Smart redirect: popup-aware ──
