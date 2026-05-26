@@ -136,16 +136,30 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
   }
 
   // 2. Identify required providers
+  // Map from common names (used in mission JSON) to DB provider keys (used in tenant_permissions)
+  const PROVIDER_ALIASES: Record<string, string> = {
+    'google': 'google', 'gmail': 'google', 'google mail': 'google',
+    'linkedin': 'linkedin_oidc', 'linkedin_oidc': 'linkedin_oidc',
+    'slack': 'slack', 'slack_oidc': 'slack',
+    'github': 'github',
+    'notion': 'notion',
+    'zoho': 'zoho',
+    'discord': 'discord',
+  };
+
   const requiredProviders = new Set<string>();
   requiredPermissions.forEach((p: any) => {
     if (p.type === 'oauth_token') {
-      if (p.service.toLowerCase().includes('google') || p.service.toLowerCase().includes('gmail')) {
-        requiredProviders.add('google');
-      } else if (p.service.toLowerCase().includes('slack')) {
-        requiredProviders.add('slack_oidc');
-      } else {
-        requiredProviders.add(p.service.toLowerCase());
+      const serviceLower = p.service.toLowerCase();
+      // Check aliases first
+      for (const [alias, dbKey] of Object.entries(PROVIDER_ALIASES)) {
+        if (serviceLower.includes(alias)) {
+          requiredProviders.add(dbKey);
+          return;
+        }
       }
+      // Fallback: use the service name as-is
+      requiredProviders.add(serviceLower);
     }
   });
 

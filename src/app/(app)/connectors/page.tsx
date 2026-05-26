@@ -129,9 +129,39 @@ export default function ConnectorsPage() {
   const checkConnectionStatus = async () => {
     const supabase = getSupabase();
     const { data: { user } } = await supabase.auth.getUser();
-    const provider = user?.app_metadata?.provider;
     setUserEmail(user?.email || null);
-    if (provider) setConnectedProviders(new Set([provider]));
+    
+    // Start with the login provider
+    const providers = new Set<string>();
+    const loginProvider = user?.app_metadata?.provider;
+    if (loginProvider) providers.add(loginProvider);
+    
+    // Fetch ALL connected OAuth tokens from tenant_permissions
+    if (user) {
+      try {
+        // Get the user's tenant_id from tenants table
+        const { data: tenantData } = await supabase
+          .from('tenants')
+          .select('id')
+          .eq('owner_user_id', user.id)
+          .single();
+        
+        if (tenantData) {
+          const { data: perms } = await supabase
+            .from('tenant_permissions')
+            .select('provider')
+            .eq('tenant_id', tenantData.id);
+          
+          if (perms) {
+            perms.forEach(p => providers.add(p.provider));
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to fetch tenant permissions:', e);
+      }
+    }
+    
+    setConnectedProviders(providers);
     setLoading(false);
   };
 

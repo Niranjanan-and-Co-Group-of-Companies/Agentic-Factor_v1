@@ -220,10 +220,17 @@ export async function GET(
     // ── Smart redirect: popup-aware ──
     // If opened as a popup from mission page, send postMessage and close.
     // If opened directly (e.g., from connectors page), redirect normally.
+    // Clean display name for the provider
+    const DISPLAY_NAMES: Record<string, string> = {
+      linkedin_oidc: 'LinkedIn', github: 'GitHub', slack: 'Slack',
+      google: 'Google', notion: 'Notion', zoho: 'Zoho', discord: 'Discord',
+    };
+    const displayName = DISPLAY_NAMES[provider] || provider.charAt(0).toUpperCase() + provider.slice(1);
+
     const successHtml = `
 <!DOCTYPE html>
 <html>
-<head><title>Connected!</title>
+<head><meta charset="utf-8"><title>Connected!</title>
 <style>
   body { background: #0a0e1a; color: #fff; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
   .card { text-align: center; padding: 2rem; }
@@ -234,7 +241,7 @@ export async function GET(
 <body>
 <div class="card">
   <div class="check">✅</div>
-  <h2>${provider.charAt(0).toUpperCase() + provider.slice(1)} Connected!</h2>
+  <h2>${displayName} Connected!</h2>
   <p>This window will close automatically...</p>
 </div>
 <script>
@@ -262,7 +269,7 @@ export async function GET(
     const errorHtml = `
 <!DOCTYPE html>
 <html>
-<head><title>Connection Failed</title>
+<head><meta charset="utf-8"><title>Connection Failed</title>
 <style>
   body { background: #0a0e1a; color: #fff; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
   .card { text-align: center; padding: 2rem; }
