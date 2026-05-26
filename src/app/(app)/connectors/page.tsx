@@ -186,6 +186,32 @@ export default function ConnectorsPage() {
     return list;
   }, [search, category, connectedProviders]);
 
+  // Map from connector ID to the OAuth route name (most are the same)
+  const OAUTH_ROUTE_MAP: Record<string, string> = {
+    linkedin: 'linkedin',
+    google: 'google',
+    github: 'github',
+    slack: 'slack',
+    notion: 'notion',
+    zoho: 'zoho',
+    discord: 'discord',
+  };
+
+  // Listen for OAuth popup success messages to auto-refresh
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'OAUTH_SUCCESS') {
+        showToast(`✅ ${event.data.provider || 'Provider'} connected successfully!`);
+        // Re-fetch connection status
+        checkConnectionStatus();
+      } else if (event.data?.type === 'OAUTH_ERROR') {
+        showToast(`❌ Connection failed. Please try again.`);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
   const handleConnect = async (connector: ConnectorDef) => {
     if (connector.status === "coming_soon") {
       showToast(`🔧 ${connector.label} is coming soon. We'll notify you when it's ready.`);
@@ -198,18 +224,24 @@ export default function ConnectorsPage() {
     if (!connector.provider) return;
 
     setConnecting(connector.id);
-    try {
-      const supabase = getSupabase();
-      const { error } = await supabase.auth.signInWithOAuth({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        provider: connector.provider as any,
-        options: { redirectTo: `${window.location.origin}/auth/callback?returnTo=/connectors` },
-      });
-      if (error) throw error;
-    } catch (err) {
-      showToast(`❌ Connection failed: ${(err as Error).message}`);
-      setConnecting(null);
-    }
+
+    // Use our custom OAuth route (stores tokens in tenant_permissions)
+    const oauthRoute = OAUTH_ROUTE_MAP[connector.id] || connector.id;
+    const popup = window.open(
+      `/api/oauth/${oauthRoute}`,
+      'oauth_window',
+      'width=500,height=600,scrollbars=yes'
+    );
+
+    // Watch for popup closing (user cancelled or completed)
+    const pollTimer = setInterval(() => {
+      if (popup && popup.closed) {
+        clearInterval(pollTimer);
+        setConnecting(null);
+        // Re-check in case they completed the flow
+        setTimeout(() => checkConnectionStatus(), 1000);
+      }
+    }, 500);
   };
 
   const handleRequestAccess = async (connector: ConnectorDef) => {
