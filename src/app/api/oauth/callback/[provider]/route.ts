@@ -217,11 +217,79 @@ export async function GET(
       }
     }
 
-    // Redirect back to connectors page with success
-    return NextResponse.redirect(new URL(`/connectors?connected=${provider}`, request.url));
+    // ── Smart redirect: popup-aware ──
+    // If opened as a popup from mission page, send postMessage and close.
+    // If opened directly (e.g., from connectors page), redirect normally.
+    const successHtml = `
+<!DOCTYPE html>
+<html>
+<head><title>Connected!</title>
+<style>
+  body { background: #0a0e1a; color: #fff; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+  .card { text-align: center; padding: 2rem; }
+  .check { font-size: 3rem; margin-bottom: 1rem; }
+  p { color: #8b95a5; font-size: 0.9rem; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="check">✅</div>
+  <h2>${provider.charAt(0).toUpperCase() + provider.slice(1)} Connected!</h2>
+  <p>This window will close automatically...</p>
+</div>
+<script>
+  // Send success message to parent window (mission page popup flow)
+  if (window.opener) {
+    window.opener.postMessage({ type: 'OAUTH_SUCCESS', provider: '${provider}' }, '*');
+    setTimeout(() => window.close(), 1200);
+  } else {
+    // Not a popup — redirect to connectors page
+    setTimeout(() => { window.location.href = '/connectors?connected=${provider}'; }, 1500);
+  }
+</script>
+</body>
+</html>`;
+
+    return new NextResponse(successHtml, {
+      status: 200,
+      headers: { 'Content-Type': 'text/html' },
+    });
 
   } catch (err) {
     console.error(`[OAuth ${provider}] Token exchange failed:`, err);
-    return NextResponse.redirect(new URL(`/connectors?error=exchange_failed`, request.url));
+    
+    // Error handling — also popup-aware
+    const errorHtml = `
+<!DOCTYPE html>
+<html>
+<head><title>Connection Failed</title>
+<style>
+  body { background: #0a0e1a; color: #fff; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+  .card { text-align: center; padding: 2rem; }
+  .icon { font-size: 3rem; margin-bottom: 1rem; }
+  p { color: #8b95a5; font-size: 0.9rem; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">❌</div>
+  <h2>Connection Failed</h2>
+  <p>Something went wrong. Please try again.</p>
+</div>
+<script>
+  if (window.opener) {
+    window.opener.postMessage({ type: 'OAUTH_ERROR', error: 'exchange_failed' }, '*');
+    setTimeout(() => window.close(), 2000);
+  } else {
+    setTimeout(() => { window.location.href = '/connectors?error=exchange_failed'; }, 2000);
+  }
+</script>
+</body>
+</html>`;
+
+    return new NextResponse(errorHtml, {
+      status: 200,
+      headers: { 'Content-Type': 'text/html' },
+    });
   }
 }
