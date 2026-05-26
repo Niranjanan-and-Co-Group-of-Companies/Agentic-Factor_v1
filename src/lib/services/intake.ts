@@ -154,7 +154,7 @@ async function extractAndSaveTenantMemory(intent: string, tenantId: string): Pro
     const llmResponse = await callLLM([
       { role: 'system', content: 'Extract reusable company facts, preferences, credentials, or policies from the user prompt. Ignore specific task instructions. Only extract global facts. Return JSON: { "facts": ["fact 1", "fact 2"] }' },
       { role: 'user', content: intent }
-    ], { jsonMode: true, temperature: 0.1, tier: 2 });
+    ], { jsonMode: true, temperature: 0.1, tier: 2, budgetContext: { tenantId, missionId: 'blueprint_generation' } });
     
     const data = JSON.parse(llmResponse.content);
     if (data.facts && data.facts.length > 0) {
@@ -214,7 +214,7 @@ export async function generateMissionJSON(
   const discoveryCheck = await callLLM([
     { role: 'system', content: discoveryPrompts[promptKey] },
     { role: 'user', content: `Intent: ${intent}${globalMemory}` }
-  ], { jsonMode: true, temperature: 0.1, tier: 2 });
+  ], { jsonMode: true, temperature: 0.1, tier: 2, budgetContext: { tenantId, missionId: 'blueprint_generation' } });
   
   const discoveryData = JSON.parse(discoveryCheck.content);
   if (!discoveryData.ready && discoveryData.question) {
@@ -229,7 +229,7 @@ export async function generateMissionJSON(
       role: 'user',
       content: `Generate a Mission JSON for the following intent:\n\n"${intent}"${memoryContext}${globalMemory}`,
     },
-  ], { temperature: 0.3, jsonMode: true, tier: 1 }); // Tier 1 for complex code generation
+  ], { temperature: 0.3, jsonMode: true, tier: 1, budgetContext: { tenantId, missionId: 'blueprint_generation' } }); // Tier 1 for complex code generation
 
   console.log(`[intake] LLM provider: ${llmResponse.provider}, tokens: ${llmResponse.tokensUsed}`);
 
@@ -273,7 +273,7 @@ export async function generateMissionJSON(
         { role: 'user', content: `Generate a Mission JSON for: "${intent}"${memoryContext}${globalMemory}` },
         { role: 'assistant', content: llmResponse.content.substring(0, 2000) },
         { role: 'user', content: `Your previous response had a JSON syntax error: ${(parseError1 as Error).message}. Please regenerate the COMPLETE valid JSON response. Respond with ONLY valid JSON, no markdown.` }
-      ], { temperature: 0.1, jsonMode: true, tier: 1 });
+      ], { temperature: 0.1, jsonMode: true, tier: 1, budgetContext: { tenantId, missionId: 'blueprint_retry' } });
       
       console.log(`[intake] LLM retry provider: ${retryResponse.provider}, tokens: ${retryResponse.tokensUsed}`);
       

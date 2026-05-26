@@ -280,7 +280,7 @@ async function callOpenAIWithFallback(messages: LLMMessage[], temperature: numbe
 // ═══════════════════════════════════════════════════════════
 
 // ── Gemini Direct ──
-async function callGeminiDirect(messages: LLMMessage[], temperature: number, jsonMode: boolean, model: string, maxTokens: number = 16384): Promise<LLMResponse> {
+async function callGeminiDirect(messages: LLMMessage[], temperature: number, jsonMode: boolean, model: string, maxTokens: number = 65536): Promise<LLMResponse> {
   const apiKey = process.env.GEMINI_API_KEY!;
 
   const systemInstruction = messages.find(m => m.role === 'system')?.content || '';

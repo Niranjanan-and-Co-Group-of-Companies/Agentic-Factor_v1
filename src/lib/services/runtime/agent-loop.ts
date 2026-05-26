@@ -243,7 +243,7 @@ ${pythonCode}`;
       try {
         // Install common packages (suppress all output to prevent stdout pollution)
         await sandbox.runCode(
-          'import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "requests", "beautifulsoup4", "google-api-python-client", "google-auth-oauthlib", "openai", "anthropic", "matplotlib", "pandas", "numpy", "openpyxl"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)',
+          'import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "requests", "beautifulsoup4", "google-api-python-client", "google-auth-oauthlib", "openai", "anthropic", "matplotlib", "pandas", "numpy", "openpyxl", "python-docx", "python-pptx"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)',
           { envs: sandboxEnvs }
         );
 
@@ -303,7 +303,7 @@ ${pythonCode}`;
 
           // 2. Scan /tmp in sandbox for generated output files
           const scanExec = await sandbox.runCode(
-            'import os, json; files = [f for f in os.listdir("/tmp") if f.endswith((".png", ".jpg", ".jpeg", ".pdf", ".csv", ".xlsx", ".html", ".svg", ".json"))]; print(json.dumps(files))',
+            'import os, json; files = [f for f in os.listdir("/tmp") if f.endswith((".png", ".jpg", ".jpeg", ".pdf", ".csv", ".xlsx", ".html", ".svg", ".json", ".docx", ".pptx", ".txt", ".md", ".zip", ".xml", ".yaml", ".yml"))]; print(json.dumps(files))',
             { envs: sandboxEnvs }
           );
           const scanStdout = scanExec.logs.stdout.join('').trim();
@@ -314,6 +314,10 @@ ${pythonCode}`;
               '.pdf': 'application/pdf', '.csv': 'text/csv',
               '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
               '.html': 'text/html', '.svg': 'image/svg+xml', '.json': 'application/json',
+              '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+              '.txt': 'text/plain', '.md': 'text/markdown', '.zip': 'application/zip',
+              '.xml': 'application/xml', '.yaml': 'text/yaml', '.yml': 'text/yaml',
             };
             for (const fname of tmpFiles) {
               try {
