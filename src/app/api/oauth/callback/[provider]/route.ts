@@ -189,7 +189,7 @@ export async function GET(
         expires_at: expiresIn > 0 
           ? new Date(Date.now() + expiresIn * 1000).toISOString() 
           : null,
-        scopes: scope,
+        scopes: scope ? scope.split(/[,\s]+/).filter(Boolean) : [],
         updated_at: new Date().toISOString(),
       };
 
@@ -249,7 +249,7 @@ export async function GET(
             access_token: tokenData.authed_user.access_token,
             refresh_token: null,
             expires_at: null,
-            scopes: tokenData.authed_user.scope || '',
+            scopes: tokenData.authed_user.scope ? tokenData.authed_user.scope.split(/[,\s]+/).filter(Boolean) : [],
             updated_at: new Date().toISOString(),
           }, {
             onConflict: 'tenant_id,provider',
