@@ -377,9 +377,24 @@ export default function MissionDetailPage() {
       const data = await res.json();
       
       if (res.status === 403 && data.error === 'missing_permission') {
-        // Trigger Global JIT OAuth
         setIsStarting(false);
-        triggerAuth(data.providers[0], handleStartMission);
+        const providers = data.providers || [];
+        
+        // If it's an OAuth connector the user can connect themselves, trigger the popup
+        const oauthProviders = ['google', 'linkedin_oidc', 'slack', 'github', 'notion', 'discord', 'zoho'];
+        const userCanConnect = providers.some((p: string) => oauthProviders.includes(p));
+        
+        if (userCanConnect) {
+          // User can connect this themselves via OAuth
+          triggerAuth(providers[0], handleStartMission);
+        } else {
+          // These are connectors the admin needs to set up (API keys, etc.)
+          // Show a friendly message — admin has been emailed
+          setChatMessages(prev => [...prev, { 
+            role: "assistant", 
+            text: `⚠️ **Connectors Pending Setup**\n\nThis mission requires the following connectors that aren't configured yet:\n\n${providers.map((p: string) => `• **${p.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}**`).join('\n')}\n\nOur team has been notified and will set them up shortly. You'll receive an email once they're ready.\n\nOnce configured, click **Force Restart** to run the mission with full capabilities.`
+          }]);
+        }
         return;
       }
       

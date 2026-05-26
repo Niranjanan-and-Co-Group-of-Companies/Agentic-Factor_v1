@@ -14,6 +14,8 @@ export interface CircuitBreakerConfig {
   tripThreshold: number;        // Consecutive failures before trip (default: 5)
   cooldownMs: number;           // Reset wait after trip (default: 60000)
   costPer1kTokens: number;      // Cost estimate (default: $0.005)
+  creditMultiplier: number;      // Markup multiplier for credits (default: 4x)
+  creditsPerDollar: number;      // Credits per $1 of cost (default: 1000)
 }
 
 export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
@@ -39,6 +41,8 @@ const DEFAULT_CONFIG: CircuitBreakerConfig = {
   tripThreshold: 5,
   cooldownMs: 60_000,
   costPer1kTokens: 0.005,
+  creditMultiplier: 4,           // 4x markup for 80%+ profit margin
+  creditsPerDollar: 1000,        // 1 dollar = 1000 base credits
 };
 
 // In-memory state (per-tenant and per-mission)
@@ -180,7 +184,7 @@ export async function recordUsage(
       event_type: 'token.usage_recorded',
       entity_type: 'mission',
       entity_id: missionId,
-      payload: { tokensUsed, callType, tenantMinuteTotal: circuit.tokensThisMinute, missionTotal: mission.totalTokens, dailyCost: (circuit.totalTokensToday / 1000) * DEFAULT_CONFIG.costPer1kTokens },
+      payload: { tokensUsed, callType, tenantMinuteTotal: circuit.tokensThisMinute, missionTotal: mission.totalTokens, creditsUsed: Math.ceil((tokensUsed / 1000) * DEFAULT_CONFIG.costPer1kTokens * DEFAULT_CONFIG.creditMultiplier * DEFAULT_CONFIG.creditsPerDollar) },
     });
   } catch (err) {
     console.error('[CircuitBreaker] Failed to log usage:', err);
@@ -202,13 +206,14 @@ export function recordFailure(tenantId: string, config: Partial<CircuitBreakerCo
 /**
  * Get current circuit status for dashboard display.
  */
-export function getCircuitStatus(tenantId: string): { state: CircuitState; tokensThisMinute: number; totalTokensToday: number; estimatedDailyCost: number; consecutiveFailures: number } {
+export function getCircuitStatus(tenantId: string): { state: CircuitState; tokensThisMinute: number; totalTokensToday: number; estimatedDailyCost: number; estimatedCreditsUsed: number; consecutiveFailures: number } {
   const circuit = getTenantCircuit(tenantId);
   return {
     state: circuit.state,
     tokensThisMinute: circuit.tokensThisMinute,
     totalTokensToday: circuit.totalTokensToday,
     estimatedDailyCost: (circuit.totalTokensToday / 1000) * DEFAULT_CONFIG.costPer1kTokens,
+    estimatedCreditsUsed: Math.ceil((circuit.totalTokensToday / 1000) * DEFAULT_CONFIG.costPer1kTokens * DEFAULT_CONFIG.creditMultiplier * DEFAULT_CONFIG.creditsPerDollar),
     consecutiveFailures: circuit.consecutiveFailures,
   };
 }

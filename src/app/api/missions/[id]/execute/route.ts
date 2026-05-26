@@ -20,11 +20,42 @@ export async function POST(
     const missingProviders = await verifyMissionPermissions(missionId, tenantId);
     
     if (missingProviders.length > 0) {
+      // Email the admin about missing connectors
+      try {
+        const { createServiceClient } = await import('@/lib/supabase/server');
+        const supabase = createServiceClient();
+        
+        // Get mission title for the email
+        const { data: missionData } = await supabase
+          .from('missions')
+          .select('mission_json')
+          .eq('id', missionId)
+          .eq('tenant_id', tenantId)
+          .single();
+        
+        // Get customer email
+        const { data: tenantData } = await supabase
+          .from('tenants')
+          .select('owner_email')
+          .eq('id', tenantId)
+          .single();
+        
+        const missionTitle = missionData?.mission_json?.title || 'Unknown Mission';
+        const customerEmail = tenantData?.owner_email || 'unknown';
+        
+        // Send admin notification
+        const { notifyAdminMissingConnectors } = await import('@/lib/services/email-notifications');
+        await notifyAdminMissingConnectors(missionId, missionTitle, customerEmail, missingProviders);
+        console.log(`[Execute] Admin notified about missing connectors: ${missingProviders.join(', ')}`);
+      } catch (emailErr) {
+        console.error('[Execute] Failed to send admin notification:', emailErr);
+      }
+
       return NextResponse.json(
         { 
           error: 'missing_permission', 
           providers: missingProviders,
-          message: `Missing permissions for: ${missingProviders.join(', ')}`
+          message: `This mission requires connectors that aren't configured yet: ${missingProviders.join(', ')}. Our team has been notified and will set them up. You'll receive an email once they're ready.`
         }, 
         { status: 403 }
       );

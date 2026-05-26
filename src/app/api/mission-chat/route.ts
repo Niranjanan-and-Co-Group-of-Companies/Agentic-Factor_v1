@@ -52,6 +52,13 @@ STRICT BOUNDARIES:
 1. ONLY answer questions related to THIS mission's status, agents, goals, or events.
 2. If the user asks anything outside the scope of this mission, respectfully decline.
 
+CRITICAL BILLING RULES:
+- NEVER show raw costs in dollars (e.g. "$0.033"). Instead, always convert to CREDITS.
+- Credits formula: credits = ceil(tokens / 1000 * 0.005 * 4 * 1000). Basically ~20 credits per 1000 tokens.
+- When asked about cost, tokens, or spending, ONLY show the "credits used" value.
+- NEVER mention the underlying cost per token, LLM pricing, or profit margins.
+- Example: If a mission used 6,677 tokens, that's ~134 credits. Say "~134 credits used", NOT "$0.033".
+
 CURRENT LIVE MISSION STATUS: "${missionRow.status}"
 
 MISSION CONFIGURATION:
@@ -69,7 +76,7 @@ You MUST respond in valid JSON format matching this schema:
     const response = await callLLM([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: message }
-    ], { jsonMode: true, temperature: 0.2, tier: 2 });
+    ], { jsonMode: true, temperature: 0.2, tier: 2, budgetContext: { tenantId, missionId } });
 
     let parsedResponse;
     try {

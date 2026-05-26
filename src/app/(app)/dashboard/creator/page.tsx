@@ -661,7 +661,7 @@ function MissionCreatorInner() {
         {confirmResult && (
           <div className="grid-3" style={{ marginBottom: "var(--space-xl)" }}>
             <div className="stat-card"><div className="stat-value" style={{ color: "var(--emerald)", fontSize: "1.5rem" }}>{(confirmResult as Record<string, Record<string, unknown>>).graph?.agentCount as number}</div><div className="stat-label">Agents</div></div>
-            <div className="stat-card"><div className="stat-value" style={{ color: "var(--accent)", fontSize: "1.5rem" }}>{(confirmResult as Record<string, Record<string, unknown>>).dryRun?.estimatedTokens as number}</div><div className="stat-label">Est. Tokens</div></div>
+            <div className="stat-card"><div className="stat-value" style={{ color: "var(--accent)", fontSize: "1.5rem" }}>{Math.ceil(((confirmResult as Record<string, Record<string, unknown>>).dryRun?.estimatedTokens as number || 0) / 1000 * 0.005 * 4 * 1000)}</div><div className="stat-label">Est. Credits</div></div>
             <div className="stat-card"><div className="stat-value" style={{ color: "var(--amber)", fontSize: "1.5rem" }}>v{confirmResult.snapshotVersion as number}</div><div className="stat-label">Snapshot</div></div>
           </div>
         )}
