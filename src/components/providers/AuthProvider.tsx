@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
+import ConnectorLogo from "@/components/ConnectorLogos";
 
 interface AuthPopupContextType {
   triggerAuth: (provider?: string | null, onSuccess?: () => void) => void;
@@ -91,9 +92,9 @@ export function AuthPopupProvider({ children }: { children: React.ReactNode }) {
                   <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>→</span>
                 </button>
               ) : (
-                [{p:"google",l:"Google",i:"📧"},{p:"linkedin_oidc",l:"LinkedIn",i:"💼"},{p:"slack_oidc",l:"Slack",i:"💬"}].map((o) => (
+                [{p:"google",l:"Google"},{p:"linkedin_oidc",l:"LinkedIn"},{p:"slack_oidc",l:"Slack"}].map((o) => (
                   <button key={o.p} className="oauth-btn" onClick={() => { setShow(false); window.location.href = `/login?returnTo=/`; }}>
-                    <span className="oauth-icon">{o.i}</span>
+                    <span className="oauth-icon"><ConnectorLogo id={o.p === 'linkedin_oidc' ? 'linkedin' : o.p === 'slack_oidc' ? 'slack' : o.p} size={24} /></span>
                     <span className="oauth-name">{o.l}</span>
                     <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>→</span>
                   </button>

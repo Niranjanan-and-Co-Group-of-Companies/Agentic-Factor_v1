@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { createBrowserClient } from "@supabase/ssr";
+import ConnectorLogo from "@/components/ConnectorLogos";
 
 // ============================================================
 // Connector Marketplace — 40+ SaaS Platforms
@@ -396,7 +397,7 @@ export default function ConnectorsPage() {
               {/* Header */}
               <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-sm)" }}>
                 <div className="row" style={{ gap: "var(--space-sm)" }}>
-                  <span style={{ fontSize: "1.8rem" }}>{c.icon}</span>
+                  <ConnectorLogo id={c.id} size={32} />
                   <div>
                     <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>{c.label}</div>
                     <span className="badge" style={{ fontSize: "0.6rem", color: "var(--text-muted)", padding: "1px 6px" }}>{c.category}</span>
