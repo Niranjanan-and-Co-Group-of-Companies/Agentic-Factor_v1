@@ -6,7 +6,7 @@ import { useState, useEffect } from "react";
 // With Add/Remove Admin Users popup.
 // ============================================================
 
-type Tab = "dashboard" | "connectors" | "tenants" | "missions";
+type Tab = "dashboard" | "connectors" | "tenants" | "missions" | "models" | "connector_defs";
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -112,6 +112,8 @@ export default function AdminPage() {
     { key: "connectors", label: "Connectors", icon: "🔌" },
     { key: "tenants", label: "Tenants", icon: "👥" },
     { key: "missions", label: "Missions", icon: "🎯" },
+    { key: "models", label: "LLM Models", icon: "🧠" },
+    { key: "connector_defs", label: "Connector Defs", icon: "⚙️" },
   ];
 
   return (
@@ -269,6 +271,105 @@ export default function AdminPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+          {/* LLM MODELS TAB */}
+          {tab === "models" && data && (
+            <div className="card" style={{ padding: "var(--space-lg)", overflowX: "auto" }}>
+              <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
+                <h3 style={{ fontSize: "0.95rem", fontWeight: 700 }}>LLM Model Registry ({(data.models || []).length})</h3>
+                <span className="badge badge-blue">Self-Healing Enabled</span>
+              </div>
+              <table style={{ width: "100%", fontSize: "0.78rem", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid var(--border)", textAlign: "left" }}>
+                    <th style={{ padding: "8px 12px" }}>Provider</th>
+                    <th style={{ padding: "8px 12px" }}>Model</th>
+                    <th style={{ padding: "8px 12px" }}>Tier</th>
+                    <th style={{ padding: "8px 12px" }}>Priority</th>
+                    <th style={{ padding: "8px 12px" }}>Health</th>
+                    <th style={{ padding: "8px 12px" }}>Failures</th>
+                    <th style={{ padding: "8px 12px" }}>Last Check</th>
+                    <th style={{ padding: "8px 12px" }}>Active</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data.models || []).map((m: any) => (
+                    <tr key={m.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "8px 12px" }}><span className={`badge ${m.provider === 'anthropic' ? 'badge-purple' : m.provider === 'google' ? 'badge-blue' : 'badge-green'}`}>{m.provider}</span></td>
+                      <td style={{ padding: "8px 12px", fontFamily: "monospace", fontSize: "0.72rem" }}>{m.model_name}</td>
+                      <td style={{ padding: "8px 12px" }}>T{m.tier}</td>
+                      <td style={{ padding: "8px 12px" }}>{m.priority}</td>
+                      <td style={{ padding: "8px 12px" }}><span className={`badge ${m.health_status === 'healthy' ? 'badge-green' : m.health_status === 'degraded' ? 'badge-amber' : 'badge-red'}`}>{m.health_status}</span></td>
+                      <td style={{ padding: "8px 12px" }}>{m.failure_count}</td>
+                      <td style={{ padding: "8px 12px", fontSize: "0.68rem", color: "var(--text-muted)" }}>{m.last_health_check ? new Date(m.last_health_check).toLocaleString() : 'Never'}</td>
+                      <td style={{ padding: "8px 12px" }}>
+                        <button
+                          className={`btn btn-sm ${m.is_active ? 'btn-primary' : 'btn-ghost'}`}
+                          onClick={async () => {
+                            await fetch('/api/mgmt-x7k9/data', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ action: 'toggle_model', modelId: m.id, isActive: !m.is_active }),
+                            });
+                            fetchData();
+                          }}
+                        >
+                          {m.is_active ? '✅ Active' : '❌ Off'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* CONNECTOR DEFINITIONS TAB */}
+          {tab === "connector_defs" && data && (
+            <div className="card" style={{ padding: "var(--space-lg)", overflowX: "auto" }}>
+              <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
+                <h3 style={{ fontSize: "0.95rem", fontWeight: 700 }}>Connector Definitions ({(data.connectors || []).length})</h3>
+                <span className="badge badge-purple">DB-Driven</span>
+              </div>
+              <table style={{ width: "100%", fontSize: "0.78rem", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid var(--border)", textAlign: "left" }}>
+                    <th style={{ padding: "8px 12px" }}>ID</th>
+                    <th style={{ padding: "8px 12px" }}>Label</th>
+                    <th style={{ padding: "8px 12px" }}>Category</th>
+                    <th style={{ padding: "8px 12px" }}>Status</th>
+                    <th style={{ padding: "8px 12px" }}>Provider</th>
+                    <th style={{ padding: "8px 12px" }}>Active</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data.connectors || []).map((c: any) => (
+                    <tr key={c.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "8px 12px", fontFamily: "monospace", fontSize: "0.72rem" }}>{c.id}</td>
+                      <td style={{ padding: "8px 12px", fontWeight: 600 }}>{c.label}</td>
+                      <td style={{ padding: "8px 12px" }}><span className="badge badge-blue" style={{ fontSize: "0.65rem" }}>{c.category}</span></td>
+                      <td style={{ padding: "8px 12px" }}><span className={`badge ${c.status === 'available' ? 'badge-green' : c.status === 'coming_soon' ? 'badge-amber' : 'badge-purple'}`}>{c.status}</span></td>
+                      <td style={{ padding: "8px 12px", fontSize: "0.72rem", color: "var(--text-muted)" }}>{c.provider || '—'}</td>
+                      <td style={{ padding: "8px 12px" }}>
+                        <button
+                          className={`btn btn-sm ${c.is_active ? 'btn-primary' : 'btn-ghost'}`}
+                          onClick={async () => {
+                            await fetch('/api/mgmt-x7k9/data', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ action: 'toggle_connector', connectorId: c.id, isActive: !c.is_active }),
+                            });
+                            fetchData();
+                          }}
+                        >
+                          {c.is_active ? '✅ Active' : '❌ Off'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </>

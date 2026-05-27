@@ -7,7 +7,13 @@
 //   1. Automatically tries the next model in the chain
 //   2. Caches the working model for 1 hour
 //   3. After cache expires, retries the best model first
+//
+// DB Enhancement: Model chains can be loaded from the
+// `llm_models` table. Falls back to hardcoded MODEL_CHAINS
+// if the DB is unavailable or the table doesn't exist.
 // ============================================================
+
+import { createServiceClient } from '@/lib/supabase/server';
 
 interface LLMMessage {
   role: 'system' | 'user' | 'assistant';
@@ -29,8 +35,8 @@ interface LLMResponse {
 // When a model returns 404 or 429 (rate limit), we skip to the next one and cache the result.
 const MODEL_CHAINS: Record<string, Record<number, string[]>> = {
   anthropic: {
-    // Updated May 2026: claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5
-    1: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+    // Claude Sonnet = Priority 1 in Tier 1
+    1: ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5-20251001'],
     2: ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
     3: ['claude-haiku-4-5-20251001'],
   },
@@ -45,6 +51,78 @@ const MODEL_CHAINS: Record<string, Record<number, string[]>> = {
     3: ['gpt-4o-mini'],
   },
 };
+
+// ── DB-Driven Model Registry ──
+// Loads model chains from the `llm_models` table with 5-min in-memory cache.
+// Falls back to hardcoded MODEL_CHAINS if DB is unavailable.
+const DB_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+let dbModelCache: { chains: Record<string, Record<number, string[]>>; timestamp: number } | null = null;
+
+async function loadModelsFromDB(): Promise<Record<string, Record<number, string[]>> | null> {
+  // Return cached if fresh
+  if (dbModelCache && (Date.now() - dbModelCache.timestamp) < DB_CACHE_TTL_MS) {
+    return dbModelCache.chains;
+  }
+  try {
+    const supabase = createServiceClient();
+    const { data: rows, error } = await supabase
+      .from('llm_models')
+      .select('provider, model_name, tier, priority')
+      .eq('is_active', true)
+      .neq('health_status', 'down')
+      .order('tier', { ascending: true })
+      .order('priority', { ascending: true });
+    if (error || !rows?.length) return null;
+    const chains: Record<string, Record<number, string[]>> = {};
+    for (const row of rows) {
+      if (!chains[row.provider]) chains[row.provider] = {};
+      if (!chains[row.provider][row.tier]) chains[row.provider][row.tier] = [];
+      if (!chains[row.provider][row.tier].includes(row.model_name)) {
+        chains[row.provider][row.tier].push(row.model_name);
+      }
+    }
+    dbModelCache = { chains, timestamp: Date.now() };
+    return chains;
+  } catch {
+    return null; // DB unavailable — use hardcoded
+  }
+}
+
+/** Get model chain for a provider+tier. DB first, hardcoded fallback. */
+export async function getModelChain(provider: string, tier: number): Promise<string[]> {
+  const dbChains = await loadModelsFromDB();
+  if (dbChains?.[provider]?.[tier]?.length) return dbChains[provider][tier];
+  return MODEL_CHAINS[provider]?.[tier] || MODEL_CHAINS[provider]?.[3] || [];
+}
+
+/** Report a model failure to the DB for health tracking. Fire-and-forget. */
+export async function reportModelFailure(provider: string, modelName: string): Promise<void> {
+  try {
+    const supabase = createServiceClient();
+    // Increment failure_count
+    const { data: rows } = await supabase
+      .from('llm_models')
+      .select('id, failure_count')
+      .eq('provider', provider)
+      .eq('model_name', modelName);
+    if (rows?.length) {
+      const newCount = (rows[0].failure_count || 0) + 1;
+      const newStatus = newCount >= 3 ? 'down' : 'degraded';
+      await supabase
+        .from('llm_models')
+        .update({ failure_count: newCount, health_status: newStatus, last_health_check: new Date().toISOString() })
+        .eq('provider', provider)
+        .eq('model_name', modelName);
+      if (newStatus === 'down') {
+        console.error(`[LLM] Model ${provider}/${modelName} marked DOWN after ${newCount} failures`);
+        // Invalidate cache so next call picks up the change
+        dbModelCache = null;
+      }
+    }
+  } catch {
+    // Fire-and-forget — don't break the LLM call
+  }
+}
 
 // ── Model Health Cache ──
 // Remembers which model worked for each provider+tier combo.
@@ -66,6 +144,7 @@ function getCachedModel(provider: string, tier: number): string | null {
 function setCachedModel(provider: string, tier: number, model: string): void {
   modelHealthCache.set(`${provider}:${tier}`, { model, timestamp: Date.now() });
 }
+
 
 // ── Credit cost mapping based on actual model used ──
 // This ensures billing matches the ACTUAL model, not the requested tier.
@@ -171,7 +250,7 @@ export async function callLLM(
 
 // ── Anthropic with Fallback Chain ──
 async function callAnthropicWithFallback(messages: LLMMessage[], temperature: number, tier: number, jsonMode: boolean, maxTokens: number): Promise<LLMResponse> {
-  const chain = MODEL_CHAINS.anthropic[tier] || MODEL_CHAINS.anthropic[3];
+  const chain = await getModelChain('anthropic', tier);
   const cachedModel = getCachedModel('anthropic', tier);
   
   // Reorder chain: put cached model first if it exists
@@ -209,7 +288,7 @@ async function callAnthropicWithFallback(messages: LLMMessage[], temperature: nu
 
 // ── Gemini with Fallback Chain ──
 async function callGeminiWithFallback(messages: LLMMessage[], temperature: number, jsonMode: boolean, tier: number, maxTokens: number): Promise<LLMResponse> {
-  const chain = MODEL_CHAINS.gemini[tier] || MODEL_CHAINS.gemini[3];
+  const chain = await getModelChain('gemini', tier);
   const cachedModel = getCachedModel('gemini', tier);
   
   const modelsToTry = cachedModel 
@@ -243,7 +322,7 @@ async function callGeminiWithFallback(messages: LLMMessage[], temperature: numbe
 
 // ── OpenAI with Fallback Chain ──
 async function callOpenAIWithFallback(messages: LLMMessage[], temperature: number, jsonMode: boolean, tier: number, maxTokens: number): Promise<LLMResponse> {
-  const chain = MODEL_CHAINS.openai[tier] || MODEL_CHAINS.openai[3];
+  const chain = await getModelChain('openai', tier);
   const cachedModel = getCachedModel('openai', tier);
   
   const modelsToTry = cachedModel 

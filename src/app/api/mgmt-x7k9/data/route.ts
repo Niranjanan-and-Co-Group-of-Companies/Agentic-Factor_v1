@@ -98,6 +98,27 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ missions });
     }
 
+    case 'models': {
+      // Get LLM models from registry
+      const { data } = await supabase
+        .from('llm_models')
+        .select('id, provider, model_name, display_name, tier, priority, is_active, health_status, failure_count, last_health_check')
+        .order('tier', { ascending: true })
+        .order('priority', { ascending: true });
+
+      return NextResponse.json({ models: data || [] });
+    }
+
+    case 'connector_defs': {
+      // Get connector definitions from DB
+      const { data } = await supabase
+        .from('connector_definitions')
+        .select('id, label, description, category, status, provider, is_active, sort_order')
+        .order('sort_order', { ascending: true });
+
+      return NextResponse.json({ connectors: data || [] });
+    }
+
     default:
       return NextResponse.json({ error: 'Invalid view' }, { status: 400 });
   }
@@ -161,6 +182,24 @@ export async function POST(request: NextRequest) {
         })
         .eq('tenant_id', tenantId);
 
+      return NextResponse.json({ success: true });
+    }
+
+    case 'toggle_model': {
+      const { modelId, isActive } = params;
+      await supabase
+        .from('llm_models')
+        .update({ is_active: isActive, updated_at: new Date().toISOString() })
+        .eq('id', modelId);
+      return NextResponse.json({ success: true });
+    }
+
+    case 'toggle_connector': {
+      const { connectorId, isActive: connActive } = params;
+      await supabase
+        .from('connector_definitions')
+        .update({ is_active: connActive, updated_at: new Date().toISOString() })
+        .eq('id', connectorId);
       return NextResponse.json({ success: true });
     }
 

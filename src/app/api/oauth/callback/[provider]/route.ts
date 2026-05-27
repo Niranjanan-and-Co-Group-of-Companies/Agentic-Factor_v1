@@ -264,6 +264,39 @@ export async function GET(
       console.error(`[OAuth ${provider}] ❌ No tenantId in state parameter! Cannot store token.`);
     }
 
+    // ── Notify customer if any missions were waiting for this connector ──
+    if (tenantId) {
+      try {
+        const { data: waitingMissions } = await supabase
+          .from('missions')
+          .select('id, mission_json, tenant_id')
+          .eq('tenant_id', tenantId)
+          .in('status', ['pending', 'failed', 'paused']);
+
+        if (waitingMissions?.length) {
+          for (const m of waitingMissions) {
+            const agents = m.mission_json?.agents || [];
+            const needsProvider = agents.some((a: any) => 
+              a.connectors?.includes(provider) || 
+              a.connectors?.includes(provider.replace('_oidc', ''))
+            );
+            if (needsProvider) {
+              // Log a connector.ready event for this mission
+              await supabase.from('events').insert({
+                tenant_id: tenantId,
+                event_type: 'connector.ready',
+                entity_type: 'mission',
+                entity_id: m.id,
+                payload: { provider, missionTitle: m.mission_json?.title },
+              });
+              console.log(`[OAuth] Mission "${m.mission_json?.title}" can now use ${provider}`);
+            }
+          }
+        }
+      } catch (notifyErr) {
+        console.warn('[OAuth] Mission notification check failed (non-fatal):', notifyErr);
+      }
+    }
     // ── Smart redirect: popup-aware ──
     // If opened as a popup from mission page, send postMessage and close.
     // If opened directly (e.g., from connectors page), redirect normally.
