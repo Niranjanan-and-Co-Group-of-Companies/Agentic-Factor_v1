@@ -194,7 +194,7 @@ export async function listAdmins(): Promise<any[]> {
 }
 
 /**
- * Change admin password.
+ * Change admin password by ID.
  */
 export async function changePassword(adminId: string, newPassword: string): Promise<void> {
   const supabase = createServiceClient();
@@ -203,4 +203,35 @@ export async function changePassword(adminId: string, newPassword: string): Prom
     .from('admin_users')
     .update({ password_hash: hash })
     .eq('id', adminId);
+}
+
+/**
+ * Verify admin password without sending OTP (for password reset flow).
+ */
+export async function verifyAdmin(email: string, password: string): Promise<boolean> {
+  const supabase = createServiceClient();
+  const { data: admin } = await supabase
+    .from('admin_users')
+    .select('id, password_hash')
+    .eq('email', email.toLowerCase().trim())
+    .single();
+
+  if (!admin) return false;
+  return bcrypt.compare(password, admin.password_hash);
+}
+
+/**
+ * Update admin password by email.
+ */
+export async function updateAdminPassword(email: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = createServiceClient();
+  const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+
+  const { error } = await supabase
+    .from('admin_users')
+    .update({ password_hash: hash, updated_at: new Date().toISOString() })
+    .eq('email', email.toLowerCase().trim());
+
+  if (error) return { success: false, error: error.message };
+  return { success: true };
 }

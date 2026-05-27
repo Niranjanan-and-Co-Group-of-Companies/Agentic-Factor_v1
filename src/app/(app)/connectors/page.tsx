@@ -119,13 +119,38 @@ export default function ConnectorsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [requestSending, setRequestSending] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [connectorDefs, setConnectorDefs] = useState<ConnectorDef[]>(CONNECTORS);
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 4000);
   };
 
-  useEffect(() => { checkConnectionStatus(); }, []);
+  useEffect(() => { loadConnectors(); checkConnectionStatus(); }, []);
+
+  // ── Load connectors from DB, fallback to hardcoded ──
+  const loadConnectors = async () => {
+    try {
+      const res = await fetch('/api/connectors/definitions');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.connectors?.length) {
+          setConnectorDefs(data.connectors.map((c: any) => ({
+            id: c.id,
+            label: c.label,
+            icon: c.icon_svg || '',
+            description: c.description || '',
+            category: c.category as ConnectorCategory,
+            status: c.status as ConnectorStatus,
+            provider: c.provider || undefined,
+            scopes: c.scopes || undefined,
+          })));
+        }
+      }
+    } catch {
+      // Fallback to hardcoded — already set as default
+    }
+  };
 
   const checkConnectionStatus = async () => {
     const supabase = getSupabase();
@@ -168,7 +193,7 @@ export default function ConnectorsPage() {
 
   // ── Filtered connectors ──
   const filtered = useMemo(() => {
-    let list = CONNECTORS.map(c => ({
+    let list = connectorDefs.map(c => ({
       ...c,
       status: connectedProviders.has(c.provider || "") ? "connected" as ConnectorStatus : c.status,
     }));
@@ -185,7 +210,7 @@ export default function ConnectorsPage() {
     const order: Record<ConnectorStatus, number> = { connected: 0, available: 1, coming_soon: 2, request_access: 3 };
     list.sort((a, b) => order[a.status] - order[b.status]);
     return list;
-  }, [search, category, connectedProviders]);
+  }, [search, category, connectedProviders, connectorDefs]);
 
   // Map from connector ID to the OAuth route name (most are the same)
   const OAUTH_ROUTE_MAP: Record<string, string> = {

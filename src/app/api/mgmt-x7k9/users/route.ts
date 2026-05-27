@@ -63,3 +63,35 @@ export async function DELETE(request: NextRequest) {
 
   return NextResponse.json({ success: true });
 }
+
+// PATCH — Reset admin password
+export async function PATCH(request: NextRequest) {
+  const auth = await requireAdmin();
+  if (!auth.ok || !auth.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { action, currentPassword, newPassword } = await request.json();
+
+  if (action !== 'reset_password') {
+    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+  }
+
+  if (!currentPassword || !newPassword || newPassword.length < 8) {
+    return NextResponse.json({ error: 'Current password and new password (min 8 chars) required' }, { status: 400 });
+  }
+
+  const { verifyAdmin, updateAdminPassword } = await import('@/lib/services/admin-auth');
+  
+  // Verify current password
+  const verified = await verifyAdmin(auth.email, currentPassword);
+  if (!verified) {
+    return NextResponse.json({ error: 'Current password is incorrect' }, { status: 403 });
+  }
+
+  // Update password
+  const result = await updateAdminPassword(auth.email, newPassword);
+  if (!result.success) {
+    return NextResponse.json({ error: result.error }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true, message: 'Password updated successfully' });
+}

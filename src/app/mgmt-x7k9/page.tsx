@@ -23,6 +23,17 @@ export default function AdminPage() {
   const [adminActionLoading, setAdminActionLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Add Model/Connector modals
+  const [showAddModel, setShowAddModel] = useState(false);
+  const [showAddConnector, setShowAddConnector] = useState(false);
+  const [newModel, setNewModel] = useState({ provider: 'anthropic', model_name: '', display_name: '', tier: 2, priority: 1 });
+  const [newConnector, setNewConnector] = useState({ id: '', label: '', description: '', category: 'productivity', status: 'request_access', provider: '' });
+
+  // Password reset
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+
   useEffect(() => { checkAuth(); }, []);
   useEffect(() => { if (authenticated) fetchData(); }, [authenticated, tab]);
 
@@ -100,6 +111,71 @@ export default function AdminPage() {
     setTimeout(() => setToast(null), 4000);
   };
 
+  const handleAddModel = async () => {
+    if (!newModel.model_name || !newModel.display_name) return;
+    setAdminActionLoading(true);
+    const res = await fetch('/api/mgmt-x7k9/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'add_model', ...newModel }),
+    });
+    setAdminActionLoading(false);
+    if (res.ok) {
+      setToast('✅ Model added');
+      setNewModel({ provider: 'anthropic', model_name: '', display_name: '', tier: 2, priority: 1 });
+      setShowAddModel(false);
+      fetchData();
+    } else {
+      const d = await res.json();
+      setToast(`❌ ${d.error}`);
+    }
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const handleAddConnector = async () => {
+    if (!newConnector.id || !newConnector.label) return;
+    setAdminActionLoading(true);
+    const res = await fetch('/api/mgmt-x7k9/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'add_connector', ...newConnector }),
+    });
+    setAdminActionLoading(false);
+    if (res.ok) {
+      setToast('✅ Connector added');
+      setNewConnector({ id: '', label: '', description: '', category: 'productivity', status: 'request_access', provider: '' });
+      setShowAddConnector(false);
+      fetchData();
+    } else {
+      const d = await res.json();
+      setToast(`❌ ${d.error}`);
+    }
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const handlePasswordReset = async () => {
+    if (!currentPassword || !newPw || newPw !== confirmPw || newPw.length < 8) {
+      setToast('❌ Passwords must match and be at least 8 characters');
+      setTimeout(() => setToast(null), 4000);
+      return;
+    }
+    setAdminActionLoading(true);
+    const res = await fetch('/api/mgmt-x7k9/users', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reset_password', currentPassword, newPassword: newPw }),
+    });
+    setAdminActionLoading(false);
+    const d = await res.json();
+    if (res.ok) {
+      setToast('✅ Password updated');
+      setCurrentPassword(''); setNewPw(''); setConfirmPw('');
+    } else {
+      setToast(`❌ ${d.error}`);
+    }
+    setTimeout(() => setToast(null), 4000);
+  };
+
   const handleLogout = async () => {
     await fetch("/api/mgmt-x7k9/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) });
     window.location.href = "/mgmt-x7k9/login";
@@ -126,7 +202,7 @@ export default function AdminPage() {
             <p className="page-subtitle">Logged in as {adminEmail}</p>
           </div>
           <div className="row" style={{ gap: "var(--space-sm)" }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => { setShowAddAdmin(true); fetchAdmins(); }}>👤 Manage Admins</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setShowAddAdmin(true); fetchAdmins(); }}>👤 Admins</button>
             <button className="btn btn-ghost btn-sm" onClick={handleLogout}>Logout</button>
           </div>
         </div>
@@ -278,7 +354,8 @@ export default function AdminPage() {
             <div className="card" style={{ padding: "var(--space-lg)", overflowX: "auto" }}>
               <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
                 <h3 style={{ fontSize: "0.95rem", fontWeight: 700 }}>LLM Model Registry ({(data.models || []).length})</h3>
-                <span className="badge badge-blue">Self-Healing Enabled</span>
+                <span className="badge badge-blue">Self-Healing</span>
+                <button className="btn btn-primary btn-sm" onClick={() => setShowAddModel(true)}>+ Add Model</button>
               </div>
               <table style={{ width: "100%", fontSize: "0.78rem", borderCollapse: "collapse" }}>
                 <thead>
@@ -331,6 +408,7 @@ export default function AdminPage() {
               <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
                 <h3 style={{ fontSize: "0.95rem", fontWeight: 700 }}>Connector Definitions ({(data.connectors || []).length})</h3>
                 <span className="badge badge-purple">DB-Driven</span>
+                <button className="btn btn-primary btn-sm" onClick={() => setShowAddConnector(true)}>+ Add Connector</button>
               </div>
               <table style={{ width: "100%", fontSize: "0.78rem", borderCollapse: "collapse" }}>
                 <thead>
@@ -424,6 +502,17 @@ export default function AdminPage() {
             <div style={{ marginTop: "var(--space-lg)", textAlign: "right" }}>
               <button className="btn btn-ghost" onClick={() => setShowAddAdmin(false)}>Close</button>
             </div>
+
+            {/* Password Reset */}
+            <div style={{ marginTop: "var(--space-lg)", padding: "var(--space-md)", background: "var(--bg-glass)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+              <h4 style={{ fontSize: "0.88rem", fontWeight: 600, marginBottom: "var(--space-md)" }}>🔒 Change Your Password</h4>
+              <input type="password" placeholder="Current password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }} />
+              <input type="password" placeholder="New password (min 8 chars)" value={newPw} onChange={e => setNewPw(e.target.value)} style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }} />
+              <input type="password" placeholder="Confirm new password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-md)" }} />
+              <button className="btn btn-primary btn-sm" onClick={handlePasswordReset} disabled={adminActionLoading || !currentPassword || newPw.length < 8 || newPw !== confirmPw}>
+                {adminActionLoading ? "Updating..." : "🔒 Update Password"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -432,6 +521,77 @@ export default function AdminPage() {
       {toast && (
         <div style={{ position: "fixed", bottom: 24, right: 24, background: "var(--bg-card)", border: "1px solid var(--border)", padding: "12px 20px", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.3)", fontSize: "0.85rem", zIndex: 10000 }}>
           {toast}
+        </div>
+      )}
+
+      {/* ADD MODEL MODAL */}
+      {showAddModel && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} onClick={() => setShowAddModel(false)}>
+          <div className="card" style={{ maxWidth: 500, width: "90%", padding: "var(--space-xl)" }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "var(--space-lg)" }}>🧠 Add LLM Model</h3>
+            <select value={newModel.provider} onChange={e => setNewModel({...newModel, provider: e.target.value})} style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }}>
+              <option value="anthropic">Anthropic (Claude)</option>
+              <option value="google">Google (Gemini)</option>
+              <option value="openai">OpenAI (GPT)</option>
+            </select>
+            <input placeholder="Model name (e.g. claude-sonnet-4-6)" value={newModel.model_name} onChange={e => setNewModel({...newModel, model_name: e.target.value})} style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }} />
+            <input placeholder="Display name (e.g. Claude Sonnet 4)" value={newModel.display_name} onChange={e => setNewModel({...newModel, display_name: e.target.value})} style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }} />
+            <div className="row" style={{ gap: "var(--space-sm)", marginBottom: "var(--space-md)" }}>
+              <select value={newModel.tier} onChange={e => setNewModel({...newModel, tier: Number(e.target.value)})} style={{ flex: 1, padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem" }}>
+                <option value={1}>Tier 1 (Best)</option>
+                <option value={2}>Tier 2 (Good)</option>
+                <option value={3}>Tier 3 (Cheapest)</option>
+              </select>
+              <input type="number" placeholder="Priority" value={newModel.priority} onChange={e => setNewModel({...newModel, priority: Number(e.target.value)})} min={1} max={10} style={{ width: 80, padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem" }} />
+            </div>
+            <div className="row" style={{ gap: "var(--space-sm)", justifyContent: "flex-end" }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowAddModel(false)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" onClick={handleAddModel} disabled={adminActionLoading || !newModel.model_name || !newModel.display_name}>
+                {adminActionLoading ? "Adding..." : "➕ Add Model"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADD CONNECTOR MODAL */}
+      {showAddConnector && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} onClick={() => setShowAddConnector(false)}>
+          <div className="card" style={{ maxWidth: 500, width: "90%", padding: "var(--space-xl)" }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "var(--space-lg)" }}>⚙️ Add Connector</h3>
+            <input placeholder="ID slug (e.g. freshdesk)" value={newConnector.id} onChange={e => setNewConnector({...newConnector, id: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '')})} style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }} />
+            <input placeholder="Display label (e.g. Freshdesk)" value={newConnector.label} onChange={e => setNewConnector({...newConnector, label: e.target.value})} style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }} />
+            <input placeholder="Description" value={newConnector.description} onChange={e => setNewConnector({...newConnector, description: e.target.value})} style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }} />
+            <div className="row" style={{ gap: "var(--space-sm)", marginBottom: "var(--space-sm)" }}>
+              <select value={newConnector.category} onChange={e => setNewConnector({...newConnector, category: e.target.value})} style={{ flex: 1, padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem" }}>
+                <option value="communication">Communication</option>
+                <option value="crm">CRM</option>
+                <option value="devtools">Dev Tools</option>
+                <option value="productivity">Productivity</option>
+                <option value="social">Social</option>
+                <option value="payments">Payments</option>
+                <option value="ecommerce">E-Commerce</option>
+                <option value="cloud">Cloud</option>
+                <option value="analytics">Analytics</option>
+                <option value="ai">AI / ML</option>
+                <option value="storage">Storage</option>
+                <option value="marketing">Marketing</option>
+                <option value="hr">HR</option>
+              </select>
+              <select value={newConnector.status} onChange={e => setNewConnector({...newConnector, status: e.target.value})} style={{ flex: 1, padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem" }}>
+                <option value="available">Available</option>
+                <option value="coming_soon">Coming Soon</option>
+                <option value="request_access">Request Access</option>
+              </select>
+            </div>
+            <input placeholder="OAuth provider (optional, e.g. github)" value={newConnector.provider} onChange={e => setNewConnector({...newConnector, provider: e.target.value})} style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-md)" }} />
+            <div className="row" style={{ gap: "var(--space-sm)", justifyContent: "flex-end" }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowAddConnector(false)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" onClick={handleAddConnector} disabled={adminActionLoading || !newConnector.id || !newConnector.label}>
+                {adminActionLoading ? "Adding..." : "➕ Add Connector"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

@@ -203,6 +203,43 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
+    case 'add_model': {
+      const { provider, model_name, display_name, tier, priority } = params;
+      if (!provider || !model_name || !display_name) {
+        return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      }
+      const { error: insertErr } = await supabase.from('llm_models').insert({
+        provider,
+        model_name,
+        display_name,
+        tier: tier || 2,
+        priority: priority || 1,
+        is_active: true,
+        health_status: 'healthy',
+      });
+      if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 400 });
+      return NextResponse.json({ success: true });
+    }
+
+    case 'add_connector': {
+      const { id: connId, label: connLabel, description: connDesc, category: connCat, status: connStatus, provider: connProvider } = params;
+      if (!connId || !connLabel) {
+        return NextResponse.json({ error: 'Missing required fields (id, label)' }, { status: 400 });
+      }
+      const { error: connInsertErr } = await supabase.from('connector_definitions').insert({
+        id: connId,
+        label: connLabel,
+        description: connDesc || '',
+        category: connCat || 'productivity',
+        status: connStatus || 'request_access',
+        provider: connProvider || null,
+        is_active: true,
+        sort_order: 100,
+      });
+      if (connInsertErr) return NextResponse.json({ error: connInsertErr.message }, { status: 400 });
+      return NextResponse.json({ success: true });
+    }
+
     default:
       return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   }
