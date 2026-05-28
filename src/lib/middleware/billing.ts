@@ -30,15 +30,16 @@ const PLAN_DEFAULTS: Record<string, PlanConfig> = {
   enterprise: { credits: 99999, maxActiveMissions: 99999, modelTier: 'custom', maxStorageMb: 1_048_576, governance: 'full_audit',    isTrial: false, maxClarifications: 10, maxFanOutRoles: 99999, schedulingEnabled: true },
 };
 
-// Credit costs per action type
+// Credit costs per action type (4X markup on raw LLM costs)
+// These are what CUSTOMERS pay. Internal tracking uses calculateRealCostUsd.
 export const CREDIT_COSTS = {
-  llm_call_flash: 1,     // Claude Haiku, Gemini Flash, GPT-4o-mini
-  llm_call_pro: 3,       // Claude Sonnet, Gemini 2.5 Flash, GPT-4o
-  llm_call_premium: 5,   // Claude Opus, Gemini Pro
-  code_execution: 2,     // E2B sandbox run
-  embedding: 0.5,        // Embedding generation
-  ingest_chunk: 0.1,     // RAG document chunk
-  schedule_daily: 1,     // Per scheduled mission per day (cron maintenance)
+  llm_call_flash: 4,      // Claude Haiku, Gemini Flash, GPT-4o-mini (was 1)
+  llm_call_pro: 12,       // Claude Sonnet, Gemini 2.5 Flash, GPT-4o (was 3)
+  llm_call_premium: 20,   // Claude Opus, Gemini Pro (was 5)
+  code_execution: 8,      // E2B sandbox run (was 2)
+  embedding: 2,           // Embedding generation (was 0.5)
+  ingest_chunk: 0.4,      // RAG document chunk (was 0.1)
+  schedule_daily: 4,      // Per scheduled mission per day (was 1)
 } as const;
 
 // ── Token-Based Billing: Real Cost per 1K tokens (USD) ──

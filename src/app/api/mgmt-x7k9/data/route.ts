@@ -240,6 +240,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
+    case 'edit_model': {
+      const { modelId: editModelId, provider: editProvider, model_name: editModelName, display_name: editDisplayName, tier: editTier, priority: editPriority } = params;
+      if (!editModelId) return NextResponse.json({ error: 'modelId required' }, { status: 400 });
+      const updateData: any = { updated_at: new Date().toISOString() };
+      if (editProvider) updateData.provider = editProvider;
+      if (editModelName) updateData.model_name = editModelName;
+      if (editDisplayName) updateData.display_name = editDisplayName;
+      if (editTier !== undefined) updateData.tier = editTier;
+      if (editPriority !== undefined) updateData.priority = editPriority;
+      const { error: editModelErr } = await supabase.from('llm_models').update(updateData).eq('id', editModelId);
+      if (editModelErr) return NextResponse.json({ error: editModelErr.message }, { status: 400 });
+      return NextResponse.json({ success: true });
+    }
+
+    case 'edit_connector': {
+      const { connectorId: editConnId, label: editLabel, description: editDesc, category: editCat, status: editStatus, provider: editConnProvider } = params;
+      if (!editConnId) return NextResponse.json({ error: 'connectorId required' }, { status: 400 });
+      const connUpdate: any = { updated_at: new Date().toISOString() };
+      if (editLabel) connUpdate.label = editLabel;
+      if (editDesc !== undefined) connUpdate.description = editDesc;
+      if (editCat) connUpdate.category = editCat;
+      if (editStatus) connUpdate.status = editStatus;
+      if (editConnProvider !== undefined) connUpdate.provider = editConnProvider;
+      const { error: editConnErr } = await supabase.from('connector_definitions').update(connUpdate).eq('id', editConnId);
+      if (editConnErr) return NextResponse.json({ error: editConnErr.message }, { status: 400 });
+      return NextResponse.json({ success: true });
+    }
+
     default:
       return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   }

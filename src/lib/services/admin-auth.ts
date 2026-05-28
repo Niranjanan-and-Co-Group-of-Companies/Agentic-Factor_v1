@@ -229,7 +229,7 @@ export async function updateAdminPassword(email: string, newPassword: string): P
 
   const { error } = await supabase
     .from('admin_users')
-    .update({ password_hash: hash, updated_at: new Date().toISOString() })
+    .update({ password_hash: hash })
     .eq('email', email.toLowerCase().trim());
 
   if (error) return { success: false, error: error.message };

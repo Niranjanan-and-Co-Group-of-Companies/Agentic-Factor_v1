@@ -156,18 +156,75 @@ You are the final agent in this mission. Your final JSON output MUST structurall
 ${expectedOutputFormat}
 Do NOT output literal data from the sample if it doesn't make sense, but you MUST follow its JSON schema, keys, and structure exactly.` : ''}
 
+==== AGENTICFACTOR SDK (PRE-INSTALLED) ====
+The \`agenticfactor\` Python SDK is pre-installed and provides tested, reliable wrappers for all connected APIs.
+**USE THIS SDK instead of writing raw HTTP requests.** It handles authentication, retries, and error handling automatically.
+
+AVAILABLE MODULES:
+  from agenticfactor import gmail, calendar, drive, sheets, search, files, api
+  from agenticfactor._core import ask_user, notify_user, schedule_check
+
+  # GMAIL — Send, read, search emails
+  gmail.send(to="user@email.com", subject="Subject", body="Body text", cc="cc@email.com", html=False)
+  gmail.search(query="from:hr@company.com has:attachment", max_results=10)
+  gmail.read(message_id="...")  # Returns {from, to, subject, body, attachments}
+  gmail.draft(to="...", subject="...", body="...")
+  gmail.download_attachment(message_id, attachment_id)  # Returns bytes
+
+  # GOOGLE CALENDAR — Events and free slots
+  calendar.list_events(start="2024-06-01", end="2024-06-30")
+  calendar.create_event(summary="Meeting", start="2024-06-15T10:00:00", end="2024-06-15T11:00:00", attendees=["a@b.com"], send_notifications=True)
+  calendar.update_event(event_id, summary="Updated Title")
+  calendar.find_free_slots(duration_minutes=45, range_days=14, calendars=["primary"], count=5)
+
+  # GOOGLE DRIVE — File management
+  drive.list_files(query="report", file_type="pdf")
+  drive.read_file(file_id)  # Returns text content
+  drive.upload_file(name="report.txt", content="...", mime_type="text/plain")
+  drive.share_file(file_id, email="user@email.com", role="reader")
+
+  # GOOGLE SHEETS — Spreadsheet management
+  sheets.create(title="Candidates", data=[["Name", "Score"], ["Alice", 95]], share_with=["hr@company.com"])
+  sheets.read(spreadsheet_id, range_name="Sheet1!A1:Z100")
+  sheets.update(spreadsheet_id, range_name="Sheet1!A1", data=[["Updated"]])
+  sheets.append_rows(spreadsheet_id, data=[["New Row", 123]])
+
+  # WEB SEARCH — Search the internet
+  search.web_search(query="best recruitment platforms 2024", max_results=5)
+  search.news_search(query="tech layoffs", max_results=5)
+
+  # FILE PARSING — Read documents
+  files.parse_pdf(file_path_or_bytes)  # Returns extracted text
+  files.parse_docx(file_path_or_bytes)
+  files.parse_csv(file_path_or_bytes)  # Returns 2D list
+  files.parse_excel(file_path_or_bytes)
+
+  # UNIVERSAL API — Call ANY connector with OAuth token
+  api.call(provider="salesforce", method="GET", endpoint="/services/data/v58.0/query", params={"q": "SELECT Id FROM Lead"})
+  api.call(provider="hubspot", method="GET", endpoint="/crm/v3/objects/contacts")
+  api.linkedin_post(content="Exciting news!")
+  api.slack_send(channel="#general", text="Hello team!")
+  api.github_create_issue(owner="org", repo="repo", title="Bug", body="Details")
+  api.notion_create_page(parent_id="...", title="New Page", content="...")
+
+  # INTERACTIVE — Pause and ask user, or schedule future checks
+  ask_user(question="What budget should I use?", options=["$500", "$1000", "$2000"])
+  notify_user(message="Job posting has been published to LinkedIn", email=True)
+  schedule_check(delay="3d", context={"posted_to": "linkedin"}, reason="Check application count")
+
 INSTRUCTIONS:
 1. Write a complete, self-contained Python script to accomplish this task.
 2. The script MUST print the final output as a valid JSON string to standard output (stdout).
 3. Do NOT print anything else to stdout. Use sys.stderr.write() for any debugging or logs.
-4. If you need to authenticate with APIs, the following OAuth access tokens are available as environment variables: ${envKeys || 'None'}
-   (e.g., use os.environ.get("GOOGLE_ACCESS_TOKEN"))
-5. **CRITICAL STRICT RULE**: NEVER output simulated, mocked, or placeholder data. You MUST execute the real API requests using the provided credentials and real logic. If you output mock data, the entire mission will fail.
-6. Enclose your Python code inside a triple-backtick block with 'python' as the language identifier.
-7. **WARNING ON WEB SCRAPING**: If you use \`requests\` to fetch generic web pages or news sites, remember they return HTML! Do NOT call \`.json()\` on the response unless you are querying a dedicated JSON API. Use BeautifulSoup to parse HTML.
-8. **DO NOT CATCH FATAL ERRORS**: If your script fails or encounters an exception, DO NOT catch it and print it as JSON to stdout! Let the script crash naturally. The orchestrator will catch the traceback and allow you to fix your code in the next attempt.
-9. **DEPENDENCY MANAGEMENT**: Common packages (requests, beautifulsoup4, openai, etc.) are PRE-INSTALLED in the execution sandbox. You can import them directly without installing. If you need a rare/uncommon package that is NOT pre-installed, install it silently: \`subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "package_name"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\` — you MUST redirect to DEVNULL to prevent pip output from polluting your JSON stdout.
-10. **READING INPUT FROM PREVIOUS AGENTS**: If this agent receives data from a previous step, it is available via the environment variable \`INPUT_CONTEXT\`. Read it like this: \`input_data = json.loads(os.environ.get('INPUT_CONTEXT', '{}'))\`. Do NOT use sys.stdin.read(). Do NOT read from files. The \`_input\` variable is also pre-set with the raw string value of INPUT_CONTEXT for convenience.`;
+4. **USE THE agenticfactor SDK** for all API interactions. It handles OAuth tokens automatically.
+5. If the SDK doesn't have a specific wrapper, use \`api.call(provider, method, endpoint)\` for any connector.
+6. OAuth tokens are also available as environment variables if needed: ${envKeys || 'None'}
+7. **CRITICAL STRICT RULE**: NEVER output simulated, mocked, or placeholder data. You MUST execute real API requests using the SDK.
+8. Enclose your Python code inside a triple-backtick block with 'python' as the language identifier.
+9. **DO NOT CATCH FATAL ERRORS**: Let the script crash naturally on errors.
+10. **READING INPUT**: Previous agent data is in \`_input_data\` (parsed JSON dict) and \`_input\` (raw string).
+11. If you need to ask the user something, use \`ask_user()\`. The script will pause and resume when user responds.`;
+
 
       const response = await callLLM(
         [{ role: 'system', content: systemPrompt }], 
@@ -175,8 +232,9 @@ INSTRUCTIONS:
       );
 
       // ── Deduct LLM credit based on actual model used ──
+      // Always deduct — even if later E2B execution fails, we still paid the LLM provider
       try {
-        const { deductCredits } = await import('@/lib/middleware/billing');
+        const { deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
         const { getModelCreditCost } = await import('@/lib/services/llm-router');
         const llmCost = getModelCreditCost(response.model);
         await deductCredits(tenantId, llmCost, `llm_${response.provider}:${response.model}:${agent.role}`, {
@@ -188,7 +246,6 @@ INSTRUCTIONS:
         console.log(`[Agent ${agent.id}] LLM credit: ${llmCost} (model: ${response.model}, tokens: ${response.tokensUsed})`);
       } catch (creditErr) {
         console.warn(`[Agent ${agent.id}] LLM credit deduction failed:`, creditErr);
-        // Don't throw here — we already got the code, let the execution proceed
       }
       
       // More flexible regex: handles ```python, ``` python, and variations
@@ -216,6 +273,10 @@ INSTRUCTIONS:
         const envKey = `${token.provider.toUpperCase()}_ACCESS_TOKEN`;
         sandboxEnvs[envKey] = token.access_token;
       }
+      // Inject API keys for search and other services
+      if (process.env.TAVILY_API_KEY) sandboxEnvs['TAVILY_API_KEY'] = process.env.TAVILY_API_KEY;
+      if (process.env.SERPAPI_KEY) sandboxEnvs['SERPAPI_KEY'] = process.env.SERPAPI_KEY;
+      if (process.env.SENDGRID_API_KEY) sandboxEnvs['SENDGRID_API_KEY'] = process.env.SENDGRID_API_KEY;
 
       // Prepend import of input context from env — available as `_input` (raw string) and `_input_data` (parsed JSON)
       const wrappedCode = `import os, sys, json
@@ -241,11 +302,27 @@ ${pythonCode}`;
       });
 
       try {
-        // Install common packages (suppress all output to prevent stdout pollution)
+        // Install common packages + agenticfactor SDK (suppress all output to prevent stdout pollution)
         await sandbox.runCode(
-          'import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "requests", "beautifulsoup4", "google-api-python-client", "google-auth-oauthlib", "openai", "anthropic", "matplotlib", "pandas", "numpy", "openpyxl", "python-docx", "python-pptx"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)',
+          'import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "requests", "beautifulsoup4", "google-api-python-client", "google-auth-oauthlib", "openai", "anthropic", "matplotlib", "pandas", "numpy", "openpyxl", "python-docx", "python-pptx", "PyPDF2"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)',
           { envs: sandboxEnvs }
         );
+
+        // Install agenticfactor SDK by writing files into the sandbox
+        const sdkPath = require('path').join(process.cwd(), 'src/lib/sandbox/agenticfactor');
+        const fs = require('fs');
+        const sdkFiles = ['__init__.py', '_core.py', 'gmail.py', 'calendar.py', 'drive.py', 'sheets.py', 'api.py', 'search.py', 'files.py'];
+        for (const sdkFile of sdkFiles) {
+          const filePath = require('path').join(sdkPath, sdkFile);
+          try {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            await sandbox.files.write(`/home/user/agenticfactor/${sdkFile}`, content);
+          } catch (e) {
+            console.warn(`[Agent ${agent.id}] SDK file ${sdkFile} not found, skipping`);
+          }
+        }
+        // Add SDK to Python path
+        await sandbox.runCode('import sys; sys.path.insert(0, "/home/user")', { envs: sandboxEnvs });
 
         // Execute the agent's Python script
         const execution = await sandbox.runCode(wrappedCode, { envs: sandboxEnvs });
@@ -261,13 +338,89 @@ ${pythonCode}`;
           console.warn(`[Agent ${agent.id} stderr]:`, stderr);
         }
 
-        // Check if stdout is valid JSON
+        // ── Signal Detection: Check for interactive signals from agenticfactor SDK ──
+        const signalMatch = stdout.match(/__SIGNAL__:(.+)$/m);
+        if (signalMatch) {
+          try {
+            const signal = JSON.parse(signalMatch[1]);
+            
+            if (signal.__user_prompt__) {
+              // Save prompt to DB and pause execution
+              await supabase.from('events').insert({
+                tenant_id: tenantId,
+                event_type: 'agent.user_prompt',
+                entity_type: 'agent',
+                entity_id: agent.id,
+                payload: { missionId, question: signal.__user_prompt__.question, options: signal.__user_prompt__.options },
+              });
+              console.log(`[Agent ${agent.id}] User prompt requested: ${signal.__user_prompt__.question}`);
+              // Send notification email
+              try {
+                const { sendEmail } = await import('../notifications');
+                const { data: tenant } = await supabase.from('tenants').select('email').eq('id', tenantId).single();
+                if (tenant?.email) {
+                  await sendEmail({
+                    to: tenant.email,
+                    subject: `🤖 Mission needs your input — ${agent.role}`,
+                    body: `Your mission agent needs your input.\n\nAgent: ${agent.role}\nQuestion: ${signal.__user_prompt__.question}\n\nPlease reply in the Mission Chat on your dashboard.`,
+                  });
+                }
+              } catch (emailErr) { console.warn('Notification email failed:', emailErr); }
+            }
+            
+            if (signal.__notify__) {
+              try {
+                const { sendEmail } = await import('../notifications');
+                const { data: tenant } = await supabase.from('tenants').select('email').eq('id', tenantId).single();
+                if (tenant?.email) {
+                  await sendEmail({
+                    to: tenant.email,
+                    subject: `📋 Mission Update — ${agent.role}`,
+                    body: `Mission Update\n\n${signal.__notify__.message}`,
+                  });
+                }
+              } catch (emailErr) { console.warn('Notification email failed:', emailErr); }
+            }
+            
+            if (signal.__missing_permission__) {
+              // Email admin about missing permission
+              try {
+                const { sendEmail } = await import('../notifications');
+                const adminEmail = process.env.ADMIN_EMAIL || 'niranjanant7@gmail.com';
+                const { data: tenant } = await supabase.from('tenants').select('email').eq('id', tenantId).single();
+                await sendEmail({
+                  to: adminEmail,
+                  subject: `⚠️ Missing Permission — ${signal.__missing_permission__.provider}`,
+                  body: `A mission requires a connector that isn't configured.\n\nProvider: ${signal.__missing_permission__.provider}\nTenant: ${tenant?.email || tenantId}\nAgent: ${agent.role}\n\nPlease add this connector or contact the customer.`,
+                });
+                // Also notify the customer
+                if (tenant?.email) {
+                  await sendEmail({
+                    to: tenant.email,
+                    subject: `🔗 Connector Required — ${signal.__missing_permission__.provider}`,
+                    body: `Your mission needs the ${signal.__missing_permission__.provider} connector to proceed.\n\nPlease go to the Connectors page on your dashboard and connect it.`,
+                  });
+                }
+              } catch (emailErr) { console.warn('Admin notification failed:', emailErr); }
+            }
+          } catch (sigErr) {
+            console.warn(`[Agent ${agent.id}] Signal parse error:`, sigErr);
+          }
+        }
+
+        // Check if stdout is valid JSON (filter out signal lines)
+        let cleanStdout = stdout.split('\n').filter(line => !line.startsWith('__SIGNAL__:')).join('\n').trim();
         let finalOutputJSON = '';
         try {
-          finalOutputJSON = stdout;
+          finalOutputJSON = cleanStdout;
           JSON.parse(finalOutputJSON);
         } catch (e) {
-          throw new Error(`Script succeeded but output was not valid JSON. Output was: ${stdout}`);
+          // If signal was the only output, use the signal as output
+          if (signalMatch) {
+            finalOutputJSON = JSON.stringify({ status: 'signal_sent', signal: signalMatch[1] });
+          } else {
+            throw new Error(`Script succeeded but output was not valid JSON. Output was: ${stdout}`);
+          }
         }
 
         // --- FILE OUTPUT EXTRACTION: Collect artifacts from E2B sandbox ---

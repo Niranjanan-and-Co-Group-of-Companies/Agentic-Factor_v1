@@ -29,6 +29,10 @@ export default function AdminPage() {
   const [newModel, setNewModel] = useState({ provider: 'anthropic', model_name: '', display_name: '', tier: 2, priority: 1 });
   const [newConnector, setNewConnector] = useState({ id: '', label: '', description: '', category: 'productivity', status: 'request_access', provider: '' });
 
+  // Edit Model/Connector modals
+  const [editingModel, setEditingModel] = useState<any>(null);
+  const [editingConnector, setEditingConnector] = useState<any>(null);
+
   // Password reset
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -173,6 +177,34 @@ export default function AdminPage() {
     } else {
       setToast(`❌ ${d.error}`);
     }
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const handleEditModel = async () => {
+    if (!editingModel) return;
+    setAdminActionLoading(true);
+    const res = await fetch('/api/mgmt-x7k9/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'edit_model', modelId: editingModel.id, provider: editingModel.provider, model_name: editingModel.model_name, display_name: editingModel.display_name, tier: editingModel.tier, priority: editingModel.priority }),
+    });
+    setAdminActionLoading(false);
+    if (res.ok) { setToast('✅ Model updated'); setEditingModel(null); fetchData(); }
+    else { const d = await res.json(); setToast(`❌ ${d.error}`); }
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const handleEditConnector = async () => {
+    if (!editingConnector) return;
+    setAdminActionLoading(true);
+    const res = await fetch('/api/mgmt-x7k9/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'edit_connector', connectorId: editingConnector.id, label: editingConnector.label, description: editingConnector.description, category: editingConnector.category, status: editingConnector.status, provider: editingConnector.provider }),
+    });
+    setAdminActionLoading(false);
+    if (res.ok) { setToast('✅ Connector updated'); setEditingConnector(null); fetchData(); }
+    else { const d = await res.json(); setToast(`❌ ${d.error}`); }
     setTimeout(() => setToast(null), 4000);
   };
 
@@ -392,8 +424,9 @@ export default function AdminPage() {
                             fetchData();
                           }}
                         >
-                          {m.is_active ? '✅ Active' : '❌ Off'}
+                          {m.is_active ? '✅' : '❌'}
                         </button>
+                        <button className="btn btn-ghost btn-sm" style={{ marginLeft: 4 }} onClick={() => setEditingModel({...m})}>✏️</button>
                       </td>
                     </tr>
                   ))}
@@ -441,8 +474,9 @@ export default function AdminPage() {
                             fetchData();
                           }}
                         >
-                          {c.is_active ? '✅ Active' : '❌ Off'}
+                          {c.is_active ? '✅' : '❌'}
                         </button>
+                        <button className="btn btn-ghost btn-sm" style={{ marginLeft: 4 }} onClick={() => setEditingConnector({...c})}>✏️</button>
                       </td>
                     </tr>
                   ))}
@@ -590,6 +624,54 @@ export default function AdminPage() {
               <button className="btn btn-primary btn-sm" onClick={handleAddConnector} disabled={adminActionLoading || !newConnector.id || !newConnector.label}>
                 {adminActionLoading ? "Adding..." : "➕ Add Connector"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT MODEL MODAL */}
+      {editingModel && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} onClick={() => setEditingModel(null)}>
+          <div className="card" style={{ maxWidth: 500, width: "90%", padding: "var(--space-xl)" }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "var(--space-lg)" }}>✏️ Edit Model</h3>
+            <select value={editingModel.provider} onChange={e => setEditingModel({...editingModel, provider: e.target.value})} style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }}>
+              <option value="anthropic">Anthropic</option><option value="google">Google</option><option value="openai">OpenAI</option>
+            </select>
+            <input value={editingModel.model_name} onChange={e => setEditingModel({...editingModel, model_name: e.target.value})} placeholder="Model name" style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }} />
+            <input value={editingModel.display_name} onChange={e => setEditingModel({...editingModel, display_name: e.target.value})} placeholder="Display name" style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }} />
+            <div className="row" style={{ gap: "var(--space-sm)", marginBottom: "var(--space-md)" }}>
+              <select value={editingModel.tier} onChange={e => setEditingModel({...editingModel, tier: Number(e.target.value)})} style={{ flex: 1, padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem" }}>
+                <option value={1}>Tier 1</option><option value={2}>Tier 2</option><option value={3}>Tier 3</option>
+              </select>
+              <input type="number" value={editingModel.priority} onChange={e => setEditingModel({...editingModel, priority: Number(e.target.value)})} min={1} max={10} style={{ width: 80, padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem" }} />
+            </div>
+            <div className="row" style={{ gap: "var(--space-sm)", justifyContent: "flex-end" }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setEditingModel(null)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" onClick={handleEditModel} disabled={adminActionLoading}>{adminActionLoading ? "Saving..." : "💾 Save"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT CONNECTOR MODAL */}
+      {editingConnector && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} onClick={() => setEditingConnector(null)}>
+          <div className="card" style={{ maxWidth: 500, width: "90%", padding: "var(--space-xl)" }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "var(--space-lg)" }}>✏️ Edit Connector: {editingConnector.id}</h3>
+            <input value={editingConnector.label} onChange={e => setEditingConnector({...editingConnector, label: e.target.value})} placeholder="Label" style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }} />
+            <input value={editingConnector.description || ''} onChange={e => setEditingConnector({...editingConnector, description: e.target.value})} placeholder="Description" style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-sm)" }} />
+            <div className="row" style={{ gap: "var(--space-sm)", marginBottom: "var(--space-sm)" }}>
+              <select value={editingConnector.category} onChange={e => setEditingConnector({...editingConnector, category: e.target.value})} style={{ flex: 1, padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem" }}>
+                <option value="communication">Communication</option><option value="crm">CRM</option><option value="devtools">Dev Tools</option><option value="productivity">Productivity</option><option value="social">Social</option><option value="payments">Payments</option><option value="ecommerce">E-Commerce</option><option value="cloud">Cloud</option><option value="analytics">Analytics</option><option value="ai">AI / ML</option><option value="storage">Storage</option><option value="marketing">Marketing</option><option value="hr">HR</option>
+              </select>
+              <select value={editingConnector.status} onChange={e => setEditingConnector({...editingConnector, status: e.target.value})} style={{ flex: 1, padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem" }}>
+                <option value="available">Available</option><option value="coming_soon">Coming Soon</option><option value="request_access">Request Access</option>
+              </select>
+            </div>
+            <input value={editingConnector.provider || ''} onChange={e => setEditingConnector({...editingConnector, provider: e.target.value})} placeholder="OAuth provider (optional)" style={{ width: "100%", padding: "8px 12px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.85rem", marginBottom: "var(--space-md)" }} />
+            <div className="row" style={{ gap: "var(--space-sm)", justifyContent: "flex-end" }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setEditingConnector(null)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" onClick={handleEditConnector} disabled={adminActionLoading}>{adminActionLoading ? "Saving..." : "💾 Save"}</button>
             </div>
           </div>
         </div>

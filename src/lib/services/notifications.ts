@@ -1,13 +1,10 @@
-// ============================================================
-// Notifications Service — SMTP2GO Email
-// Used for: connector requests, mission alerts, system notifications
-// ============================================================
-
 interface EmailOptions {
   to: string;
   subject: string;
   body: string;
   from?: string;
+  htmlBody?: string;  // Optional explicit HTML body (overrides auto-generated)
+  attachments?: { filename: string; content: string; type: string }[];
 }
 
 /**
@@ -27,28 +24,41 @@ export async function sendEmail(options: EmailOptions): Promise<{ success: boole
   }
 
   try {
+    const htmlContent = options.htmlBody || `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
+        <div style="background: linear-gradient(135deg, #3B82F6, #8B5CF6); padding: 24px; border-radius: 12px; color: white; margin-bottom: 24px;">
+          <h1 style="margin: 0; font-size: 20px;">⚡ Agentic Factor</h1>
+        </div>
+        <div style="padding: 16px 0;">
+          ${options.body.split('\n').map(line => `<p style="margin: 8px 0; color: #333; line-height: 1.6;">${line}</p>`).join('')}
+        </div>
+        <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee; font-size: 12px; color: #999;">
+          Sent by Agentic Factor Notifications
+        </div>
+      </div>
+    `;
+
+    const emailPayload: any = {
+      sender,
+      to: [options.to],
+      subject: options.subject,
+      text_body: options.body,
+      html_body: htmlContent,
+    };
+
+    // Add attachments if provided
+    if (options.attachments && options.attachments.length > 0) {
+      emailPayload.attachments = options.attachments.map(att => ({
+        filename: att.filename,
+        fileblob: att.content,  // base64 encoded content
+        mimetype: att.type,
+      }));
+    }
+
     const res = await fetch('https://api.smtp2go.com/v3/email/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': apiKey },
-      body: JSON.stringify({
-        sender,
-        to: [options.to],
-        subject: options.subject,
-        text_body: options.body,
-        html_body: `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
-            <div style="background: linear-gradient(135deg, #3B82F6, #8B5CF6); padding: 24px; border-radius: 12px; color: white; margin-bottom: 24px;">
-              <h1 style="margin: 0; font-size: 20px;">⚡ Agentic Factor</h1>
-            </div>
-            <div style="padding: 16px 0;">
-              ${options.body.split('\n').map(line => `<p style="margin: 8px 0; color: #333; line-height: 1.6;">${line}</p>`).join('')}
-            </div>
-            <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee; font-size: 12px; color: #999;">
-              Sent by Agentic Factor Notifications
-            </div>
-          </div>
-        `,
-      }),
+      body: JSON.stringify(emailPayload),
     });
 
     if (!res.ok) {
@@ -166,5 +176,45 @@ export async function notifyMissionStatus(
   if (!template) return;
 
   await sendEmail({ to: email, ...template });
+}
+
+/**
+ * Send a mission output/results email to the customer.
+ * Used when a mission completes with deliverables (PDFs, spreadsheets, reports).
+ */
+export async function sendMissionOutputEmail(
+  tenantId: string,
+  missionTitle: string,
+  missionId: string,
+  outputSummary: string,
+  artifactUrls?: { filename: string; url: string }[],
+): Promise<void> {
+  const { createServiceClient } = await import('@/lib/supabase/server');
+  const supabase = createServiceClient();
+  const { data: { user } } = await supabase.auth.admin.getUserById(tenantId);
+  const email = user?.email;
+  if (!email) return;
+
+  const dashboardUrl = `https://agenticfactor.io/dashboard/missions/${missionId}`;
+  
+  const artifactsList = artifactUrls?.length
+    ? artifactUrls.map(a => `📎 ${a.filename}: ${a.url}`).join('\n')
+    : 'View all deliverables on your dashboard.';
+
+  await sendEmail({
+    to: email,
+    subject: `📦 Mission Deliverables Ready: ${missionTitle}`,
+    body: [
+      `Your mission "${missionTitle}" has produced results!`,
+      ``,
+      `Summary:`,
+      outputSummary,
+      ``,
+      `Deliverables:`,
+      artifactsList,
+      ``,
+      `View full results: ${dashboardUrl}`,
+    ].join('\n'),
+  });
 }
 
