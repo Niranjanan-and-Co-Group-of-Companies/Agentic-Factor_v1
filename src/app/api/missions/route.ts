@@ -6,7 +6,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { MissionSchema, LLMOutputSchema, type Mission } from '@/lib/schemas/mission';
 import { z } from 'zod';
 
-export const maxDuration = 120;
+export const maxDuration = 300; // Blueprint generation can take 60-120s for complex missions
 
 // ============================================================
 // Request schemas

@@ -88,20 +88,43 @@ function MissionCreatorInner() {
   }, [searchParams]);
 
   // ── Phase 1: Generate Blueprint (NO DB writes) ──
-  const handleGenerate = async (overrideIntent?: string) => {
+  const handleGenerate = async (overrideIntent?: string, retryCount = 0) => {
     const finalIntent = overrideIntent || intent;
     if (!finalIntent.trim() || finalIntent.length < 10) { setError("Describe your mission in at least 10 characters."); return; }
     setLoading(true); setError("");
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 115000); // Abort 5s before Vercel's 120s limit
+      
       const res = await fetch("/api/missions?action=blueprint", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ intent: finalIntent }),
-        credentials: "include", // Send Supabase session cookies for real user ID
+        credentials: "include",
+        signal: controller.signal,
       });
-      const data = await res.json();
+      clearTimeout(timeoutId);
+      
+      // ── Safe response parsing (handles 504, HTML errors, etc.) ──
+      let data: any;
+      try {
+        const text = await res.text();
+        data = JSON.parse(text);
+      } catch {
+        // Response was not JSON (e.g., Vercel 504 HTML page)
+        if (res.status === 504 || res.status === 502 || res.status === 503) {
+          if (retryCount < 1) {
+            setError("⏳ Blueprint generation is taking longer than expected. Retrying with optimizations...");
+            // Auto-retry once
+            setTimeout(() => handleGenerate(finalIntent, retryCount + 1), 2000);
+            return;
+          }
+          throw new Error("Blueprint generation timed out. Try a simpler mission description, or break it into smaller steps.");
+        }
+        throw new Error(`Server returned an unexpected response (HTTP ${res.status}). Please try again.`);
+      }
+      
       if (!res.ok) {
-        // Surface specific error from API
         const errMsg = data.message || data.error || "Blueprint generation failed";
         const details = data.details ? `: ${JSON.stringify(data.details)}` : "";
         throw new Error(`${errMsg}${details}`);
@@ -111,7 +134,7 @@ function MissionCreatorInner() {
       if (data.isDiscovery) {
         setDiscoveryQuestion(data.question);
         setPhase("discovery");
-        return; // Don't advance to reviewing phase
+        return;
       }
       
       // Add default trust levels to agents
@@ -120,7 +143,18 @@ function MissionCreatorInner() {
       }));
       setBlueprint({ ...data.blueprint, agents: agentsWithTrust });
       setPhase("reviewing");
-    } catch (err) { setError((err as Error).message); }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        if (retryCount < 1) {
+          setError("⏳ Blueprint generation is taking longer than expected. Retrying...");
+          setTimeout(() => handleGenerate(finalIntent, retryCount + 1), 2000);
+          return;
+        }
+        setError("Blueprint generation timed out. Try a simpler mission description, or break it into smaller steps.");
+      } else {
+        setError(err.message);
+      }
+    }
     finally { setLoading(false); }
   };
   const handleEditBlueprint = async (instruction: string) => {
@@ -132,11 +166,18 @@ function MissionCreatorInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ blueprint, instruction }),
       });
-      const data = await res.json();
+      
+      let data: any;
+      try {
+        const text = await res.text();
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(res.status >= 500 ? "Server timed out while editing. Try a simpler instruction." : "Unexpected server response. Please try again.");
+      }
+      
       if (!res.ok) throw new Error(data.message || "Failed to edit blueprint");
       
       const updatedBlueprint = data.blueprint;
-      // Re-apply trust levels
       const agentsWithTrust = updatedBlueprint.agents.map((a: any) => ({
         ...a, trustLevel: "conditional",
       }));
@@ -204,7 +245,13 @@ function MissionCreatorInner() {
         body: JSON.stringify({ mission: payloadMission }),
         credentials: "include", // Send Supabase session cookies for real user ID
       });
-      const data = await res.json();
+      let data: any;
+      try {
+        const text = await res.text();
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(res.status >= 500 ? "Server error while confirming. Please try again." : "Unexpected response. Please try again.");
+      }
       if (!res.ok) throw new Error(data.message || data.error || "Failed to confirm blueprint");
 
       // ✅ DB write confirmed — NOW safe to delete from localStorage
@@ -291,7 +338,7 @@ function MissionCreatorInner() {
                 {loading && (
                   <div style={{ marginTop: "var(--space-md)", display: "flex", alignItems: "center", gap: 8, color: "var(--accent)", fontSize: "0.85rem" }}>
                     <span className="animate-glow" style={{ display: "inline-block", width: 14, height: 14, borderRadius: "50%", background: "var(--accent)" }} />
-                    Generating blueprint with AI... this takes 5-15 seconds
+                    Generating blueprint with AI... this may take up to 60 seconds for complex missions
                   </div>
                 )}
                 {error && <div style={{ marginTop: "var(--space-md)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem", lineHeight: 1.6 }}>❌ {error}</div>}

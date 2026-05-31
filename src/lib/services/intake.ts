@@ -190,17 +190,20 @@ export async function generateMissionJSON(
   intent: string,
   tenantId: string
 ): Promise<{ mission?: Mission; rawLLMOutput?: LLMOutput; isDiscovery?: boolean; question?: string }> {
-  // 1. Search vector memory for similar past missions
-  const memoryContext = await searchSimilarMissions(intent, tenantId);
-  const globalMemory = await retrieveTenantMemory(tenantId);
+  // ── Parallelized initial calls (saves ~5-10 seconds) ──
+  const { getPlanConfig } = await import('@/lib/middleware/billing');
+  
+  // Run ALL pre-checks in parallel instead of sequentially
+  const [memoryContext, globalMemory, planConfig] = await Promise.all([
+    searchSimilarMissions(intent, tenantId),
+    retrieveTenantMemory(tenantId),
+    getPlanConfig(tenantId),
+  ]);
 
-  // Extract facts in the background
+  // Extract facts in the background (fire-and-forget)
   extractAndSaveTenantMemory(intent, tenantId).catch(console.error);
 
   // Phase 2.2: Plan-Aware Discovery Loop
-  // Higher plans = MORE thorough questioning = MORE accurate agents
-  const { getPlanConfig } = await import('@/lib/middleware/billing');
-  const planConfig = await getPlanConfig(tenantId);
   const maxQ = planConfig.maxClarifications;
 
   const discoveryPrompts: Record<number, string> = {
@@ -221,7 +224,6 @@ export async function generateMissionJSON(
   try {
     discoveryData = robustJSONParse(discoveryCheck.content);
   } catch {
-    // If discovery check itself fails to parse, skip discovery and proceed to blueprint
     console.warn('[intake] Discovery check returned non-JSON, skipping discovery');
     discoveryData = { ready: true };
   }
