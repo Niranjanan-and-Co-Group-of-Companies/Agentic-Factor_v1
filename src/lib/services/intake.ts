@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { LLMOutputSchema, MissionSchema, type Mission, type LLMOutput } from '../schemas/mission';
 import { createServiceClient } from '../supabase/server';
 import { callLLM, generateEmbedding } from './llm-router';
+import { robustJSONParse, safeJSONParse } from '../utils/json-parser';
 
 // ============================================================
 // System prompt for the LLM intake engine
@@ -156,7 +157,7 @@ async function extractAndSaveTenantMemory(intent: string, tenantId: string): Pro
       { role: 'user', content: intent }
     ], { jsonMode: true, temperature: 0.1, tier: 2, budgetContext: { tenantId, missionId: 'blueprint_generation' } });
     
-    const data = JSON.parse(llmResponse.content);
+    const data: any = safeJSONParse(llmResponse.content, { facts: [] });
     if (data.facts && data.facts.length > 0) {
       for (const fact of data.facts) {
         await supabase.from('tenant_memory').insert({ tenant_id: tenantId, fact });
@@ -216,9 +217,16 @@ export async function generateMissionJSON(
     { role: 'user', content: `Intent: ${intent}${globalMemory}` }
   ], { jsonMode: true, temperature: 0.1, tier: 2, budgetContext: { tenantId, missionId: 'blueprint_generation' } });
   
-  const discoveryData = JSON.parse(discoveryCheck.content);
+  let discoveryData;
+  try {
+    discoveryData = robustJSONParse(discoveryCheck.content);
+  } catch {
+    // If discovery check itself fails to parse, skip discovery and proceed to blueprint
+    console.warn('[intake] Discovery check returned non-JSON, skipping discovery');
+    discoveryData = { ready: true };
+  }
   if (!discoveryData.ready && discoveryData.question) {
-    return { isDiscovery: true, question: discoveryData.question };
+    return { isDiscovery: true, question: discoveryData.question as string };
   }
 
   // 2. Call LLM with system prompt + intent + memory context
@@ -240,7 +248,7 @@ export async function generateMissionJSON(
   let rawJSON: Record<string, unknown>;
   
   try {
-    rawJSON = JSON.parse(llmResponse.content);
+    rawJSON = robustJSONParse(llmResponse.content);
   } catch (parseError1) {
     console.warn(`[intake] JSON parse failed, attempting local repair...`);
     
@@ -262,7 +270,7 @@ export async function generateMissionJSON(
       repaired += '}'.repeat(Math.max(0, openBraces - closeBraces));
       repaired += ']'.repeat(Math.max(0, openBrackets - closeBrackets));
       
-      rawJSON = JSON.parse(repaired);
+      rawJSON = robustJSONParse(repaired);
       console.log(`[intake] Local JSON repair succeeded!`);
     } catch (repairError) {
       console.warn(`[intake] Local repair failed, retrying LLM...`);
@@ -278,14 +286,14 @@ export async function generateMissionJSON(
       console.log(`[intake] LLM retry provider: ${retryResponse.provider}, tokens: ${retryResponse.tokensUsed}`);
       
       try {
-        rawJSON = JSON.parse(retryResponse.content);
+        rawJSON = robustJSONParse(retryResponse.content);
         console.log(`[intake] LLM retry succeeded!`);
       } catch (parseError2) {
         // Last attempt: clean the retry response too
         let cleaned = retryResponse.content;
         cleaned = cleaned.replace(/^```json?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
         cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
-        rawJSON = JSON.parse(cleaned); // If this fails, the error propagates to the user
+        rawJSON = robustJSONParse(cleaned); // If this fails, the error propagates to the user
       }
     }
   }
@@ -362,7 +370,7 @@ export async function editBlueprint(
   let rawJSON;
   let llmOutput;
   try {
-    rawJSON = JSON.parse(llmResponse.content);
+    rawJSON = robustJSONParse(llmResponse.content);
     llmOutput = LLMOutputSchema.parse(rawJSON);
   } catch (err: any) {
     console.log(`[intake] Edit blueprint failed parsing, attempting heal: ${err.message}`);
@@ -371,7 +379,7 @@ export async function editBlueprint(
       { role: 'user', content: `Bad Output: ${llmResponse.content}\n\nError: ${err.message}` }
     ], { jsonMode: true, temperature: 0.1, tier: 1 });
     
-    rawJSON = JSON.parse(healResponse.content);
+    rawJSON = robustJSONParse(healResponse.content);
     llmOutput = LLMOutputSchema.parse(rawJSON);
   }
 

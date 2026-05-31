@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 import { callLLM } from '@/lib/services/llm-router';
+import { robustJSONParse } from '@/lib/utils/json-parser';
 
 export const maxDuration = 120;
 
@@ -35,7 +36,7 @@ export async function POST(request: NextRequest) {
       { role: 'user', content: `Current Blueprint:\n${JSON.stringify(blueprint, null, 2)}\n\nUser Feedback:\n${feedback}` }
     ], { jsonMode: true, temperature: 0.1, tier: 1 });
 
-    const updatedBlueprint = JSON.parse(optimizationResponse.content);
+    const updatedBlueprint = robustJSONParse(optimizationResponse.content);
 
     // Save the optimized blueprint back to the database
     await supabase

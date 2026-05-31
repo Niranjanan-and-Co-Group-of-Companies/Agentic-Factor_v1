@@ -3,6 +3,7 @@ import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 import { callLLM } from '@/lib/services/llm-router';
 import { editBlueprint } from '@/lib/services/intake';
+import { safeJSONParse } from '@/lib/utils/json-parser';
 
 export const maxDuration = 120;
 
@@ -78,9 +79,9 @@ You MUST respond in valid JSON format matching this schema:
       { role: 'user', content: message }
     ], { jsonMode: true, temperature: 0.2, tier: 2, budgetContext: { tenantId, missionId } });
 
-    let parsedResponse;
+    let parsedResponse: any;
     try {
-      parsedResponse = JSON.parse(response.content);
+      parsedResponse = safeJSONParse(response.content, { reply: response.content });
     } catch {
       // LLM returned non-JSON, use content as-is
       parsedResponse = { reply: response.content };

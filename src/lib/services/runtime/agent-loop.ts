@@ -2,6 +2,7 @@ import { callLLM } from '../llm-router';
 import { executeTool } from '../tools';
 import { createServiceClient } from '@/lib/supabase/server';
 import { Sandbox } from '@e2b/code-interpreter';
+import { robustJSONParse } from '@/lib/utils/json-parser';
 
 interface AgentConfig {
   id: string;
@@ -417,14 +418,19 @@ ${pythonCode}`;
         let cleanStdout = stdout.split('\n').filter(line => !line.startsWith('__SIGNAL__:')).join('\n').trim();
         let finalOutputJSON = '';
         try {
-          finalOutputJSON = cleanStdout;
-          JSON.parse(finalOutputJSON);
+          // Use robust parser: extracts JSON even from mixed text with debug prints
+          const parsed = robustJSONParse(cleanStdout);
+          finalOutputJSON = JSON.stringify(parsed);
         } catch (e) {
           // If signal was the only output, use the signal as output
           if (signalMatch) {
             finalOutputJSON = JSON.stringify({ status: 'signal_sent', signal: signalMatch[1] });
+          } else if (cleanStdout) {
+            // Last resort: wrap raw text as JSON so the pipeline doesn't break
+            finalOutputJSON = JSON.stringify({ status: 'completed', raw_output: cleanStdout });
+            console.warn(`[Agent ${agent.id}] Output was not JSON, wrapped as raw_output`);
           } else {
-            throw new Error(`Script succeeded but output was not valid JSON. Output was: ${stdout}`);
+            throw new Error(`Script succeeded but produced no output.`);
           }
         }
 
