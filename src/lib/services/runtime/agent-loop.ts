@@ -309,16 +309,13 @@ ${pythonCode}`;
         );
 
         // Install agenticfactor SDK by writing files into the sandbox
-        const sdkPath = require('path').join(process.cwd(), 'src/lib/sandbox/agenticfactor');
-        const fs = require('fs');
-        const sdkFiles = ['__init__.py', '_core.py', 'gmail.py', 'calendar.py', 'drive.py', 'sheets.py', 'api.py', 'search.py', 'files.py'];
-        for (const sdkFile of sdkFiles) {
-          const filePath = require('path').join(sdkPath, sdkFile);
+        const { getSDKFiles } = await import('@/lib/sandbox/sdk-loader');
+        const sdkFiles = getSDKFiles();
+        for (const [filename, content] of Object.entries(sdkFiles)) {
           try {
-            const content = fs.readFileSync(filePath, 'utf-8');
-            await sandbox.files.write(`/home/user/agenticfactor/${sdkFile}`, content);
+            await sandbox.files.write(`/home/user/agenticfactor/${filename}`, content);
           } catch (e) {
-            console.warn(`[Agent ${agent.id}] SDK file ${sdkFile} not found, skipping`);
+            console.warn(`[Agent ${agent.id}] SDK file ${filename} write failed, skipping`);
           }
         }
         // Add SDK to Python path
@@ -344,6 +341,14 @@ ${pythonCode}`;
           try {
             const signal = JSON.parse(signalMatch[1]);
             
+            // Helper: get tenant email from Supabase Auth
+            const getTenantEmail = async (): Promise<string | null> => {
+              try {
+                const { data: { user } } = await supabase.auth.admin.getUserById(tenantId);
+                return user?.email || null;
+              } catch { return null; }
+            };
+            
             if (signal.__user_prompt__) {
               // Save prompt to DB and pause execution
               await supabase.from('events').insert({
@@ -357,10 +362,10 @@ ${pythonCode}`;
               // Send notification email
               try {
                 const { sendEmail } = await import('../notifications');
-                const { data: tenant } = await supabase.from('tenants').select('email').eq('id', tenantId).single();
-                if (tenant?.email) {
+                const tenantEmail = await getTenantEmail();
+                if (tenantEmail) {
                   await sendEmail({
-                    to: tenant.email,
+                    to: tenantEmail,
                     subject: `🤖 Mission needs your input — ${agent.role}`,
                     body: `Your mission agent needs your input.\n\nAgent: ${agent.role}\nQuestion: ${signal.__user_prompt__.question}\n\nPlease reply in the Mission Chat on your dashboard.`,
                   });
@@ -371,10 +376,10 @@ ${pythonCode}`;
             if (signal.__notify__) {
               try {
                 const { sendEmail } = await import('../notifications');
-                const { data: tenant } = await supabase.from('tenants').select('email').eq('id', tenantId).single();
-                if (tenant?.email) {
+                const tenantEmail = await getTenantEmail();
+                if (tenantEmail) {
                   await sendEmail({
-                    to: tenant.email,
+                    to: tenantEmail,
                     subject: `📋 Mission Update — ${agent.role}`,
                     body: `Mission Update\n\n${signal.__notify__.message}`,
                   });
@@ -387,16 +392,16 @@ ${pythonCode}`;
               try {
                 const { sendEmail } = await import('../notifications');
                 const adminEmail = process.env.ADMIN_EMAIL || 'niranjanant7@gmail.com';
-                const { data: tenant } = await supabase.from('tenants').select('email').eq('id', tenantId).single();
+                const tenantEmail = await getTenantEmail();
                 await sendEmail({
                   to: adminEmail,
                   subject: `⚠️ Missing Permission — ${signal.__missing_permission__.provider}`,
-                  body: `A mission requires a connector that isn't configured.\n\nProvider: ${signal.__missing_permission__.provider}\nTenant: ${tenant?.email || tenantId}\nAgent: ${agent.role}\n\nPlease add this connector or contact the customer.`,
+                  body: `A mission requires a connector that isn't configured.\n\nProvider: ${signal.__missing_permission__.provider}\nTenant: ${tenantEmail || tenantId}\nAgent: ${agent.role}\n\nPlease add this connector or contact the customer.`,
                 });
                 // Also notify the customer
-                if (tenant?.email) {
+                if (tenantEmail) {
                   await sendEmail({
-                    to: tenant.email,
+                    to: tenantEmail,
                     subject: `🔗 Connector Required — ${signal.__missing_permission__.provider}`,
                     body: `Your mission needs the ${signal.__missing_permission__.provider} connector to proceed.\n\nPlease go to the Connectors page on your dashboard and connect it.`,
                   });
