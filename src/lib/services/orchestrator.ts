@@ -36,7 +36,9 @@ export type MissionStatus =
   | 'pending_approval'
   | 'building'
   | 'active'
+  | 'running'
   | 'paused'
+  | 'awaiting_input'
   | 'completed'
   | 'failed'
   | 'deadlocked';

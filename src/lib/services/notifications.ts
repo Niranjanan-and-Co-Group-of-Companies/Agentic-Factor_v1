@@ -109,7 +109,7 @@ export async function notifyMissionStatus(
   tenantId: string,
   missionTitle: string,
   missionId: string,
-  status: 'completed' | 'failed' | 'paused' | 'needs_approval'
+  status: 'completed' | 'failed' | 'paused' | 'needs_approval' | 'awaiting_input'
 ): Promise<void> {
   // Lazy import to avoid circular dependency
   const { createServiceClient } = await import('@/lib/supabase/server');
@@ -168,6 +168,18 @@ export async function notifyMissionStatus(
         `An agent has completed its work and is waiting for your approval before the output is handed off to the next agent.`,
         ``,
         `Review and approve: ${dashboardUrl}`,
+      ].join('\n'),
+    },
+    awaiting_input: {
+      subject: `💬 Your Input Needed: ${missionTitle}`,
+      body: [
+        `Your mission "${missionTitle}" has paused and needs your input to continue.`,
+        ``,
+        `One of your agents has a question that requires your answer before the mission can proceed.`,
+        ``,
+        `Answer now: ${dashboardUrl}`,
+        ``,
+        `You can respond directly on the mission page or via the Chief of Staff chat.`,
       ].join('\n'),
     },
   };

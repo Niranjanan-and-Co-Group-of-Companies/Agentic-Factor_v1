@@ -14,6 +14,86 @@ interface AgentConfig {
   trustLevel?: 'manual' | 'conditional' | 'autonomous';
 }
 
+/**
+ * Sanitize LLM-generated Python code before execution.
+ * Fixes common issues like unterminated string literals.
+ */
+function sanitizePythonCode(code: string): string {
+  // Fix 1: Replace unterminated single/double-quoted strings that span multiple lines
+  // Pattern: a line ending with an opening quote and string content but no closing quote
+  const lines = code.split('\n');
+  const fixedLines: string[] = [];
+  let i = 0;
+  
+  while (i < lines.length) {
+    const line = lines[i];
+    
+    // Detect a line that opens a string but doesn't close it
+    // Matches patterns like: some_func('text that continues
+    // or: variable = "text that continues  
+    const unterminatedMatch = line.match(/^(.*?)(['\"])([^'"]*?)$/);
+    
+    if (unterminatedMatch && !line.trimStart().startsWith('#')) {
+      const [, prefix, quote, startContent] = unterminatedMatch;
+      
+      // Check if this looks like an actual unterminated string (not a comment, not triple-quoted)
+      // Count unmatched quotes in the prefix to determine if we're inside a string
+      const prefixQuotes = (prefix.match(new RegExp(`(?<!\\\\)${quote === "'" ? "'" : '"'}`, 'g')) || []).length;
+      
+      if (prefixQuotes % 2 === 0) {
+        // Even number of quotes before = this opens a new string that isn't closed
+        // Collect continuation lines until we find the closing quote
+        const contentLines = [startContent];
+        let j = i + 1;
+        let closed = false;
+        
+        while (j < lines.length && j - i < 20) { // Max 20 lines lookahead
+          const nextLine = lines[j];
+          const closeIdx = nextLine.indexOf(quote);
+          
+          if (closeIdx !== -1) {
+            // Found closing quote — reconstruct with triple quotes
+            contentLines.push(nextLine.substring(0, closeIdx));
+            const remainder = nextLine.substring(closeIdx + 1);
+            const tripleQuote = quote.repeat(3);
+            fixedLines.push(`${prefix}${tripleQuote}${contentLines.join('\n')}${tripleQuote}${remainder}`);
+            closed = true;
+            i = j + 1;
+            break;
+          }
+          contentLines.push(nextLine);
+          j++;
+        }
+        
+        if (!closed) {
+          // Couldn't find closing quote — just escape the newline
+          fixedLines.push(line);
+          i++;
+        }
+        continue;
+      }
+    }
+    
+    fixedLines.push(line);
+    i++;
+  }
+  
+  return fixedLines.join('\n');
+}
+
+export interface AgentResult {
+  output: string;
+  finalCode: string;
+  signal?: {
+    type: 'user_prompt' | 'schedule' | 'notify' | 'missing_permission';
+    question?: string;
+    options?: string[];
+    delay?: number;
+    provider?: string;
+    message?: string;
+  };
+}
+
 export async function executeAgent(
   tenantId: string,
   missionId: string,
@@ -22,7 +102,7 @@ export async function executeAgent(
   tokens: { provider: string, access_token: string }[] = [],
   isFinalAgent: boolean = false,
   expectedOutputFormat?: string
-): Promise<{ output: string; finalCode: string }> {
+): Promise<AgentResult> {
   const supabase = createServiceClient();
   
   // Log start
@@ -224,7 +304,9 @@ INSTRUCTIONS:
 8. Enclose your Python code inside a triple-backtick block with 'python' as the language identifier.
 9. **DO NOT CATCH FATAL ERRORS**: Let the script crash naturally on errors.
 10. **READING INPUT**: Previous agent data is in \`_input_data\` (parsed JSON dict) and \`_input\` (raw string).
-11. If you need to ask the user something, use \`ask_user()\`. The script will pause and resume when user responds.`;
+11. If you need to ask the user something, use \`ask_user()\`. The script will pause and resume when user responds.
+12. **MULTI-LINE STRINGS**: ALWAYS use triple quotes (\"\"\" or ''') for multi-line strings. NEVER put a newline inside a single-quoted or double-quoted string. Example: lines.append('''This is\na multi-line\nstring''')
+13. **JSON IN STRINGS**: When building JSON manually, use json.dumps() instead of hand-crafting JSON strings with f-strings.`;
 
 
       const response = await callLLM(
@@ -262,6 +344,8 @@ INSTRUCTIONS:
       pythonCode = codeMatch[1];
     }
 
+    // Sanitize LLM-generated code: fix unterminated strings, etc.
+    pythonCode = sanitizePythonCode(pythonCode);
     lastPythonCode = pythonCode;
 
     try {
@@ -269,7 +353,14 @@ INSTRUCTIONS:
 
       // Build environment variables for the sandbox
       const sandboxEnvs: Record<string, string> = {};
-      if (inputContext) sandboxEnvs['INPUT_CONTEXT'] = inputContext;
+      if (inputContext) {
+        // Sanitize INPUT_CONTEXT: escape control characters that break json.loads()
+        let sanitized = inputContext;
+        // Replace actual newlines/tabs inside JSON string values with escaped versions
+        // This handles cases where previous agent output has raw control chars
+        sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ');
+        sandboxEnvs['INPUT_CONTEXT'] = sanitized;
+      }
       for (const token of tokens) {
         const envKey = `${token.provider.toUpperCase()}_ACCESS_TOKEN`;
         sandboxEnvs[envKey] = token.access_token;
@@ -284,9 +375,15 @@ INSTRUCTIONS:
 try:
     _input = os.environ.get('INPUT_CONTEXT', '{}')
     try:
-        _input_data = json.loads(_input)
+        _input_data = json.loads(_input, strict=False)
     except:
-        _input_data = {}
+        # Fallback: try cleaning the input
+        import re
+        cleaned = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', _input)
+        try:
+            _input_data = json.loads(cleaned)
+        except:
+            _input_data = {}
 except:
     _input = '{}'
     _input_data = {}
@@ -338,6 +435,8 @@ ${pythonCode}`;
 
         // ── Signal Detection: Check for interactive signals from agenticfactor SDK ──
         const signalMatch = stdout.match(/__SIGNAL__:(.+)$/m);
+        let detectedSignal: AgentResult['signal'] | undefined;
+        
         if (signalMatch) {
           try {
             const signal = JSON.parse(signalMatch[1]);
@@ -360,6 +459,14 @@ ${pythonCode}`;
                 payload: { missionId, question: signal.__user_prompt__.question, options: signal.__user_prompt__.options },
               });
               console.log(`[Agent ${agent.id}] User prompt requested: ${signal.__user_prompt__.question}`);
+              
+              // Set signal for executor to detect
+              detectedSignal = {
+                type: 'user_prompt',
+                question: signal.__user_prompt__.question,
+                options: signal.__user_prompt__.options,
+              };
+              
               // Send notification email
               try {
                 const { sendEmail } = await import('../notifications');
@@ -368,7 +475,7 @@ ${pythonCode}`;
                   await sendEmail({
                     to: tenantEmail,
                     subject: `🤖 Mission needs your input — ${agent.role}`,
-                    body: `Your mission agent needs your input.\n\nAgent: ${agent.role}\nQuestion: ${signal.__user_prompt__.question}\n\nPlease reply in the Mission Chat on your dashboard.`,
+                    body: `Your mission agent needs your input.\n\nAgent: ${agent.role}\nQuestion: ${signal.__user_prompt__.question}${signal.__user_prompt__.options?.length ? '\n\nOptions:\n' + signal.__user_prompt__.options.map((o: string, i: number) => `  ${i + 1}. ${o}`).join('\n') : ''}\n\nPlease reply in the Mission Chat on your dashboard:\nhttps://agenticfactor.io/dashboard/missions/${missionId}`,
                   });
                 }
               } catch (emailErr) { console.warn('Notification email failed:', emailErr); }
@@ -389,7 +496,11 @@ ${pythonCode}`;
             }
             
             if (signal.__missing_permission__) {
-              // Email admin about missing permission
+              detectedSignal = {
+                type: 'missing_permission',
+                provider: signal.__missing_permission__.provider,
+              };
+              
               try {
                 const { sendEmail } = await import('../notifications');
                 const adminEmail = process.env.ADMIN_EMAIL || 'niranjanant7@gmail.com';
@@ -399,7 +510,6 @@ ${pythonCode}`;
                   subject: `⚠️ Missing Permission — ${signal.__missing_permission__.provider}`,
                   body: `A mission requires a connector that isn't configured.\n\nProvider: ${signal.__missing_permission__.provider}\nTenant: ${tenantEmail || tenantId}\nAgent: ${agent.role}\n\nPlease add this connector or contact the customer.`,
                 });
-                // Also notify the customer
                 if (tenantEmail) {
                   await sendEmail({
                     to: tenantEmail,
@@ -599,7 +709,7 @@ Respond with a JSON object: {"valid": boolean, "reason": "string explaining why 
           payload: { missionId, output: finalOutputJSON },
         });
 
-        return { output: finalOutputJSON, finalCode: pythonCode };
+        return { output: finalOutputJSON, finalCode: pythonCode, signal: detectedSignal };
 
       } finally {
         // Always clean up the sandbox

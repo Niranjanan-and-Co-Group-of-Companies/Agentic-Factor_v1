@@ -150,6 +150,10 @@ export default function MissionDetailPage() {
   const [connectorSending, setConnectorSending] = useState(false);
   const [connectorToast, setConnectorToast] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  // Phase 5: Awaiting Input state
+  const [pendingQuestion, setPendingQuestion] = useState<{ question: string; options: string[]; agentRole: string; agentId: string } | null>(null);
+  const [userAnswer, setUserAnswer] = useState("");
+  const [resumeLoading, setResumeLoading] = useState(false);
   
   // Email inbox state
   const [emailConfig, setEmailConfig] = useState<{ inboundEmail: string | null; allowedSenders: string[]; maxSenders: number; plan: string; available: boolean } | null>(null);
@@ -311,6 +315,19 @@ export default function MissionDetailPage() {
         if (completedEvent && completedEvent.payload?.finalOutput) {
           setFinalOutput(completedEvent.payload.finalOutput);
         }
+        
+        // Phase 5: Check for awaiting_input question
+        const awaitingEvent = eventRows.find((e: any) => e.event_type === "mission.awaiting_input");
+        if (awaitingEvent?.payload && missionData?.status === 'awaiting_input') {
+          setPendingQuestion({
+            question: awaitingEvent.payload.question,
+            options: awaitingEvent.payload.options || [],
+            agentRole: awaitingEvent.payload.agentRole,
+            agentId: awaitingEvent.payload.agentId,
+          });
+        } else {
+          setPendingQuestion(null);
+        }
       }
 
       // Fetch Timeline
@@ -467,6 +484,31 @@ export default function MissionDetailPage() {
     setFeedbackLoading(false);
   };
 
+  // Phase 5: Resume mission with user's answer
+  const handleResumeWithAnswer = async () => {
+    if (!userAnswer.trim() || resumeLoading) return;
+    setResumeLoading(true);
+    try {
+      const res = await fetch("/api/missions/resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ missionId, answer: userAnswer }),
+      });
+      let data: any;
+      try { data = await res.json(); } catch { data = {}; }
+      if (res.ok) {
+        setPendingQuestion(null);
+        setUserAnswer("");
+        setChatMessages(prev => [...prev, { role: "user", text: userAnswer }, { role: "assistant", text: `✅ Answer received! Mission is resuming from agent "${data.resumedFrom || 'next'}"...` }]);
+      } else {
+        alert(data.error || "Failed to resume mission");
+      }
+    } catch {
+      alert("Network error. Please try again.");
+    }
+    setResumeLoading(false);
+  };
+
   if (loading) return <div style={{ padding: "var(--space-2xl)", textAlign: "center" }}>Loading mission details...</div>;
   if (!mission) return <div style={{ padding: "var(--space-2xl)", textAlign: "center" }}>Mission not found.</div>;
 
@@ -499,6 +541,9 @@ export default function MissionDetailPage() {
                 {isStarting ? "Forcing Restart..." : "⚠️ Force Restart"}
               </button>
             ) : null}
+            {mission.status === "awaiting_input" ? (
+              <span className="badge badge-amber" style={{ fontSize: "0.85rem", padding: "8px 16px" }}>💬 Awaiting Your Input</span>
+            ) : null}
             {/* Mission Lifecycle Controls */}
             {(mission.status === "active" || mission.status === "building") && (
               <button className="btn btn-ghost" onClick={async () => {
@@ -520,7 +565,7 @@ export default function MissionDetailPage() {
                 window.location.reload();
               }}>✕ Cancel</button>
             )}
-            {["completed", "failed", "draft", "paused"].includes(mission.status) && (
+            {["completed", "failed", "draft", "paused", "awaiting_input"].includes(mission.status) && (
               <button className="btn btn-ghost" style={{ color: "var(--text-muted)", fontSize: "0.8rem" }} onClick={async () => {
                 if (!confirm("Delete this mission permanently? This cannot be undone.")) return;
                 const res = await fetch(`/api/missions/${missionId}`, { method: "DELETE" });
@@ -663,6 +708,77 @@ export default function MissionDetailPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* PHASE 5: AWAITING INPUT POPUP */}
+      {pendingQuestion && mission.status === 'awaiting_input' && (
+        <div className="card animate-slide-in" style={{ 
+          marginBottom: "var(--space-xl)", 
+          borderColor: "hsla(217,91%,60%,0.5)", 
+          background: "hsla(217,91%,60%,0.08)",
+          boxShadow: "0 0 30px hsla(217,91%,60%,0.15)",
+        }}>
+          <div className="card-header">
+            <span className="card-title">💬 Agent Needs Your Input</span>
+            <span className="badge badge-blue">{pendingQuestion.agentRole}</span>
+          </div>
+          <div style={{ 
+            padding: "var(--space-lg)", 
+            background: "var(--bg-glass)", 
+            borderRadius: "var(--radius-md)", 
+            marginBottom: "var(--space-md)",
+            fontSize: "1.05rem",
+            fontWeight: 500,
+            lineHeight: 1.6,
+            color: "var(--text-bright)",
+          }}>
+            🤖 {pendingQuestion.question}
+          </div>
+          {pendingQuestion.options.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-sm)", marginBottom: "var(--space-md)" }}>
+              {pendingQuestion.options.map((opt, i) => (
+                <button 
+                  key={i} 
+                  className={`btn ${userAnswer === opt ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ fontSize: "0.85rem" }}
+                  onClick={() => setUserAnswer(opt)}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: "var(--space-sm)", alignItems: "center" }}>
+            <input
+              type="text"
+              className="input"
+              value={userAnswer}
+              onChange={e => setUserAnswer(e.target.value)}
+              placeholder="Type your answer..."
+              onKeyDown={e => e.key === 'Enter' && handleResumeWithAnswer()}
+              style={{ 
+                flex: 1, 
+                padding: "12px 16px", 
+                fontSize: "0.95rem",
+                background: "var(--bg-base)", 
+                border: "1px solid var(--accent)", 
+                borderRadius: "var(--radius-md)", 
+                color: "var(--text-bright)" 
+              }}
+            />
+            <button 
+              className="btn btn-primary btn-lg" 
+              onClick={handleResumeWithAnswer} 
+              disabled={resumeLoading || !userAnswer.trim()}
+              style={{ whiteSpace: "nowrap" }}
+            >
+              {resumeLoading ? "⏳ Resuming..." : "▶ Submit & Resume"}
+            </button>
+          </div>
+          <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "var(--space-sm)" }}>
+            You can type any answer — words, sentences, emojis, or pick from the options above. The AI will interpret your response.
+          </p>
         </div>
       )}
 

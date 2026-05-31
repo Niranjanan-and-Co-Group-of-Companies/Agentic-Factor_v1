@@ -89,6 +89,45 @@ export async function executeMission(missionId: string, tenantId: string) {
         const result = await executeAgent(tenantId, missionId, agent, currentContext, tokens, isFinalAgent, mission.expectedOutputFormat);
         output = result.output;
 
+        // ── Phase 5: Mid-Mission Pause for User Input ──
+        if (result.signal?.type === 'user_prompt') {
+          console.log(`[Executor] Agent ${agent.role} requested user input. Pausing mission.`);
+          
+          // Save the pending question with the agent's current state
+          await supabase.from('events').insert({
+            tenant_id: tenantId,
+            event_type: 'mission.awaiting_input',
+            entity_type: 'mission',
+            entity_id: missionId,
+            payload: {
+              agentId: agent.id,
+              agentRole: agent.role,
+              question: result.signal.question,
+              options: result.signal.options || [],
+              currentOutput: output,
+              currentAgentId: currentAgentId,
+            },
+          });
+          
+          await transitionMissionStatus(missionId, tenantId, 'awaiting_input');
+          
+          // Notify user
+          try {
+            const { notifyMissionStatus } = await import('../notifications');
+            await notifyMissionStatus(tenantId, mission.title, missionId, 'awaiting_input');
+          } catch (notifyErr) {
+            console.warn('[Executor] Notification failed (non-fatal):', notifyErr);
+          }
+          
+          return; // Halt execution — will resume when user answers
+        }
+        
+        if (result.signal?.type === 'missing_permission') {
+          console.log(`[Executor] Agent ${agent.role} needs connector: ${result.signal.provider}. Pausing.`);
+          await transitionMissionStatus(missionId, tenantId, 'awaiting_input');
+          return;
+        }
+
         // --- PHASE 1.3: Working Code Lock ---
         if (result.finalCode && result.finalCode !== agent.pythonScript) {
           console.log(`[Executor] Code healed for Agent ${agent.id}. Locking new code into blueprint...`);
@@ -113,7 +152,6 @@ export async function executeMission(missionId: string, tenantId: string) {
         }
         // Phase 3.5: Wait States
         try {
-          // If the agent output is JSON and contains a sleep or schedule command
           const parsedOutput = JSON.parse(output);
           if (parsedOutput.action === 'sleep' || parsedOutput.action === 'schedule') {
             const timeConfig = parsedOutput.duration || parsedOutput.cron;
@@ -130,7 +168,7 @@ export async function executeMission(missionId: string, tenantId: string) {
               },
             });
             await transitionMissionStatus(missionId, tenantId, 'paused');
-            return; // Halt execution chain, cron will wake it later
+            return;
           }
         } catch (e) {
           // Not JSON, continue normally
