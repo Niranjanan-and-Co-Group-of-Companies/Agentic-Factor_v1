@@ -5,6 +5,89 @@ import { callLLM, generateEmbedding } from './llm-router';
 import { robustJSONParse, safeJSONParse } from '../utils/json-parser';
 
 // ============================================================
+// Permission Normalizer — maps free-form service names to exact provider keys
+// This is a safety net: the LLM prompt already constrains the output,
+// but LLMs can still hallucinate full API names.
+// ============================================================
+const KNOWN_PROVIDERS = [
+  'google', 'twitter', 'facebook', 'instagram', 'linkedin_oidc',
+  'slack', 'github', 'notion', 'discord', 'zoho',
+  'whatsapp', 'messenger', 'azure', 'teams', 'stripe', 'shopify',
+] as const;
+
+// Keywords → provider mappings. Order matters: more specific matches first.
+const PROVIDER_KEYWORDS: Array<{ keywords: string[]; provider: string }> = [
+  { keywords: ['twitter', 'tweet', 'x.com', 'x/twitter', 'twitter/x'], provider: 'twitter' },
+  { keywords: ['instagram', 'insta', 'ig '], provider: 'instagram' },
+  { keywords: ['facebook', 'fb ', 'graph api', 'meta '], provider: 'facebook' },
+  { keywords: ['whatsapp', 'whats app'], provider: 'whatsapp' },
+  { keywords: ['messenger', 'fb messenger'], provider: 'messenger' },
+  { keywords: ['linkedin', 'linked in'], provider: 'linkedin_oidc' },
+  { keywords: ['slack'], provider: 'slack' },
+  { keywords: ['github', 'git hub'], provider: 'github' },
+  { keywords: ['notion'], provider: 'notion' },
+  { keywords: ['discord'], provider: 'discord' },
+  { keywords: ['zoho'], provider: 'zoho' },
+  { keywords: ['azure', 'microsoft azure'], provider: 'azure' },
+  { keywords: ['teams', 'microsoft teams'], provider: 'teams' },
+  { keywords: ['stripe'], provider: 'stripe' },
+  { keywords: ['shopify'], provider: 'shopify' },
+  { keywords: ['google', 'gmail', 'gdrive', 'google drive', 'google calendar', 'google sheets', 'gcp', 'workspace'], provider: 'google' },
+];
+
+/**
+ * Normalizes a single service name to a known provider key.
+ * Returns the original value if no match is found (for truly unknown connectors).
+ */
+function normalizeServiceName(service: string): string {
+  const lower = service.toLowerCase().trim();
+
+  // 1. Exact match — already a valid provider key
+  if ((KNOWN_PROVIDERS as readonly string[]).includes(lower)) {
+    return lower;
+  }
+
+  // 2. Keyword fuzzy match
+  for (const { keywords, provider } of PROVIDER_KEYWORDS) {
+    for (const kw of keywords) {
+      if (lower.includes(kw)) {
+        return provider;
+      }
+    }
+  }
+
+  // 3. No match — return as-is (will be caught by the "unknown connector" admin flow)
+  console.warn(`[Normalizer] Unknown service "${service}" — no provider match found, keeping as-is`);
+  return lower.replace(/\s+/g, '_');
+}
+
+/**
+ * Normalizes all permission service names in a blueprint.
+ * Also deduplicates permissions that resolve to the same provider + type.
+ */
+function normalizePermissions(permissions: Array<{ type: string; service: string; scope: string; confidentialityLevel: string }>): typeof permissions {
+  const seen = new Set<string>();
+  const normalized: typeof permissions = [];
+
+  for (const perm of permissions) {
+    const originalService = perm.service;
+    const normalizedService = normalizeServiceName(perm.service);
+    const dedupeKey = `${perm.type}:${normalizedService}`;
+
+    if (originalService !== normalizedService) {
+      console.log(`[Normalizer] Mapped permission "${originalService}" → "${normalizedService}"`);
+    }
+
+    if (!seen.has(dedupeKey)) {
+      seen.add(dedupeKey);
+      normalized.push({ ...perm, service: normalizedService });
+    }
+  }
+
+  return normalized;
+}
+
+// ============================================================
 // System prompt for the LLM intake engine
 // ============================================================
 const SYSTEM_PROMPT = `You are the Intake Engine for a SaaS Agentic Factor platform.
@@ -37,8 +120,8 @@ You must decompose the user's intent into:
 9. **Validation Checklist**: 3-8 specific assertions to verify the mission output quality.
 10. **Permissions**: All credentials the agents will need. Each permission MUST have:
    - "type": one of "api_key", "oauth_token", "database_credential", "file_access", "service_account", "webhook"
-   - "service": string
-   - "scope": string
+   - "service": MUST be one of these EXACT provider keys (case-sensitive): "google", "twitter", "facebook", "instagram", "linkedin_oidc", "slack", "github", "notion", "discord", "zoho", "whatsapp", "messenger", "azure", "teams", "stripe", "shopify". Do NOT use full names like "Twitter/X OAuth 2.0 PKCE" or "Facebook Graph API" — use ONLY the short key.
+   - "scope": string (e.g., "tweet.write", "pages_manage_posts", "chat:write")
    - "confidentialityLevel": one of "public", "internal", "confidential", "restricted"
 11. **Discovery Questions**: Generate 3 or more highly specific "discoveryQuestions" to ask the user. These questions must gather missing context or exact preferences needed to refine the agents' system prompts before deployment.
 12. **Expected Output Format**: Generate a highly specific string ("expectedOutputFormat") containing a sample format of what the final output should look like based on the user's request. This will be shown to the user so they can edit it. If it's a JSON array, provide an example array. If it's a markdown report, provide a sample markdown skeleton.
@@ -49,6 +132,7 @@ IMPORTANT RULES:
 - Every agent that accesses external APIs or data sources must set requiresExternalData: true.
 - The validationChecklist must contain actionable, testable assertions.
 - Tool types MUST be from the allowed list above. Do NOT invent new types.
+- Permission "service" values MUST be exact provider keys from the list above. Using full API names will break the system.
 
 Respond ONLY with valid JSON matching the schema. No markdown, no explanation.`;
 
@@ -303,6 +387,11 @@ export async function generateMissionJSON(
   // 3. Validate LLM output against schema
   const llmOutput = LLMOutputSchema.parse(rawJSON);
 
+  // 3.5 Normalize permission service names (safety net for LLM hallucinations)
+  if (llmOutput.permissions?.length > 0) {
+    llmOutput.permissions = normalizePermissions(llmOutput.permissions as any) as any;
+  }
+
   // 4. Hydrate with IDs, tenantId, timestamps
   const now = new Date().toISOString();
   const missionId = uuidv4();
@@ -383,6 +472,11 @@ export async function editBlueprint(
     
     rawJSON = robustJSONParse(healResponse.content);
     llmOutput = LLMOutputSchema.parse(rawJSON);
+  }
+
+  // Normalize permission service names (safety net)
+  if (llmOutput.permissions?.length > 0) {
+    llmOutput.permissions = normalizePermissions(llmOutput.permissions as any) as any;
   }
 
   // Preserve UUIDs from the current blueprint where possible, otherwise generate new ones
