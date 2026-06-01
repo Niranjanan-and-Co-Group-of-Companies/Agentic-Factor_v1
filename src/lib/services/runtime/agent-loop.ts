@@ -19,6 +19,12 @@ interface AgentConfig {
  * Fixes common issues like unterminated string literals.
  */
 function sanitizePythonCode(code: string): string {
+  // Fix 0: Strip null bytes and other non-printable characters that crash Python's parser
+  // Python hard-rejects \x00 with: "source code string cannot contain null bytes"
+  code = code.replace(/\x00/g, '');
+  // Also strip other non-printable chars (except \n, \r, \t which are valid in source)
+  code = code.replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  
   // Fix 1: Replace unterminated single/double-quoted strings that span multiple lines
   // Pattern: a line ending with an opening quote and string content but no closing quote
   const lines = code.split('\n');
@@ -419,8 +425,11 @@ ${pythonCode}`;
         // Add SDK to Python path
         await sandbox.runCode('import sys; sys.path.insert(0, "/home/user")', { envs: sandboxEnvs });
 
+        // Final safety: strip any null bytes from the complete code (Python hard-rejects \x00)
+        const safeCode = wrappedCode.replace(/\x00/g, '');
+        
         // Execute the agent's Python script
-        const execution = await sandbox.runCode(wrappedCode, { envs: sandboxEnvs });
+        const execution = await sandbox.runCode(safeCode, { envs: sandboxEnvs });
 
         const stdout = execution.logs.stdout.join('\n').trim();
         const stderr = execution.logs.stderr.join('\n').trim();
