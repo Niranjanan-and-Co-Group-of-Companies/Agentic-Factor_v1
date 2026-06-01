@@ -360,12 +360,11 @@ INSTRUCTIONS:
       // Build environment variables for the sandbox
       const sandboxEnvs: Record<string, string> = {};
       if (inputContext) {
-        // Sanitize INPUT_CONTEXT: escape control characters that break json.loads()
-        let sanitized = inputContext;
-        // Replace actual newlines/tabs inside JSON string values with escaped versions
-        // This handles cases where previous agent output has raw control chars
-        sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ');
-        sandboxEnvs['INPUT_CONTEXT'] = sanitized;
+        // Base64-encode INPUT_CONTEXT to avoid E2B's os.environ injection breaking
+        // on special characters (single quotes, backslashes, etc.)
+        // Base64 only produces A-Za-z0-9+/= which are always safe
+        const b64 = Buffer.from(inputContext, 'utf-8').toString('base64');
+        sandboxEnvs['INPUT_CONTEXT_B64'] = b64;
       }
       for (const token of tokens) {
         const envKey = `${token.provider.toUpperCase()}_ACCESS_TOKEN`;
@@ -377,15 +376,15 @@ INSTRUCTIONS:
       if (process.env.SENDGRID_API_KEY) sandboxEnvs['SENDGRID_API_KEY'] = process.env.SENDGRID_API_KEY;
 
       // Prepend import of input context from env — available as `_input` (raw string) and `_input_data` (parsed JSON)
-      const wrappedCode = `import os, sys, json
+      const wrappedCode = `import os, sys, json, base64
 try:
-    _input = os.environ.get('INPUT_CONTEXT', '{}')
+    _b64 = os.environ.get('INPUT_CONTEXT_B64', '')
+    _input = base64.b64decode(_b64).decode('utf-8') if _b64 else '{}'
     try:
         _input_data = json.loads(_input, strict=False)
     except:
         # Fallback: try cleaning the input
-        import re
-        cleaned = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', _input)
+        cleaned = ''.join(c if ord(c) > 31 or c in '\\n\\r\\t' else ' ' for c in _input)
         try:
             _input_data = json.loads(cleaned)
         except:
