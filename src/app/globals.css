@@ -669,3 +669,46 @@ body {
 .connector-logo { width: 32px; height: 32px; object-fit: contain; border-radius: 6px; }
 .connector-logo-lg { width: 40px; height: 40px; }
 .connector-logo-sm { width: 24px; height: 24px; }
+
+/* ── Rich Output Viewer — Markdown Output ── */
+.markdown-output { font-size: 0.88rem; line-height: 1.8; color: var(--text-primary); }
+.markdown-output h1, .markdown-output h2, .markdown-output h3, .markdown-output h4 {
+  color: var(--accent); font-weight: 700; margin: var(--space-md) 0 var(--space-sm);
+}
+.markdown-output h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: var(--space-sm); }
+.markdown-output h2 { font-size: 1.15rem; }
+.markdown-output h3 { font-size: 1rem; }
+.markdown-output p { margin: var(--space-sm) 0; }
+.markdown-output strong { color: var(--text-primary); font-weight: 700; }
+.markdown-output em { color: var(--amber); }
+.markdown-output a { color: var(--accent); text-decoration: underline; }
+.markdown-output a:hover { color: var(--accent-hover); }
+.markdown-output ul, .markdown-output ol { padding-left: 24px; margin: var(--space-sm) 0; }
+.markdown-output li { margin: 4px 0; }
+.markdown-output li::marker { color: var(--accent); }
+.markdown-output code {
+  font-family: var(--font-mono); font-size: 0.82rem;
+  background: var(--bg-glass); padding: 2px 6px; border-radius: 4px;
+  color: var(--emerald);
+}
+.markdown-output pre {
+  background: hsla(222, 40%, 6%, 0.9); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: var(--space-md);
+  overflow-x: auto; margin: var(--space-md) 0;
+}
+.markdown-output pre code { background: transparent; padding: 0; color: var(--text-secondary); }
+.markdown-output table { width: 100%; border-collapse: collapse; margin: var(--space-md) 0; }
+.markdown-output th {
+  text-align: left; padding: 8px 14px;
+  background: var(--bg-glass); border: 1px solid var(--border);
+  font-weight: 600; color: var(--accent); font-size: 0.8rem;
+  text-transform: capitalize;
+}
+.markdown-output td { padding: 6px 14px; border: 1px solid var(--border); }
+.markdown-output tr:nth-child(even) { background: hsla(222, 35%, 12%, 0.3); }
+.markdown-output blockquote {
+  border-left: 3px solid var(--accent); padding-left: 16px;
+  margin: var(--space-md) 0; color: var(--text-secondary); font-style: italic;
+}
+.markdown-output hr { border: none; border-top: 1px solid var(--border); margin: var(--space-md) 0; }
+.markdown-output img { max-width: 100%; border-radius: var(--radius-md); margin: var(--space-sm) 0; }
