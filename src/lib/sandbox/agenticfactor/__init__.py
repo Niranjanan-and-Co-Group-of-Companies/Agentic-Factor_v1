@@ -6,7 +6,8 @@ Pre-installed in every E2B sandbox. Provides reliable, tested wrappers
 for all connected platform APIs.
 
 Usage in agent Python scripts:
-    from agenticfactor import gmail, calendar, drive, sheets, search, api, files
+    from agenticfactor import gmail, calendar, drive, sheets, search, api, files, social
+    from agenticfactor.social import post_tweet, post_linkedin, post_facebook, post_instagram
     from agenticfactor._core import ask_user, notify_user, schedule_check
 
 Core Modules:
@@ -17,6 +18,7 @@ Core Modules:
     search    — Web search via Tavily/SerpAPI
     files     — Parse PDFs, DOCX, CSV, Excel files
     api       — Universal API caller for ANY connector
+    social    — Post to Twitter/X, LinkedIn, Facebook, Instagram
 
 Interactive:
     ask_user(question, options)    — Pause and ask user a question
@@ -24,7 +26,7 @@ Interactive:
     schedule_check(delay, context) — Schedule a future re-check
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 from . import gmail
 from . import calendar
@@ -33,6 +35,7 @@ from . import sheets
 from . import search
 from . import files
 from . import api
+from . import social
 
 from ._core import ask_user, notify_user, schedule_check
 
@@ -44,6 +47,7 @@ __all__ = [
     "search",
     "files",
     "api",
+    "social",
     "ask_user",
     "notify_user",
     "schedule_check",

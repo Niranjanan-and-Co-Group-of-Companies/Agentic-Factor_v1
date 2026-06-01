@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
+import { randomBytes, createHash } from 'crypto';
 
 // ============================================================
 // Dynamic OAuth Initiation Handler — supports ANY provider
@@ -72,6 +73,24 @@ const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
     clientIdEnv: 'DISCORD_CLIENT_ID',
     scopes: ['identify', 'guilds', 'bot'],
   },
+  // ── Social Media Connectors ──
+  twitter: {
+    authUrl: 'https://twitter.com/i/oauth2/authorize',
+    clientIdEnv: 'TWITTER_CLIENT_ID',
+    scopes: ['tweet.read', 'tweet.write', 'users.read', 'offline.access'],
+    additionalParams: { code_challenge_method: 'S256' },
+  },
+  facebook: {
+    authUrl: 'https://www.facebook.com/v19.0/dialog/oauth',
+    clientIdEnv: 'FACEBOOK_APP_ID',
+    scopes: ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'public_profile', 'email'],
+  },
+  instagram: {
+    authUrl: 'https://www.facebook.com/v19.0/dialog/oauth',
+    clientIdEnv: 'FACEBOOK_APP_ID',
+    scopes: ['instagram_basic', 'instagram_content_publish', 'instagram_manage_comments', 'pages_show_list', 'public_profile'],
+    callbackProviderKey: 'instagram',
+  },
   // Aliases — so /api/oauth/linkedin_oidc also works (returned by verifyMissionPermissions)
   linkedin_oidc: {
     authUrl: 'https://www.linkedin.com/oauth/v2/authorization',
@@ -135,5 +154,26 @@ export async function GET(
     }
   }
 
-  return NextResponse.redirect(authUrl.toString());
+  // ── Twitter PKCE: Generate code_verifier and code_challenge ──
+  let codeVerifier = '';
+  if (provider === 'twitter') {
+    codeVerifier = randomBytes(32).toString('base64url');
+    const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
+    authUrl.searchParams.set('code_challenge', codeChallenge);
+  }
+
+  const response = NextResponse.redirect(authUrl.toString());
+
+  // Store code_verifier in a secure cookie for the callback to use
+  if (codeVerifier) {
+    response.cookies.set('twitter_code_verifier', codeVerifier, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      maxAge: 600, // 10 minutes
+      path: '/api/oauth/callback',
+    });
+  }
+
+  return response;
 }

@@ -374,6 +374,8 @@ INSTRUCTIONS:
       if (process.env.TAVILY_API_KEY) sandboxEnvs['TAVILY_API_KEY'] = process.env.TAVILY_API_KEY;
       if (process.env.SERPAPI_KEY) sandboxEnvs['SERPAPI_KEY'] = process.env.SERPAPI_KEY;
       if (process.env.SENDGRID_API_KEY) sandboxEnvs['SENDGRID_API_KEY'] = process.env.SENDGRID_API_KEY;
+      if (process.env.TWITTER_BEARER_TOKEN) sandboxEnvs['TWITTER_BEARER_TOKEN'] = process.env.TWITTER_BEARER_TOKEN;
+      if (process.env.FACEBOOK_APP_ID) sandboxEnvs['FACEBOOK_APP_ID'] = process.env.FACEBOOK_APP_ID;
 
       // Prepend import of input context from env — available as `_input` (raw string) and `_input_data` (parsed JSON)
       const wrappedCode = `import os, sys, json, base64
@@ -526,6 +528,32 @@ ${pythonCode}`;
                   });
                 }
               } catch (emailErr) { console.warn('Admin notification failed:', emailErr); }
+            }
+
+            // ── Social Media API Call Tracking (per-call credit deduction) ──
+            if (signal.__social_api_call__) {
+              const { provider, action, cost_credits } = signal.__social_api_call__;
+              console.log(`[Agent ${agent.id}] Social API call: ${provider}/${action} (${cost_credits} credits)`);
+              
+              // Log the billing event for credit deduction
+              try {
+                await supabase.from('events').insert({
+                  tenant_id: tenantId,
+                  event_type: 'billing.social_api_call',
+                  entity_type: 'agent',
+                  entity_id: agent.id,
+                  payload: {
+                    missionId,
+                    provider,
+                    action,
+                    cost_credits,
+                    agentRole: agent.role,
+                    timestamp: new Date().toISOString(),
+                  },
+                });
+              } catch (billingErr) {
+                console.warn(`[Agent ${agent.id}] Billing event insert failed (non-fatal):`, billingErr);
+              }
             }
           } catch (sigErr) {
             console.warn(`[Agent ${agent.id}] Signal parse error:`, sigErr);

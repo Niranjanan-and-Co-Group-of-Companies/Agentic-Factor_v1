@@ -51,7 +51,8 @@ const CONNECTORS: ConnectorDef[] = [
   { id: "notion", label: "Notion", icon: "📝", description: "Read/write pages, databases, comments — for documentation and knowledge agents.", category: "productivity", status: "available", provider: "notion" },
   { id: "zoho", label: "Zoho", icon: "📊", description: "Zoho CRM, Mail, Sheets, and 40+ Zoho apps — complete business suite integration.", category: "crm", status: "available", provider: "zoho", scopes: ["ZohoCRM.modules.ALL", "ZohoMail.messages.ALL"] },
   { id: "discord", label: "Discord", icon: "🎮", description: "Bot management, channel messaging, and community engagement automation.", category: "communication", status: "available", provider: "discord", scopes: ["identify", "guilds", "bot", "connections"] },
-  { id: "twitter", label: "X (Twitter)", icon: "🐦", description: "Post tweets, monitor mentions, analyze sentiment, and automate social presence.", category: "social", status: "coming_soon" },
+  { id: "twitter", label: "X (Twitter)", icon: "🐦", description: "Post tweets, monitor mentions, analyze sentiment, and automate social presence.", category: "social", status: "available", provider: "twitter", scopes: ["tweet.read", "tweet.write", "users.read"] },
+  { id: "facebook", label: "Facebook", icon: "📘", description: "Post to Pages, manage content, track engagement, and automate marketing.", category: "social", status: "available", provider: "facebook", scopes: ["pages_manage_posts", "pages_read_engagement"] },
   { id: "microsoft_teams", label: "Microsoft Teams", icon: "👥", description: "Teams messaging, meetings, and workflow automation for enterprise collaboration.", category: "communication", status: "coming_soon" },
 
   // ── REQUEST ACCESS (Not yet integrated) ──
@@ -91,7 +92,7 @@ const CONNECTORS: ConnectorDef[] = [
   { id: "woocommerce", label: "WooCommerce", icon: "🛒", description: "WordPress e-commerce — products, orders, and inventory.", category: "ecommerce", status: "request_access" },
   { id: "bamboohr", label: "BambooHR", icon: "🎋", description: "HR management, employee data, time-off, and onboarding.", category: "hr", status: "request_access" },
   { id: "workday", label: "Workday", icon: "🏢", description: "Enterprise HCM, payroll, and workforce management.", category: "hr", status: "request_access" },
-  { id: "instagram", label: "Instagram", icon: "📸", description: "Post scheduling, analytics, and DM automation.", category: "social", status: "request_access" },
+  { id: "instagram", label: "Instagram", icon: "📸", description: "Post scheduling, analytics, and DM automation.", category: "social", status: "available", provider: "instagram", scopes: ["instagram_basic", "instagram_content_publish"] },
   { id: "tiktok", label: "TikTok", icon: "🎵", description: "Content analytics, ad management, and engagement tracking.", category: "social", status: "request_access" },
   { id: "reddit", label: "Reddit", icon: "🤖", description: "Subreddit monitoring, comment analysis, and sentiment tracking.", category: "social", status: "request_access" },
 ];
@@ -221,6 +222,9 @@ export default function ConnectorsPage() {
     notion: 'notion',
     zoho: 'zoho',
     discord: 'discord',
+    twitter: 'twitter',
+    facebook: 'facebook',
+    instagram: 'instagram',
   };
 
   // Listen for OAuth popup success messages to auto-refresh

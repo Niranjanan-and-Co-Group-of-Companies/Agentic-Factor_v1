@@ -101,17 +101,19 @@ PROVIDER_BASE_URLS = {
     "calendar": "https://www.googleapis.com/calendar/v3", "drive": "https://www.googleapis.com/drive/v3",
     "sheets": "https://sheets.googleapis.com/v4", "slides": "https://slides.googleapis.com/v1",
     "contacts": "https://people.googleapis.com/v1", "linkedin": "https://api.linkedin.com/v2",
-    "slack": "https://slack.com/api", "github": "https://api.github.com",
-    "notion": "https://api.notion.com/v1", "hubspot": "https://api.hubapi.com",
-    "sendgrid": "https://api.sendgrid.com/v3", "airtable": "https://api.airtable.com/v0",
+  "slack": "https://slack.com/api", "github": "https://api.github.com",
+  "notion": "https://api.notion.com/v1", "hubspot": "https://api.hubapi.com",
+  "sendgrid": "https://api.sendgrid.com/v3", "airtable": "https://api.airtable.com/v0",
+  "twitter": "https://api.twitter.com/2", "facebook": "https://graph.facebook.com/v19.0",
+  "instagram": "https://graph.facebook.com/v19.0",
 }
 `;
 
 const INIT_FALLBACK = `
-__version__ = "1.0.0"
-from . import gmail, calendar, drive, sheets, search, files, api
+__version__ = "1.1.0"
+from . import gmail, calendar, drive, sheets, search, files, api, social
 from ._core import ask_user, notify_user, schedule_check
-__all__ = ["gmail","calendar","drive","sheets","search","files","api","ask_user","notify_user","schedule_check"]
+__all__ = ["gmail","calendar","drive","sheets","search","files","api","social","ask_user","notify_user","schedule_check"]
 `;
 
 // SDK file list and their fallbacks
@@ -126,6 +128,7 @@ const SDK_FILES: { name: string; fallback: string }[] = [
   { name: 'api.py', fallback: '' },
   { name: 'search.py', fallback: '' },
   { name: 'files.py', fallback: '' },
+  { name: 'social.py', fallback: '' },
 ];
 
 /**

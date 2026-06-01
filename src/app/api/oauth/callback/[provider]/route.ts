@@ -48,6 +48,22 @@ const PROVIDERS: Record<string, ProviderConfig> = {
     clientIdEnv: 'DISCORD_CLIENT_ID',
     clientSecretEnv: 'DISCORD_CLIENT_SECRET',
   },
+  // ── Social Media Connectors ──
+  twitter: {
+    tokenUrl: 'https://api.twitter.com/2/oauth2/token',
+    clientIdEnv: 'TWITTER_CLIENT_ID',
+    clientSecretEnv: 'TWITTER_CLIENT_SECRET',
+  },
+  facebook: {
+    tokenUrl: 'https://graph.facebook.com/v19.0/oauth/access_token',
+    clientIdEnv: 'FACEBOOK_APP_ID',
+    clientSecretEnv: 'FACEBOOK_APP_SECRET',
+  },
+  instagram: {
+    tokenUrl: 'https://graph.facebook.com/v19.0/oauth/access_token',
+    clientIdEnv: 'FACEBOOK_APP_ID',
+    clientSecretEnv: 'FACEBOOK_APP_SECRET',
+  },
 };
 
 export async function GET(
@@ -98,6 +114,27 @@ export async function GET(
           code,
           redirect_uri: redirectUri,
         }),
+      });
+    } else if (provider === 'twitter') {
+      // Twitter OAuth 2.0 PKCE — requires code_verifier from cookie
+      const codeVerifier = request.cookies.get('twitter_code_verifier')?.value || '';
+      if (!codeVerifier) {
+        console.error('[OAuth twitter] Missing code_verifier cookie');
+      }
+      // Twitter requires Basic Auth (client_id:client_secret)
+      const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+      tokenRes = await fetch(config.tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${basicAuth}`,
+        },
+        body: new URLSearchParams({
+          code,
+          grant_type: 'authorization_code',
+          redirect_uri: redirectUri,
+          code_verifier: codeVerifier,
+        }).toString(),
       });
     } else {
       let body: URLSearchParams | string = new URLSearchParams({
@@ -164,6 +201,31 @@ export async function GET(
       refreshToken = tokenData.refresh_token || '';
       expiresIn = tokenData.expires_in || 604800; // default 7 days
       scope = tokenData.scope || '';
+    } else if (provider === 'twitter') {
+      // Twitter OAuth 2.0 response
+      accessToken = tokenData.access_token;
+      refreshToken = tokenData.refresh_token || '';
+      expiresIn = tokenData.expires_in || 7200; // default 2 hours
+      scope = tokenData.scope || '';
+    } else if (provider === 'facebook' || provider === 'instagram') {
+      // Facebook/Instagram Graph API token
+      accessToken = tokenData.access_token;
+      expiresIn = tokenData.expires_in || 5184000; // ~60 days for long-lived
+      scope = '';
+      // Exchange short-lived token for long-lived token
+      try {
+        const longLivedRes = await fetch(
+          `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${clientId}&client_secret=${clientSecret}&fb_exchange_token=${accessToken}`
+        );
+        const longLivedData = await longLivedRes.json();
+        if (longLivedData.access_token) {
+          accessToken = longLivedData.access_token;
+          expiresIn = longLivedData.expires_in || 5184000;
+          console.log(`[OAuth ${provider}] Exchanged for long-lived token (${expiresIn}s)`);
+        }
+      } catch (ltErr) {
+        console.warn(`[OAuth ${provider}] Long-lived token exchange failed (non-fatal):`, ltErr);
+      }
     }
 
     if (!accessToken) {
@@ -304,6 +366,7 @@ export async function GET(
     const DISPLAY_NAMES: Record<string, string> = {
       linkedin_oidc: 'LinkedIn', github: 'GitHub', slack: 'Slack',
       google: 'Google', notion: 'Notion', zoho: 'Zoho', discord: 'Discord',
+      twitter: 'Twitter / X', facebook: 'Facebook', instagram: 'Instagram',
     };
     const displayName = DISPLAY_NAMES[provider] || provider.charAt(0).toUpperCase() + provider.slice(1);
 
