@@ -312,18 +312,27 @@ export default function MissionDetailPage() {
         const providers = data.providers || [];
         
         // If it's an OAuth connector the user can connect themselves, trigger the popup
-        const oauthProviders = ['google', 'linkedin_oidc', 'slack', 'github', 'notion', 'discord', 'zoho'];
-        const userCanConnect = providers.some((p: string) => oauthProviders.includes(p));
+        const oauthProviders = ['google', 'linkedin_oidc', 'slack', 'github', 'notion', 'discord', 'zoho', 'twitter', 'facebook', 'instagram'];
+        const connectableProviders = providers.filter((p: string) => oauthProviders.includes(p));
+        const nonConnectable = providers.filter((p: string) => !oauthProviders.includes(p));
         
-        if (userCanConnect) {
-          // User can connect this themselves via OAuth
-          triggerAuth(providers[0], handleStartMission);
-        } else {
+        if (connectableProviders.length > 0) {
+          // User can connect these themselves via OAuth — show popup for the first one
+          triggerAuth(connectableProviders[0], handleStartMission);
+          
+          // If there are multiple missing, show a message about the rest
+          if (connectableProviders.length > 1) {
+            setChatMessages(prev => [...prev, { 
+              role: "assistant", 
+              text: `🔗 **Connect Your Accounts**\n\nThis mission needs the following connectors. Please connect them from the **Connectors** page:\n\n${connectableProviders.map((p: string) => `• **${p.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}**`).join('\n')}\n\nA popup will open for the first one. After connecting, click **Force Restart** to continue.`
+            }]);
+          }
+        } else if (nonConnectable.length > 0) {
           // These are connectors the admin needs to set up (API keys, etc.)
           // Show a friendly message — admin has been emailed
           setChatMessages(prev => [...prev, { 
             role: "assistant", 
-            text: `⚠️ **Connectors Pending Setup**\n\nThis mission requires the following connectors that aren't configured yet:\n\n${providers.map((p: string) => `• **${p.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}**`).join('\n')}\n\nOur team has been notified and will set them up shortly. You'll receive an email once they're ready.\n\nOnce configured, click **Force Restart** to run the mission with full capabilities.`
+            text: `⚠️ **Connectors Pending Setup**\n\nThis mission requires connectors that aren't available on the platform yet:\n\n${nonConnectable.map((p: string) => `• **${p.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}**`).join('\n')}\n\nOur team has been notified and will set them up shortly. You'll receive an email once they're ready.\n\nOnce configured, click **Force Restart** to run the mission with full capabilities.`
           }]);
         }
         return;

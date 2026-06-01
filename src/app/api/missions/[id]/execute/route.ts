@@ -20,12 +20,12 @@ export async function POST(
     const missingProviders = await verifyMissionPermissions(missionId, tenantId);
     
     if (missingProviders.length > 0) {
-      // Email the admin about missing connectors
+      // Determine: is this a customer-connectable issue or a platform-level issue?
       try {
         const { createServiceClient } = await import('@/lib/supabase/server');
         const supabase = createServiceClient();
         
-        // Get mission title for the email
+        // Get mission title and customer email
         const { data: missionData } = await supabase
           .from('missions')
           .select('mission_json')
@@ -33,22 +33,44 @@ export async function POST(
           .eq('tenant_id', tenantId)
           .single();
         
-        // Get customer email
-        const { data: tenantData } = await supabase
-          .from('tenants')
-          .select('owner_email')
-          .eq('id', tenantId)
-          .single();
-        
+        const { data: { user } } = await supabase.auth.admin.getUserById(tenantId);
         const missionTitle = missionData?.mission_json?.title || 'Unknown Mission';
-        const customerEmail = tenantData?.owner_email || 'unknown';
+        const customerEmail = user?.email || '';
         
-        // Send admin notification
-        const { notifyAdminMissingConnectors } = await import('@/lib/services/email-notifications');
-        await notifyAdminMissingConnectors(missionId, missionTitle, customerEmail, missingProviders);
-        console.log(`[Execute] Admin notified about missing connectors: ${missingProviders.join(', ')}`);
+        // OAuth-connectable providers (customer can self-serve)
+        const oauthProviders = ['google', 'linkedin_oidc', 'slack', 'github', 'notion', 'discord', 'zoho', 'twitter', 'facebook', 'instagram'];
+        const customerConnectable = missingProviders.filter(p => oauthProviders.includes(p));
+        const platformOnly = missingProviders.filter(p => !oauthProviders.includes(p));
+        
+        // Email the CUSTOMER for connectors they can connect themselves
+        if (customerConnectable.length > 0 && customerEmail) {
+          const { sendEmail, displayName } = await import('@/lib/services/email-notifications');
+          const connectorListHtml = customerConnectable.map(p => `<li><strong>${displayName(p)}</strong></li>`).join('');
+          await sendEmail({
+            to: customerEmail,
+            subject: `🔗 Connect Your Account — ${missionTitle}`,
+            htmlBody: `
+              <div style="font-family: Inter, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #3b82f6;">🔗 Connect Your Account</h2>
+                <p>Your mission <strong>"${missionTitle}"</strong> needs the following connectors to run:</p>
+                <ul>${connectorListHtml}</ul>
+                <p>Please go to your <strong>Connectors</strong> page and click <strong>"Connect →"</strong> to authorize your account.</p>
+                <a href="https://agenticfactor.io/connectors" style="display: inline-block; padding: 12px 24px; background: #3b82f6; color: white; text-decoration: none; border-radius: 8px; margin-top: 16px;">Go to Connectors →</a>
+                <p style="margin-top: 24px; color: #64748b;">After connecting, go back to your mission and click <strong>Force Restart</strong>.</p>
+              </div>
+            `,
+          });
+          console.log(`[Execute] Customer ${customerEmail} notified about connectable: ${customerConnectable.join(', ')}`);
+        }
+        
+        // Email the ADMIN only for platform-level issues (non-OAuth connectors)
+        if (platformOnly.length > 0) {
+          const { notifyAdminMissingConnectors } = await import('@/lib/services/email-notifications');
+          await notifyAdminMissingConnectors(missionId, missionTitle, customerEmail || 'unknown', platformOnly);
+          console.log(`[Execute] Admin notified about platform connectors: ${platformOnly.join(', ')}`);
+        }
       } catch (emailErr) {
-        console.error('[Execute] Failed to send admin notification:', emailErr);
+        console.error('[Execute] Failed to send notification:', emailErr);
       }
 
       return NextResponse.json(

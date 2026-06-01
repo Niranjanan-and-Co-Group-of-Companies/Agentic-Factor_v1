@@ -60,6 +60,8 @@ export function AuthPopupProvider({ children }: { children: React.ReactNode }) {
           github: 'GitHub', slack: 'Slack', google: 'Google',
           notion: 'Notion', zoho: 'Zoho', discord: 'Discord',
           slack_oidc: 'Slack',
+          twitter: 'X (Twitter)', facebook: 'Facebook', instagram: 'Instagram',
+          whatsapp: 'WhatsApp', messenger: 'Messenger',
         };
         const displayName = provider 
           ? DISPLAY_NAMES[provider] || provider.charAt(0).toUpperCase() + provider.slice(1)

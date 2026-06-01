@@ -144,12 +144,22 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
   // Map from common names (used in mission JSON) to DB provider keys (used in tenant_permissions)
   const PROVIDER_ALIASES: Record<string, string> = {
     'google': 'google', 'gmail': 'google', 'google mail': 'google',
+    'google workspace': 'google', 'google calendar': 'google', 'google drive': 'google',
+    'google sheets': 'google', 'google docs': 'google',
     'linkedin': 'linkedin_oidc', 'linkedin_oidc': 'linkedin_oidc',
     'slack': 'slack', 'slack_oidc': 'slack',
-    'github': 'github',
+    'github': 'github', 'git': 'github',
     'notion': 'notion',
-    'zoho': 'zoho',
+    'zoho': 'zoho', 'zoho crm': 'zoho',
     'discord': 'discord',
+    // ── Social Media Connectors ──
+    'twitter': 'twitter', 'x': 'twitter', 'x.com': 'twitter',
+    'twitter/x': 'twitter', 'x (twitter)': 'twitter',
+    'oauth 2.0 pkce': 'twitter',  // LLM often generates "Twitter/X OAuth 2.0 PKCE"
+    'facebook': 'facebook', 'fb': 'facebook', 'meta': 'facebook',
+    'facebook graph': 'facebook', 'graph api': 'facebook',
+    'instagram': 'instagram', 'insta': 'instagram', 'ig': 'instagram',
+    'whatsapp': 'whatsapp', 'messenger': 'messenger',
   };
 
   const requiredProviders = new Set<string>();

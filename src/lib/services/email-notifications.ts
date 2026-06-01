@@ -75,6 +75,8 @@ const DISPLAY_NAMES: Record<string, string> = {
   google: 'Google', linkedin_oidc: 'LinkedIn', slack: 'Slack',
   github: 'GitHub', notion: 'Notion', discord: 'Discord',
   zoho: 'Zoho', azure: 'Azure', twitter: 'X (Twitter)',
+  facebook: 'Facebook', instagram: 'Instagram',
+  whatsapp: 'WhatsApp', messenger: 'Messenger',
   teams: 'Microsoft Teams', stripe: 'Stripe',
 };
 
