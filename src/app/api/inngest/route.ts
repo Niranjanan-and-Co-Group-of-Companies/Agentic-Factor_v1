@@ -1,6 +1,6 @@
 import { serve } from 'inngest/next';
 import { inngest } from '@/lib/inngest/client';
-import { executeMissionBackground } from '@/lib/inngest/functions';
+import { executeMissionBackground, generateBlueprintBackground } from '@/lib/inngest/functions';
 
 // ═══════════════════════════════════════════════════════════
 // /api/inngest — Inngest webhook endpoint
@@ -14,5 +14,6 @@ export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
     executeMissionBackground,
+    generateBlueprintBackground,
   ],
 });

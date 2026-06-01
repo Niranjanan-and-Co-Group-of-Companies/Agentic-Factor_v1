@@ -48,6 +48,7 @@ function MissionCreatorInner() {
   const [loading, setLoading] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
   const [error, setError] = useState("");
+  const [progressMessage, setProgressMessage] = useState("");
   const [discoveryQuestion, setDiscoveryQuestion] = useState("");
   const [blueprint, setBlueprint] = useState<Blueprint | null>(null);
   const [editingAgent, setEditingAgent] = useState<number | null>(null);
@@ -87,75 +88,114 @@ function MissionCreatorInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  // ── Phase 1: Generate Blueprint (NO DB writes) ──
-  const handleGenerate = async (overrideIntent?: string, retryCount = 0) => {
+  // ── Phase 1: Generate Blueprint (ASYNC via Inngest + Polling) ──
+  const handleGenerate = async (overrideIntent?: string) => {
     const finalIntent = overrideIntent || intent;
     if (!finalIntent.trim() || finalIntent.length < 10) { setError("Describe your mission in at least 10 characters."); return; }
-    setLoading(true); setError("");
+    setLoading(true); setError(""); setProgressMessage("Starting blueprint generation...");
+    
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 115000); // Abort 5s before Vercel's 120s limit
-      
+      // Step 1: Fire the Inngest event (returns instantly)
       const res = await fetch("/api/missions?action=blueprint", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ intent: finalIntent }),
         credentials: "include",
-        signal: controller.signal,
       });
-      clearTimeout(timeoutId);
       
-      // ── Safe response parsing (handles 504, HTML errors, etc.) ──
       let data: any;
       try {
         const text = await res.text();
         data = JSON.parse(text);
       } catch {
-        // Response was not JSON (e.g., Vercel 504 HTML page)
-        if (res.status === 504 || res.status === 502 || res.status === 503) {
-          if (retryCount < 1) {
-            setError("⏳ Blueprint generation is taking longer than expected. Retrying with optimizations...");
-            // Auto-retry once
-            setTimeout(() => handleGenerate(finalIntent, retryCount + 1), 2000);
-            return;
-          }
-          throw new Error("Blueprint generation timed out. Try a simpler mission description, or break it into smaller steps.");
-        }
         throw new Error(`Server returned an unexpected response (HTTP ${res.status}). Please try again.`);
       }
       
       if (!res.ok) {
-        const errMsg = data.message || data.error || "Blueprint generation failed";
-        const details = data.details ? `: ${JSON.stringify(data.details)}` : "";
-        throw new Error(`${errMsg}${details}`);
+        throw new Error(data.message || data.error || "Failed to start blueprint generation");
       }
       
-      // Phase 2.2: Discovery Loop Hook
-      if (data.isDiscovery) {
-        setDiscoveryQuestion(data.question);
-        setPhase("discovery");
-        return;
+      const jobId = data.jobId;
+      if (!jobId) {
+        throw new Error("No job ID returned. Please try again.");
       }
       
-      // Add default trust levels to agents
-      const agentsWithTrust = (data.blueprint.agents as BlueprintAgent[]).map((a) => ({
-        ...a, trustLevel: ("conditional" as TrustLevel),
-      }));
-      setBlueprint({ ...data.blueprint, agents: agentsWithTrust });
-      setPhase("reviewing");
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        if (retryCount < 1) {
-          setError("⏳ Blueprint generation is taking longer than expected. Retrying...");
-          setTimeout(() => handleGenerate(finalIntent, retryCount + 1), 2000);
-          return;
+      // Step 2: Poll for status every 3 seconds
+      setProgressMessage("Analyzing your intent...");
+      
+      const maxPolls = 120; // 120 * 3s = 6 minutes max
+      for (let poll = 0; poll < maxPolls; poll++) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        try {
+          const statusRes = await fetch(`/api/missions/blueprint-status?jobId=${jobId}`, {
+            credentials: "include",
+          });
+          
+          let statusData: any;
+          try {
+            const text = await statusRes.text();
+            statusData = JSON.parse(text);
+          } catch {
+            continue; // Retry on parse failure
+          }
+          
+          // Update progress message
+          if (statusData.step) {
+            setProgressMessage(statusData.step);
+          }
+          
+          // Handle each status
+          if (statusData.status === 'completed') {
+            // Blueprint ready!
+            const agentsWithTrust = (statusData.blueprint.agents as BlueprintAgent[]).map((a: any) => ({
+              ...a, trustLevel: ("conditional" as TrustLevel),
+            }));
+            setBlueprint({ ...statusData.blueprint, agents: agentsWithTrust });
+            setPhase("reviewing");
+            setProgressMessage("");
+            setLoading(false);
+            return;
+          }
+          
+          if (statusData.status === 'discovery') {
+            // Discovery question
+            setDiscoveryQuestion(statusData.question);
+            setPhase("discovery");
+            setProgressMessage("");
+            setLoading(false);
+            return;
+          }
+          
+          if (statusData.status === 'failed') {
+            throw new Error(statusData.error || "Blueprint generation failed.");
+          }
+          
+          // 'processing' or 'pending' — continue polling
+          if (statusData.status === 'processing') {
+            setProgressMessage(statusData.step || "Designing agent team...");
+          } else if (statusData.status === 'pending') {
+            setProgressMessage("Starting blueprint generation...");
+          }
+          
+        } catch (pollErr: any) {
+          if (pollErr.message && !pollErr.message.includes('fetch')) {
+            throw pollErr; // Re-throw non-network errors (like 'failed' status)
+          }
+          // Network error during poll — continue trying
+          console.warn('[Creator] Poll error, retrying...', pollErr);
         }
-        setError("Blueprint generation timed out. Try a simpler mission description, or break it into smaller steps.");
-      } else {
-        setError(err.message);
       }
+      
+      // If we get here, we exceeded max polls
+      throw new Error("Blueprint generation is taking too long. Please try again with a simpler description.");
+      
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+      setProgressMessage("");
     }
-    finally { setLoading(false); }
   };
   const handleEditBlueprint = async (instruction: string) => {
     if (!blueprint || !instruction.trim()) return;
@@ -338,7 +378,7 @@ function MissionCreatorInner() {
                 {loading && (
                   <div style={{ marginTop: "var(--space-md)", display: "flex", alignItems: "center", gap: 8, color: "var(--accent)", fontSize: "0.85rem" }}>
                     <span className="animate-glow" style={{ display: "inline-block", width: 14, height: 14, borderRadius: "50%", background: "var(--accent)" }} />
-                    Generating blueprint with AI... this may take up to 60 seconds for complex missions
+                    {progressMessage || "Generating blueprint with AI..."}
                   </div>
                 )}
                 {error && <div style={{ marginTop: "var(--space-md)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem", lineHeight: 1.6 }}>❌ {error}</div>}

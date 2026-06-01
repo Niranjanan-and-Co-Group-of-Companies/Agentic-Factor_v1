@@ -40,48 +40,30 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // ── Phase 1: Generate Blueprint (NO persistence) ──
+    // ── Phase 1: Generate Blueprint (ASYNC via Inngest) ──
     if (action === 'blueprint') {
-      const { checkCredits, deductCredits } = await import('@/lib/middleware/billing');
+      const { checkCredits } = await import('@/lib/middleware/billing');
       const creditCheck = await checkCredits(tenantId, 1);
       if (!creditCheck.allowed) {
         return NextResponse.json({ error: creditCheck.reason }, { status: 402 });
       }
 
       const { intent } = GenerateBlueprintRequest.parse(body);
-      const { mission, rawLLMOutput, isDiscovery, question } = await generateMissionJSON(intent, tenantId);
       
-      // Deduct 1 credit for the LLM generation (only if not a discovery question)
-      if (!isDiscovery) {
-        await deductCredits(tenantId, 1, 'blueprint_generation').catch(() => {});
-      }
-
-      if (isDiscovery) {
-        return NextResponse.json({
-          success: true,
-          phase: 'discovery',
-          isDiscovery: true,
-          question: question,
-          message: question,
-        });
-      }
-      if (!mission) {
-        return NextResponse.json({ error: 'Blueprint generation returned empty. Please try again.' }, { status: 500 });
-      }
+      // Generate a job ID and fire Inngest event (returns INSTANTLY)
+      const jobId = crypto.randomUUID();
+      
+      const { inngest } = await import('@/lib/inngest/client');
+      await inngest.send({
+        name: 'mission/blueprint.generate',
+        data: { jobId, intent, tenantId },
+      });
 
       return NextResponse.json({
         success: true,
-        phase: 'blueprint',
-        blueprint: mission,
-        rawLLMOutput,
-        meta: {
-          agentCount: mission.agents.length,
-          pattern: mission.orchestration.pattern,
-          timeoutSeconds: mission.orchestration.timeoutSeconds,
-          permissionsRequired: mission.permissions.filter((p) => !p.granted).length,
-          validationChecks: mission.validationChecklist.length,
-        },
-        message: 'Blueprint generated. Review and edit before confirming.',
+        phase: 'processing',
+        jobId,
+        message: 'Blueprint generation started. Poll /api/missions/blueprint-status for results.',
       });
     }
 

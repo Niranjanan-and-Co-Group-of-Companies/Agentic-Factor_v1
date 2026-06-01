@@ -307,3 +307,106 @@ export const executeMissionBackground = inngest.createFunction(
     }
   }
 );
+
+// ═══════════════════════════════════════════════════════════
+// Inngest Function: Generate Blueprint in Background
+//
+// Eliminates Vercel timeout issues by running LLM calls as
+// separate Inngest steps. Frontend polls for status.
+//
+// Flow:
+//   1. Event "mission/blueprint.generate" received
+//   2. Step 1: Discovery check (ask clarification if needed)
+//   3. Step 2: Main blueprint LLM generation
+//   4. Step 3: Save result to DB (blueprint_jobs table via events)
+// ═══════════════════════════════════════════════════════════
+
+export const generateBlueprintBackground = inngest.createFunction(
+  {
+    id: 'generate-blueprint',
+    name: 'Generate Blueprint (Background)',
+    retries: 2,
+    triggers: [{ event: 'mission/blueprint.generate' }],
+  },
+  async ({ event, step }) => {
+    const { jobId, intent, tenantId } = event.data;
+    const supabase = createServiceClient();
+
+    // Helper: update job status in events table
+    const updateJobStatus = async (status: string, data: Record<string, any> = {}) => {
+      await supabase.from('events').insert({
+        tenant_id: tenantId,
+        event_type: 'blueprint.job_update',
+        entity_type: 'blueprint_job',
+        entity_id: jobId,
+        payload: { jobId, status, ...data, updatedAt: new Date().toISOString() },
+      });
+    };
+
+    try {
+      // ── Step 1: Discovery Check ──
+      const discoveryResult = await step.run('discovery-check', async () => {
+        await updateJobStatus('processing', { step: 'Analyzing your intent...' });
+
+        const { generateMissionJSON } = await import('@/lib/services/intake');
+        const result = await generateMissionJSON(intent, tenantId);
+
+        if (result.isDiscovery && result.question) {
+          return { type: 'discovery' as const, question: result.question };
+        }
+
+        if (!result.mission) {
+          throw new Error('Blueprint generation returned empty.');
+        }
+
+        return {
+          type: 'blueprint' as const,
+          mission: result.mission,
+          rawLLMOutput: result.rawLLMOutput,
+        };
+      });
+
+      // If discovery question, save it and stop
+      if (discoveryResult.type === 'discovery') {
+        await step.run('save-discovery', async () => {
+          await updateJobStatus('discovery', {
+            question: discoveryResult.question,
+          });
+        });
+        return { success: true, jobId, type: 'discovery' };
+      }
+
+      // ── Step 2: Save blueprint result ──
+      await step.run('save-blueprint', async () => {
+        const mission = discoveryResult.mission;
+        await updateJobStatus('completed', {
+          blueprint: mission,
+          rawLLMOutput: discoveryResult.rawLLMOutput,
+          meta: {
+            agentCount: mission.agents.length,
+            pattern: mission.orchestration.pattern,
+            timeoutSeconds: mission.orchestration.timeoutSeconds,
+          },
+        });
+      });
+
+      // Deduct credit
+      await step.run('deduct-credit', async () => {
+        const { deductCredits } = await import('@/lib/middleware/billing');
+        await deductCredits(tenantId, 1, 'blueprint_generation').catch(() => {});
+      });
+
+      return { success: true, jobId, type: 'blueprint' };
+
+    } catch (error: any) {
+      // Save error status so frontend can show it
+      await step.run('save-error', async () => {
+        await updateJobStatus('failed', {
+          error: error.message || 'Unknown error',
+        });
+      });
+
+      throw error;
+    }
+  }
+);
