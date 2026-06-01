@@ -111,6 +111,24 @@ You must decompose the user's intent into:
    - **READING INPUT FROM PREVIOUS AGENTS**: The script MUST read input from the INPUT_CONTEXT environment variable: \`input_data = json.loads(os.environ.get('INPUT_CONTEXT', '{}'))\`. Do NOT use sys.stdin.read(). The \`_input\` and \`_input_data\` variables are also pre-set with the raw string and parsed JSON respectively.
    - The script must print its final output to \`sys.stdout\` as a JSON string.
    - **CRITICAL: DO NOT EMPTY THE BUCKET.** The script MUST parse the input JSON and merge its new output into it. If the previous agent generated a newsletter, keep it in the final JSON alongside your new status receipts so the final output contains ALL accumulated content.
+   - **NEVER use sys.exit().** E2B sandbox treats ANY sys.exit() as a crash. Use print(json.dumps({...})) to output and let the script end naturally.
+   - **PRE-INSTALLED SDK MODULES** — Use these instead of raw HTTP requests:
+     - \`from agenticfactor import social\` — Social media posting (ALWAYS use this for Twitter/Facebook/Instagram/LinkedIn):
+       - \`social.post_tweet(text)\` → Post a tweet (auto-handles Twitter API v2)
+       - \`social.get_tweets(query)\` → Search recent tweets
+       - \`social.get_twitter_user_me()\` → Get authenticated Twitter user profile
+       - \`social.get_facebook_pages()\` → List managed Facebook Pages (returns [{id, name, access_token}])
+       - \`social.post_facebook(page_id, message)\` → Post to a Facebook Page (auto-fetches page token)
+       - \`social.get_instagram_accounts()\` → List Instagram Business accounts
+       - \`social.post_instagram(ig_user_id, image_url, caption)\` → Post to Instagram
+       - \`social.post_linkedin(text)\` → Post to LinkedIn
+       - \`social.post_to_all(text, platforms=["twitter","facebook"])\` → Multi-platform post
+     - \`from agenticfactor import api\` — Universal API caller for any provider:
+       - \`api.call(provider, method, endpoint, params, json_data)\` — Always use full URLs or relative paths (base URLs auto-resolved)
+       - \`api.slack_send(channel, text)\` — Send Slack message
+       - \`api.github_create_issue(owner, repo, title, body)\` — Create GitHub issue
+       - \`api.notion_create_page(parent_id, title, content)\` — Create Notion page
+     - \`from agenticfactor._core import ask_user, notify_user\` — Interactive signals
 7. **Orchestration Pattern**: Choose the optimal pattern:
    - "sequential" — linear pipeline (A → B → C)
    - "parallel" — fan-out/gather (A+B+C → D)
@@ -133,6 +151,8 @@ IMPORTANT RULES:
 - The validationChecklist must contain actionable, testable assertions.
 - Tool types MUST be from the allowed list above. Do NOT invent new types.
 - Permission "service" values MUST be exact provider keys from the list above. Using full API names will break the system.
+- NEVER use sys.exit() in pythonScript — the sandbox crashes on it. Let scripts end naturally.
+- For social media tasks, ALWAYS use the agenticfactor.social module — NEVER write raw API calls.
 
 Respond ONLY with valid JSON matching the schema. No markdown, no explanation.`;
 
@@ -140,6 +160,42 @@ Respond ONLY with valid JSON matching the schema. No markdown, no explanation.`;
 // Few-shot examples for common mission types
 // ============================================================
 const FEW_SHOT_EXAMPLES = `
+Example 0 — User says: "Post Hello World to my Facebook Page"
+{
+  "title": "Post to Facebook Page",
+  "description": "Posts a message to the user's Facebook Page using the agenticfactor SDK.",
+  "agents": [
+    {
+      "agentIndex": 0,
+      "role": "Facebook Page Publisher",
+      "capabilities": ["post_facebook"],
+      "requiresExternalData": true,
+      "tools": [{"name": "Facebook Graph API", "type": "social_media", "requiresAuth": true, "confidentialityLevel": "internal"}],
+      "systemPrompt": "You post content to Facebook Pages using the agenticfactor.social SDK.",
+      "handoffProtocol": "Output: { 'page_id': string, 'post_id': string, 'message': string, 'status': 'posted' | 'failed' }",
+      "pythonScript": "import json, os\nfrom agenticfactor import social\n\ninput_data = json.loads(os.environ.get('INPUT_CONTEXT', '{}'))\ntry:\n    pages = social.get_facebook_pages()\n    if not pages:\n        print(json.dumps({**input_data, 'status': 'failed', 'error': 'No Facebook Pages found'}))\n    else:\n        page = pages[0]\n        result = social.post_facebook(page['id'], 'Hello World from Agentic Factor! 🚀')\n        print(json.dumps({**input_data, 'status': 'posted', 'page_id': page['id'], 'page_name': page['name'], 'post_id': result.get('id', ''), 'message': 'Hello World from Agentic Factor! 🚀'}))\nexcept Exception as e:\n    print(json.dumps({**input_data, 'status': 'failed', 'error': str(e)}))"
+    }
+  ],
+  "orchestration": {
+    "pattern": "sequential",
+    "timeoutSeconds": 120,
+    "edges": []
+  },
+  "validationChecklist": [
+    "Facebook OAuth token is valid",
+    "At least one Facebook Page is accessible",
+    "Post was successfully created on the Page"
+  ],
+  "expectedOutputFormat": "{\\n  \\\"status\\\": \\\"posted\\\",\\n  \\\"page_id\\\": \\\"123\\\",\\n  \\\"post_id\\\": \\\"456\\\"\\n}",
+  "permissions": [
+    {"type": "oauth_token", "service": "facebook", "scope": "pages_manage_posts", "confidentialityLevel": "internal"}
+  ],
+  "discoveryQuestions": [
+    "Which Facebook Page should the post go to?",
+    "What message would you like to post?"
+  ]
+}
+
 Example 1 — User says: "Monitor my AWS costs and alert on Slack if spending exceeds $1000/day"
 {
   "title": "AWS Cost Monitor with Slack Alerts",

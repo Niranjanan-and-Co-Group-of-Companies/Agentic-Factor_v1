@@ -215,6 +215,11 @@ PROVIDER_BASE_URLS = {
     "notion": "https://api.notion.com/v1",
     "discord": "https://discord.com/api/v10",
     "zoho": "https://www.zohoapis.com",
+    # ── Social Media ──
+    "twitter": "https://api.twitter.com/2",
+    "facebook": "https://graph.facebook.com/v19.0",
+    "instagram": "https://graph.facebook.com/v19.0",
+    # ── Other ──
     "salesforce": "",  # Instance-specific
     "hubspot": "https://api.hubapi.com",
     "jira": "",  # Instance-specific
