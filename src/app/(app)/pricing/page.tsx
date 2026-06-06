@@ -159,7 +159,7 @@ export default function PricingPage() {
       const res = await fetch("/api/razorpay/create-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId, quantity: planId === "pro" ? seatCount : 1, baseFee: planId === "pro" ? 27 : 0, seatPrice: planId === "pro" ? 26 : 0 }),
+        body: JSON.stringify({ planId, quantity: planId === "pro" ? seatCount : 1, baseFee: planId === "pro" ? 2299 : 0, seatPrice: planId === "pro" ? 2249 : 0 }),
       });
 
       const data = await res.json();

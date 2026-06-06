@@ -356,47 +356,88 @@ INSTRUCTIONS:
     pythonCode = sanitizePythonCode(pythonCode);
 
     // ── SYNTAX PRE-CHECK: Validate Python syntax BEFORE wasting an E2B sandbox run ──
-    // Uses a quick E2B sandbox to compile() the code without executing it.
-    // If syntax is broken, we ask the LLM to regenerate with the specific error.
-    const syntaxCheckCode = `import ast\ntry:\n    ast.parse(${JSON.stringify(pythonCode)})\n    print("SYNTAX_OK")\nexcept SyntaxError as e:\n    print(f"SYNTAX_ERROR:{e.lineno}:{e.msg}:{e.text}")`;
-    
-    try {
-      const checkSandbox = await Sandbox.create({
-        apiKey: process.env.E2B_API_KEY,
-        timeoutMs: 15_000,
-      });
-      const checkResult = await checkSandbox.runCode(syntaxCheckCode);
-      await checkSandbox.kill().catch(() => {});
-      
-      const checkOutput = (checkResult.text || '').trim();
-      
-      if (checkOutput.startsWith('SYNTAX_ERROR:')) {
-        const parts = checkOutput.replace('SYNTAX_ERROR:', '').split(':');
-        const errorLine = parts[0] || '?';
-        const errorMsg = parts[1] || 'unknown syntax error';
-        const errorText = parts.slice(2).join(':') || '';
+    // Catches all syntax errors (predefined scripts, LLM-generated, and healed code)
+    // If broken, asks the LLM to fix with targeted error info, then re-validates.
+    const validateAndFixSyntax = async (code: string, maxPasses: number = 2): Promise<string> => {
+      for (let pass = 0; pass < maxPasses; pass++) {
+        const syntaxCheckCode = `import ast\ntry:\n    ast.parse(${JSON.stringify(code)})\n    print("SYNTAX_OK")\nexcept SyntaxError as e:\n    print(f"SYNTAX_ERROR:{e.lineno}:{e.msg}:{e.text}")`;
         
-        console.warn(`[Agent ${agent.id}] Syntax pre-check FAILED at line ${errorLine}: ${errorMsg} → ${errorText}`);
-        console.log(`[Agent ${agent.id}] Asking LLM to regenerate code with targeted fix...`);
-        
-        // Ask the LLM to fix the specific syntax error
-        const fixResponse = await callLLM([
-          { role: 'system', content: `You are a Python code fixer. The following Python code has a syntax error. Fix ONLY the syntax error and return the COMPLETE corrected code inside a \`\`\`python block. Do NOT change any logic — only fix the syntax.\n\nSYNTAX ERROR:\n- Line ${errorLine}: ${errorMsg}\n- Offending text: ${errorText}\n\nCOMMON FIXES:\n- If a string is unterminated, close it properly\n- If a string spans multiple lines, use triple double-quotes (\"\"\")\n- NEVER put raw HTML inside triple-quoted strings — build HTML with list.append() and ''.join()\n- If quotes are mismatched, fix the matching\n- Use json.dumps() instead of hand-building JSON strings` },
-          { role: 'user', content: `Fix this Python code:\n\n\`\`\`python\n${pythonCode}\n\`\`\`` }
-        ], { temperature: 0.0, jsonMode: false, tier: 2 });
-        
-        const fixMatch = fixResponse.content.match(/```\s*python\s*\n([\s\S]*?)```/);
-        if (fixMatch) {
-          pythonCode = sanitizePythonCode(fixMatch[1]);
-          console.log(`[Agent ${agent.id}] Code regenerated after syntax fix.`);
-        } else {
-          console.warn(`[Agent ${agent.id}] LLM fix response had no python block. Proceeding with original code.`);
+        try {
+          const checkSandbox = await Sandbox.create({
+            apiKey: process.env.E2B_API_KEY,
+            timeoutMs: 15_000,
+          });
+          const checkResult = await checkSandbox.runCode(syntaxCheckCode);
+          await checkSandbox.kill().catch(() => {});
+          
+          const checkOutput = (checkResult.text || '').trim();
+          
+          if (!checkOutput.startsWith('SYNTAX_ERROR:')) {
+            if (pass > 0) console.log(`[Agent ${agent.id}] Syntax fixed on pass ${pass + 1}.`);
+            return code; // Code is valid
+          }
+          
+          const parts = checkOutput.replace('SYNTAX_ERROR:', '').split(':');
+          const errorLine = parts[0] || '?';
+          const errorMsg = parts[1] || 'unknown syntax error';
+          const errorText = parts.slice(2).join(':') || '';
+          
+          console.warn(`[Agent ${agent.id}] Syntax pre-check pass ${pass + 1} FAILED at line ${errorLine}: ${errorMsg} → ${errorText}`);
+          
+          // Ask the LLM to fix with VERY specific instructions for known error patterns
+          const fixResponse = await callLLM([
+            { role: 'system', content: `You are an expert Python syntax fixer. Fix the EXACT syntax error and return the COMPLETE corrected code inside a \`\`\`python block.
+
+SYNTAX ERROR FOUND:
+- Line ${errorLine}: ${errorMsg}
+- Offending text: ${errorText}
+
+CRITICAL FIX RULES (follow these EXACTLY):
+
+1. UNTERMINATED STRING LITERAL (e.g. \`if text.startswith("\`):
+   - The string was opened with " but never closed on the same line
+   - FIX: Close the string properly. Example: \`if text.startswith("{")\`
+   - NEVER split a regular string across multiple lines
+
+2. INVALID DECIMAL LITERAL (e.g. \`"""$45M"\`):
+   - Dollar sign $ after triple quotes causes Python to misparse
+   - FIX: Use regular single-quoted strings for dollar amounts: '$45M'
+   - NEVER use triple quotes (""" or ''') for short strings with dollar signs
+   - Example: amount = '$45M' NOT amount = """$45M"""
+
+3. F-STRING SINGLE '}' NOT ALLOWED:
+   - Happens when } appears inside an f-string without being doubled
+   - FIX: Use regular string formatting instead of complex f-strings
+   - BAD:  f"{chr(10).join([f\\"\\"\\"{i+1}. {name}\\" for ...])}"
+   - GOOD: numbered_list = "\\n".join([f"{i+1}. {name}" for i, name in enumerate(names)])
+
+4. GENERAL RULES:
+   - Use regular quotes ('...' or "...") for ALL short strings
+   - Triple quotes ONLY for actual multi-line text blocks, NEVER for one-liners
+   - Use json.dumps() to build JSON, never hand-craft with f-strings
+   - Build HTML with list.append() + ''.join(), never in triple quotes
+   - NEVER nest f-strings inside f-strings
+   - For complex string building, use .format() or % formatting instead of f-strings` },
+            { role: 'user', content: `Fix this Python code:\n\n\`\`\`python\n${code}\n\`\`\`` }
+          ], { temperature: 0.0, jsonMode: false, tier: 2 });
+          
+          const fixMatch = fixResponse.content.match(/```\s*python\s*\n([\s\S]*?)```/);
+          if (fixMatch) {
+            code = sanitizePythonCode(fixMatch[1]);
+            console.log(`[Agent ${agent.id}] Code regenerated after syntax fix (pass ${pass + 1}).`);
+          } else {
+            console.warn(`[Agent ${agent.id}] LLM fix had no python block on pass ${pass + 1}.`);
+            break; // Can't fix without a code block
+          }
+        } catch (syntaxCheckErr) {
+          console.warn(`[Agent ${agent.id}] Syntax check pass ${pass + 1} failed (non-fatal):`, syntaxCheckErr);
+          break;
         }
       }
-    } catch (syntaxCheckErr) {
-      // If syntax check itself fails, just proceed with execution
-      console.warn(`[Agent ${agent.id}] Syntax pre-check failed (non-fatal):`, syntaxCheckErr);
-    }
+      return code;
+    };
+
+    pythonCode = await validateAndFixSyntax(pythonCode);
 
     lastPythonCode = pythonCode;
 
