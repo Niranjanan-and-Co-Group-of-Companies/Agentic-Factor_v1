@@ -161,11 +161,11 @@ export async function executeAgent(
   while (attempts < maxAttempts) {
     attempts++;
     
-    // ── Billing Enforcement: Deduct E2B execution credit per attempt (2 credits) ──
+    // ── Billing Enforcement: Deduct E2B execution credit per attempt ──
     // LLM model credit cost is deducted separately after we know which model was used.
     try {
-      const { deductCredits } = await import('@/lib/middleware/billing');
-      await deductCredits(tenantId, 2, `e2b_execution_attempt_${attempts}:${agent.role}`);
+      const { deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
+      await deductCredits(tenantId, CREDIT_COSTS.code_execution, `e2b_execution_attempt_${attempts}:${agent.role}`);
     } catch (err) {
       console.warn(`[Agent ${agent.id}] Insufficient credits for execution, stopping.`, err);
       throw new Error('InsufficientCredits');

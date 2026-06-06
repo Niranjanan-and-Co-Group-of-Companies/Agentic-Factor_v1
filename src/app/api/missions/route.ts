@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
 
     // ── Phase 4.2: Edit Blueprint via Chat ──
     if (action === 'edit') {
-      const { checkCredits, deductCredits } = await import('@/lib/middleware/billing');
+      const { checkCredits, deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
       const creditCheck = await checkCredits(tenantId, 1);
       if (!creditCheck.allowed) {
         return NextResponse.json({ error: creditCheck.reason }, { status: 402 });
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
       const updatedMission = await editBlueprint(parsedBlueprint as Mission, instruction);
       
       // Deduct 1 credit for the LLM generation
-      await deductCredits(tenantId, 1, 'blueprint_edit').catch(() => {});
+      await deductCredits(tenantId, CREDIT_COSTS.llm_call_pro, 'blueprint_edit').catch(() => {});
       
       return NextResponse.json({
         success: true,

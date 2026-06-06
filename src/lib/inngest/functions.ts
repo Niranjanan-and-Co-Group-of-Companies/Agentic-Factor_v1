@@ -392,8 +392,8 @@ export const generateBlueprintBackground = inngest.createFunction(
 
       // Deduct credit
       await step.run('deduct-credit', async () => {
-        const { deductCredits } = await import('@/lib/middleware/billing');
-        await deductCredits(tenantId, 1, 'blueprint_generation').catch(() => {});
+        const { deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
+        await deductCredits(tenantId, CREDIT_COSTS.llm_call_pro, 'blueprint_generation').catch(() => {});
       });
 
       return { success: true, jobId, type: 'blueprint' };

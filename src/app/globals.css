@@ -657,7 +657,7 @@ body {
 .cos-markdown code { font-family: var(--font-mono); font-size: 0.78rem; background: var(--bg-glass); padding: 1px 5px; border-radius: 4px; color: var(--emerald); }
 .cos-markdown pre { background: var(--bg-glass); padding: var(--space-sm); border-radius: var(--radius-sm); overflow-x: auto; margin: 6px 0; }
 .cos-markdown pre code { background: transparent; padding: 0; }
-.cos-markdown table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 0.78rem; }
+.cos-markdown table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 0.78rem; display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
 .cos-markdown th { text-align: left; padding: 6px 8px; background: var(--bg-glass); border: 1px solid var(--border); font-weight: 600; color: var(--accent); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.3px; }
 .cos-markdown td { padding: 5px 8px; border: 1px solid var(--border); }
 .cos-markdown tr:nth-child(even) { background: hsla(222, 35%, 12%, 0.3); }
