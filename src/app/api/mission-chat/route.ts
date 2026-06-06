@@ -41,6 +41,50 @@ export async function POST(request: NextRequest) {
       .order('created_at', { ascending: false })
       .limit(20);
 
+    // ── Fetch REAL billing data for this tenant ──
+    const { data: billingRow } = await supabase
+      .from('tenant_billing')
+      .select('plan, credits_remaining, credits_total, credits_used_this_month')
+      .eq('tenant_id', tenantId)
+      .single();
+
+    const creditsRemaining = billingRow?.credits_remaining ?? 0;
+    const creditsTotal = billingRow?.credits_total ?? 1000;
+    const creditsUsedThisMonth = billingRow?.credits_used_this_month ?? 0;
+    const plan = billingRow?.plan ?? 'free';
+
+    // ── Fetch credits used specifically for THIS mission ──
+    const { data: missionCreditEvents } = await supabase
+      .from('events')
+      .select('payload')
+      .eq('tenant_id', tenantId)
+      .eq('event_type', 'billing.credit_used')
+      .filter('payload->>actionType', 'not.is', null)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    // Sum up credits used that are related to this mission's agents
+    const agentIds = new Set((missionRow.mission_json.agents || []).map((a: any) => a.id));
+    const agentRoles = new Set((missionRow.mission_json.agents || []).map((a: any) => a.role));
+    let missionCreditsUsed = 0;
+    const creditBreakdown: { action: string; credits: number }[] = [];
+    
+    if (missionCreditEvents) {
+      for (const ev of missionCreditEvents) {
+        const p = ev.payload;
+        const actionType = p?.actionType || '';
+        // Match events belonging to this mission's agents by role name in action string
+        const isThisMission = Array.from(agentRoles).some(role => 
+          actionType.includes(String(role))
+        ) || actionType.includes('blueprint');
+        
+        if (isThisMission && p?.amount) {
+          missionCreditsUsed += p.amount;
+          creditBreakdown.push({ action: actionType, credits: p.amount });
+        }
+      }
+    }
+
 const SYSTEM_PROMPT = `You are the Chief of Staff for the mission titled "${missionRow.mission_json.title}".
 Your purpose is to oversee the entire mission, manage the sub-agents, and synthesize information for the user.
 You have access to the mission's configuration (mission_json) and recent event logs.
@@ -54,14 +98,14 @@ STRICT BOUNDARIES:
 2. If the user asks anything outside the scope of this mission, respectfully decline.
 
 CRITICAL BILLING RULES:
-- NEVER show raw costs in dollars (e.g. "$0.033") or raw token counts (e.g. "28,244 tokens"). Customers should NEVER see tokens.
-- ONLY show "credits used" and "credits remaining". Credits are our customer-facing currency.
-- Credits formula: credits = ceil(tokens / 1000 * 0.005 * 4 * 1000). Basically ~20 credits per 1000 tokens.
-- When asked about cost, usage, or spending: show "X credits used" and "Y credits remaining this month" only.
-- NEVER mention tokens, token counts, underlying cost per token, LLM pricing, or profit margins.
-- NEVER show "Total tokens used" — that is internal data. Only show credits.
-- Example: If a mission used 6,677 tokens, say "~134 credits used", NOT "6,677 tokens" or "$0.033".
-- Format usage like: "📊 Credits Used: ~134 credits | Remaining: ~866 credits"
+- Use ONLY the REAL billing data provided below. NEVER estimate or calculate credits from tokens.
+- NEVER show raw token counts, dollar costs, or mention "tokens" at all. Tokens are internal data.
+- NEVER mention profit margins, LLM pricing, or cost per token.
+- When asked about usage/cost, use this REAL data:
+  📊 Credits used by this mission: ${missionCreditsUsed} credits
+  📊 Credits remaining (account-wide): ${creditsRemaining} / ${creditsTotal} credits
+  📊 Plan: ${plan}
+  📊 Total credits used this month: ${creditsUsedThisMonth} credits
 
 CURRENT LIVE MISSION STATUS: "${missionRow.status}"
 

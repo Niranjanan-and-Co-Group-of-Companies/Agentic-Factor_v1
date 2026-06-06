@@ -9,6 +9,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useAuthPopup } from "@/components/providers/AuthProvider";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface AgentNode { id: string; role: string; status: string; index: number; successScore: number | null; trustLevel: string; }
 interface ClarificationItem { id: string; agentRole: string; question: string; context: string; category: string; priority: string; missionTitle: string; }
@@ -871,7 +872,7 @@ export default function MissionDetailPage() {
                   </strong>
                   {msg.role === "assistant" ? (
                     <div className="cos-markdown">
-                      <ReactMarkdown>{msg.text}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
                     </div>
                   ) : msg.text}
                 </div>
