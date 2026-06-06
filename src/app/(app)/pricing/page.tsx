@@ -12,7 +12,7 @@ const plans = [
     id: "free",
     name: "Free",
     subtitle: "Trial",
-    price: "₹0",
+    price: "$0",
     period: "forever",
     description: "Try the power of AI agents",
     credits: "30 credits (one-time)",
@@ -34,8 +34,8 @@ const plans = [
     id: "individual",
     name: "Individual",
     subtitle: "Prosumer",
-    price: "₹2,499",
-    priceUsd: "$29",
+    price: "$29",
+    priceUsd: "",
     period: "/month",
     description: "For solo founders & power users",
     credits: "1,000 credits/month",
@@ -59,10 +59,10 @@ const plans = [
     id: "pro",
     name: "Pro",
     subtitle: "Teams",
-    price: "From ₹4,548",
+    price: "From $53",
     priceUsd: "",
     period: "/month",
-    description: "₹2,299 base + ₹2,249/seat",
+    description: "$27 base + $26/seat",
     credits: "1,000 credits/seat/month",
     features: [
       { label: "1,000 credits/seat/month", detail: "scales with team" },
@@ -159,7 +159,7 @@ export default function PricingPage() {
       const res = await fetch("/api/razorpay/create-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId, quantity: planId === "pro" ? seatCount : 1, baseFee: planId === "pro" ? 2299 : 0, seatPrice: planId === "pro" ? 2249 : 0 }),
+        body: JSON.stringify({ planId, quantity: planId === "pro" ? seatCount : 1, baseFee: planId === "pro" ? 27 : 0, seatPrice: planId === "pro" ? 26 : 0 }),
       });
 
       const data = await res.json();
@@ -219,10 +219,10 @@ export default function PricingPage() {
         <h3 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: "var(--space-md)" }}>💡 How Credits Work</h3>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "var(--space-md)" }}>
           {[
-            { action: "Flash LLM Call", cost: "1 credit", icon: "⚡" },
-            { action: "Pro LLM Call", cost: "3 credits", icon: "🧠" },
-            { action: "Premium LLM Call", cost: "5 credits", icon: "💎" },
-            { action: "Code Execution", cost: "2 credits", icon: "🖥️" },
+            { action: "Flash LLM Call", cost: "4 credits", icon: "⚡" },
+            { action: "Pro LLM Call", cost: "12 credits", icon: "🧠" },
+            { action: "Premium LLM Call", cost: "20 credits", icon: "💎" },
+            { action: "Code Execution", cost: "8 credits", icon: "🖥️" },
           ].map((item, i) => (
             <div key={i} style={{ textAlign: "center", padding: "var(--space-sm)", background: "var(--bg-card)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
               <div style={{ fontSize: "1.3rem", marginBottom: 4 }}>{item.icon}</div>
@@ -297,19 +297,19 @@ export default function PricingPage() {
                 <div style={{ marginTop: 12, padding: "8px 12px", background: "var(--bg-card)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", marginBottom: 4 }}>
                     <span style={{ color: "var(--text-muted)" }}>Base platform fee</span>
-                    <span>₹2,299</span>
+                    <span>$27</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", marginBottom: 4 }}>
-                    <span style={{ color: "var(--text-muted)" }}>{seatCount} × ₹2,249/seat</span>
-                    <span>₹{(2249 * seatCount).toLocaleString("en-IN")}</span>
+                    <span style={{ color: "var(--text-muted)" }}>{seatCount} × $26/seat</span>
+                    <span>${(26 * seatCount).toLocaleString("en-US")}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", marginBottom: 4, color: "var(--emerald)" }}>
                     <span>Credits included</span>
-                    <span>{(1000 * seatCount).toLocaleString("en-IN")} credits/mo</span>
+                    <span>{(1000 * seatCount).toLocaleString("en-US")} credits/mo</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.95rem", fontWeight: 800, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
                     <span>Total</span>
-                    <span style={{ color: "var(--accent)" }}>₹{(2299 + 2249 * seatCount).toLocaleString("en-IN")}/mo</span>
+                    <span style={{ color: "var(--accent)" }}>${(27 + 26 * seatCount).toLocaleString("en-US")}/mo</span>
                   </div>
                 </div>
               </div>
@@ -352,9 +352,9 @@ export default function PricingPage() {
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-md)" }}>
           {[
-            { name: "Starter Pack", credits: 200, price: 599, originalPrice: null, discount: null },
-            { name: "Power Pack", credits: 500, price: 1299, originalPrice: 1500, discount: "13.4%" },
-            { name: "Mega Pack", credits: 1500, price: 3499, originalPrice: 4500, discount: "22.2%" },
+            { name: "Starter Pack", credits: 200, price: 7, originalPrice: null, discount: null },
+            { name: "Power Pack", credits: 500, price: 15, originalPrice: 18, discount: "13.4%" },
+            { name: "Mega Pack", credits: 1500, price: 42, originalPrice: 53, discount: "22.2%" },
           ].map((pack, i) => (
             <div key={i} className="card" style={{ padding: "var(--space-lg)", textAlign: "center", position: "relative" }}>
               {pack.discount && (
@@ -370,13 +370,13 @@ export default function PricingPage() {
               <div style={{ marginBottom: 12 }}>
                 {pack.originalPrice && (
                   <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", textDecoration: "line-through", marginRight: 6 }}>
-                    ₹{pack.originalPrice.toLocaleString("en-IN")}
+                    ${pack.originalPrice.toLocaleString("en-US")}
                   </span>
                 )}
-                <span style={{ fontSize: "1.1rem", fontWeight: 700 }}>₹{pack.price.toLocaleString("en-IN")}</span>
+                <span style={{ fontSize: "1.1rem", fontWeight: 700 }}>${pack.price.toLocaleString("en-US")}</span>
               </div>
               <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: 12 }}>
-                ₹{(pack.price / pack.credits).toFixed(2)}/credit
+                ${(pack.price / pack.credits).toFixed(2)}/credit
               </div>
               <button
                 className="btn btn-ghost btn-sm"
@@ -384,7 +384,7 @@ export default function PricingPage() {
                 onClick={() => {
                   if (!isLoggedIn) { window.location.href = "/login?returnTo=/pricing"; return; }
                   if (currentPlan === "free") { setToast("⚠️ Top-ups are for paid plans only. Please upgrade first."); return; }
-                  setToast(`✅ Top-up purchase coming soon! ${pack.credits} credits for ₹${pack.price.toLocaleString("en-IN")}`);
+                  setToast(`✅ Top-up purchase coming soon! ${pack.credits} credits for $${pack.price.toLocaleString("en-US")}`);
                 }}
               >
                 Buy Now
@@ -398,13 +398,13 @@ export default function PricingPage() {
       <div style={{ maxWidth: 700, margin: "var(--space-2xl) auto 0", padding: "0 var(--space-md)" }}>
         <h2 style={{ fontSize: "1.4rem", fontWeight: 700, textAlign: "center", marginBottom: "var(--space-xl)" }}>Frequently Asked Questions</h2>
         {[
-          { q: "What is a credit?", a: "Every agent action (LLM call, code execution, embedding) costs credits. Flash models cost 1 credit, Pro models cost 3, and premium models cost 5 per call." },
+          { q: "What is a credit?", a: "Every agent action (LLM call, code execution, embedding) costs credits. Flash models cost 4 credits, Pro models cost 12, and premium models cost 20 per call." },
           { q: "Do unused credits roll over?", a: "No, credits reset monthly on your billing date. Use them or lose them!" },
           { q: "What are credit top-ups?", a: "When your monthly credits run out, you can buy top-up packs instantly. Top-up credits do NOT expire and are consumed after your monthly pool. Available for Individual & Pro plans only." },
           { q: "What happens when I run out of credits?", a: "Your running agents will pause. You can buy a top-up pack, wait for monthly refill, or upgrade your plan." },
           { q: "What's the difference between model tiers?", a: "Flash = fast & affordable (Gemini Flash, GPT-4o-mini, Claude 3.5 Haiku). Mixed = adds Pro models (Claude 3.5 Sonnet, Gemini Pro, GPT-4o). All = adds premium (Claude Sonnet 4 — best for code generation). Enterprise = bring your own fine-tuned models." },
           { q: "Can I change my plan anytime?", a: "Yes. Upgrade instantly, downgrade at end of billing cycle." },
-          { q: "What payment methods are supported?", a: "UPI, credit/debit cards, net banking, and wallets via Razorpay." },
+          { q: "What payment methods are supported?", a: "Credit/debit cards, UPI, net banking, and wallets via Razorpay. International cards accepted." },
         ].map((faq, i) => (
           <div key={i} className="card" style={{ padding: "var(--space-md) var(--space-lg)", marginBottom: "var(--space-sm)" }}>
             <strong style={{ fontSize: "0.88rem" }}>{faq.q}</strong>

@@ -354,6 +354,50 @@ INSTRUCTIONS:
 
     // Sanitize LLM-generated code: fix unterminated strings, etc.
     pythonCode = sanitizePythonCode(pythonCode);
+
+    // ── SYNTAX PRE-CHECK: Validate Python syntax BEFORE wasting an E2B sandbox run ──
+    // Uses a quick E2B sandbox to compile() the code without executing it.
+    // If syntax is broken, we ask the LLM to regenerate with the specific error.
+    const syntaxCheckCode = `import ast\ntry:\n    ast.parse(${JSON.stringify(pythonCode)})\n    print("SYNTAX_OK")\nexcept SyntaxError as e:\n    print(f"SYNTAX_ERROR:{e.lineno}:{e.msg}:{e.text}")`;
+    
+    try {
+      const checkSandbox = await Sandbox.create({
+        apiKey: process.env.E2B_API_KEY,
+        timeoutMs: 15_000,
+      });
+      const checkResult = await checkSandbox.runCode(syntaxCheckCode);
+      await checkSandbox.kill().catch(() => {});
+      
+      const checkOutput = (checkResult.text || '').trim();
+      
+      if (checkOutput.startsWith('SYNTAX_ERROR:')) {
+        const parts = checkOutput.replace('SYNTAX_ERROR:', '').split(':');
+        const errorLine = parts[0] || '?';
+        const errorMsg = parts[1] || 'unknown syntax error';
+        const errorText = parts.slice(2).join(':') || '';
+        
+        console.warn(`[Agent ${agent.id}] Syntax pre-check FAILED at line ${errorLine}: ${errorMsg} → ${errorText}`);
+        console.log(`[Agent ${agent.id}] Asking LLM to regenerate code with targeted fix...`);
+        
+        // Ask the LLM to fix the specific syntax error
+        const fixResponse = await callLLM([
+          { role: 'system', content: `You are a Python code fixer. The following Python code has a syntax error. Fix ONLY the syntax error and return the COMPLETE corrected code inside a \`\`\`python block. Do NOT change any logic — only fix the syntax.\n\nSYNTAX ERROR:\n- Line ${errorLine}: ${errorMsg}\n- Offending text: ${errorText}\n\nCOMMON FIXES:\n- If a string is unterminated, close it properly\n- If a string spans multiple lines, use triple double-quotes (\"\"\")\n- NEVER put raw HTML inside triple-quoted strings — build HTML with list.append() and ''.join()\n- If quotes are mismatched, fix the matching\n- Use json.dumps() instead of hand-building JSON strings` },
+          { role: 'user', content: `Fix this Python code:\n\n\`\`\`python\n${pythonCode}\n\`\`\`` }
+        ], { temperature: 0.0, jsonMode: false, tier: 2 });
+        
+        const fixMatch = fixResponse.content.match(/```\s*python\s*\n([\s\S]*?)```/);
+        if (fixMatch) {
+          pythonCode = sanitizePythonCode(fixMatch[1]);
+          console.log(`[Agent ${agent.id}] Code regenerated after syntax fix.`);
+        } else {
+          console.warn(`[Agent ${agent.id}] LLM fix response had no python block. Proceeding with original code.`);
+        }
+      }
+    } catch (syntaxCheckErr) {
+      // If syntax check itself fails, just proceed with execution
+      console.warn(`[Agent ${agent.id}] Syntax pre-check failed (non-fatal):`, syntaxCheckErr);
+    }
+
     lastPythonCode = pythonCode;
 
     try {
