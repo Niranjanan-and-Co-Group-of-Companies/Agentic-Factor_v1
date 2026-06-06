@@ -311,8 +311,10 @@ INSTRUCTIONS:
 9. **DO NOT CATCH FATAL ERRORS**: Let the script crash naturally on errors.
 10. **READING INPUT**: Previous agent data is in \`_input_data\` (parsed JSON dict) and \`_input\` (raw string).
 11. If you need to ask the user something, use \`ask_user()\`. The script will pause and resume when user responds.
-12. **MULTI-LINE STRINGS**: ALWAYS use triple quotes (\"\"\" or ''') for multi-line strings. NEVER put a newline inside a single-quoted or double-quoted string. Example: lines.append('''This is\na multi-line\nstring''')
-13. **JSON IN STRINGS**: When building JSON manually, use json.dumps() instead of hand-crafting JSON strings with f-strings.`;
+12. **MULTI-LINE STRINGS**: For multi-line text, use triple double-quotes (""" only, NEVER triple single-quotes '''). NEVER put raw HTML inside triple-quoted strings — it breaks Python syntax. Instead, build HTML using a list of strings joined together: lines = []; lines.append('<tr>'); html = '\n'.join(lines).
+13. **JSON IN STRINGS**: When building JSON manually, use json.dumps() instead of hand-crafting JSON strings with f-strings.
+14. **HTML CONTENT**: NEVER embed raw HTML directly in triple-quoted strings. ALWAYS build HTML by concatenating regular strings or using a list: parts = []; parts.append(f'<tr><td>{name}</td></tr>'); html = ''.join(parts). This prevents quote conflicts.
+15. **STRING SAFETY**: Never mix quote types carelessly. If a string contains single quotes, wrap it in double quotes. If it contains double quotes, wrap it in single quotes. For strings with both, use triple double-quotes (""" only).`;
 
 
       const response = await callLLM(
