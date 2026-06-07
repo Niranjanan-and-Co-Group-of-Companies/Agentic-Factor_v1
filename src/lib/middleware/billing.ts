@@ -144,29 +144,34 @@ export async function checkCredits(tenantId: string, cost: number = 1): Promise<
 
   const { data: billing } = await supabase
     .from('tenant_billing')
-    .select('plan, credits_remaining, credits_total, billing_status, model_tier, is_trial')
+    .select('plan, credits_remaining, credits_topup, credits_total, billing_status, model_tier, is_trial')
     .eq('tenant_id', tenantId)
     .single();
 
   const plan = billing?.plan || 'free';
-  const creditsRemaining = billing?.credits_remaining ?? PLAN_DEFAULTS[plan]?.credits ?? 30;
+  const creditsMonthly = billing?.credits_remaining ?? PLAN_DEFAULTS[plan]?.credits ?? 30;
+  const creditsTopup = billing?.credits_topup ?? 0;
+  const totalAvailable = creditsMonthly + creditsTopup;
 
   if (billing?.billing_status === 'past_due') {
     return { allowed: false, plan, reason: 'Account has past-due billing. Please update your payment method.' };
   }
   if (billing?.billing_status === 'cancelled') {
-    return { allowed: false, plan, reason: 'Subscription cancelled. Please resubscribe to continue.' };
+    const frozenMsg = creditsTopup > 0
+      ? ` You have ${creditsTopup} frozen top-up credits that will be restored when you resubscribe.`
+      : '';
+    return { allowed: false, plan, reason: `Subscription cancelled. Please resubscribe to continue.${frozenMsg}` };
   }
 
-  if (creditsRemaining < cost) {
+  if (totalAvailable < cost) {
     const msg = billing?.is_trial
       ? 'Trial credits exhausted. Upgrade to Individual or Pro for monthly credits.'
-      : `Not enough credits (${creditsRemaining} remaining, ${cost} needed). Upgrade your plan or wait for monthly reset.`;
+      : `Not enough credits (${totalAvailable} remaining, ${cost} needed). Buy a top-up pack or wait for monthly reset.`;
     return {
       allowed: false,
       plan,
       reason: msg,
-      creditsRemaining,
+      creditsRemaining: totalAvailable,
       creditsTotal: billing?.credits_total ?? 30,
     };
   }
@@ -174,7 +179,7 @@ export async function checkCredits(tenantId: string, cost: number = 1): Promise<
   return {
     allowed: true,
     plan,
-    creditsRemaining,
+    creditsRemaining: totalAvailable,
     creditsTotal: billing?.credits_total ?? 30,
     modelTier: (billing?.model_tier as ModelTier) || 'flash',
   };
@@ -264,25 +269,33 @@ export async function deductCredits(
 
   const { data } = await supabase
     .from('tenant_billing')
-    .select('credits_remaining, credits_used_this_month')
+    .select('credits_remaining, credits_topup, credits_used_this_month')
     .eq('tenant_id', tenantId)
     .single();
 
   if (data) {
-    const currentCredits = data.credits_remaining || 0;
+    const creditsMonthly = data.credits_remaining || 0;
+    const creditsTopup = data.credits_topup || 0;
+    const totalAvailable = creditsMonthly + creditsTopup;
     
     // Hard stop: refuse to deduct if credits are insufficient
-    if (currentCredits < amount) {
-      throw new Error(`Insufficient credits: ${currentCredits} remaining, ${amount} needed for ${actionType}`);
+    if (totalAvailable < amount) {
+      throw new Error(`Insufficient credits: ${totalAvailable} remaining (${creditsMonthly} monthly + ${creditsTopup} top-up), ${amount} needed for ${actionType}`);
     }
 
-    const newRemaining = currentCredits - amount;
+    // Two-bucket deduction: consume monthly credits FIRST, then top-up
+    let deductFromMonthly = Math.min(creditsMonthly, amount);
+    let deductFromTopup = amount - deductFromMonthly;
+
+    const newMonthly = creditsMonthly - deductFromMonthly;
+    const newTopup = creditsTopup - deductFromTopup;
     const newUsed = (data.credits_used_this_month || 0) + amount;
 
     await supabase
       .from('tenant_billing')
       .update({
-        credits_remaining: newRemaining,
+        credits_remaining: newMonthly,
+        credits_topup: newTopup,
         credits_used_this_month: newUsed,
         updated_at: new Date().toISOString(),
       })

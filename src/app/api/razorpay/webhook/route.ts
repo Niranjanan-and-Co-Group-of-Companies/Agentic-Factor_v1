@@ -50,6 +50,14 @@ export async function POST(request: NextRequest) {
         const config = PLAN_CONFIGS[planName] || PLAN_CONFIGS['free'];
 
         if (tenantId) {
+          // Get existing top-up credits (for resubscribe — return frozen credits)
+          const { data: existingBilling } = await supabase
+            .from('tenant_billing')
+            .select('credits_topup')
+            .eq('tenant_id', tenantId)
+            .single();
+          const frozenTopup = existingBilling?.credits_topup ?? 0;
+
           await supabase
             .from('tenant_billing')
             .update({
@@ -62,6 +70,8 @@ export async function POST(request: NextRequest) {
               credits_remaining: config.credits,
               credits_total: config.credits,
               credits_used_this_month: 0,
+              // Preserve existing top-up credits (returned on resubscribe)
+              // credits_topup is NOT touched — frozen credits come back automatically
               max_active_missions: config.maxActiveMissions,
               model_tier: config.modelTier,
               max_storage_mb: config.maxStorageMb,
@@ -74,10 +84,11 @@ export async function POST(request: NextRequest) {
 
           const email = subscription.notes?.email;
           if (email) {
+            const topupMsg = frozenTopup > 0 ? `\n- 🔓 ${frozenTopup} frozen top-up credits restored!` : '';
             await sendEmail({
               to: email,
               subject: `🎉 Welcome to Agentic Factor ${planName.charAt(0).toUpperCase() + planName.slice(1)}!`,
-              body: `Your ${planName} plan is now active.\n\nYou now have:\n- ${config.credits.toLocaleString()} credits/month\n- ${config.maxActiveMissions} active missions\n- ${config.modelTier === 'all' ? 'All AI Models' : config.modelTier === 'mixed' ? 'Flash + Pro Models' : 'Flash Models'}\n\nStart building: https://agenticfactor.io/dashboard`,
+              body: `Your ${planName} plan is now active.\n\nYou now have:\n- ${config.credits.toLocaleString()} monthly credits\n- ${config.maxActiveMissions} active missions\n- ${config.modelTier === 'all' ? 'All AI Models' : config.modelTier === 'mixed' ? 'Flash + Pro Models' : 'Flash Models'}${topupMsg}\n\nStart building: https://agenticfactor.io/dashboard`,
             });
           }
 
@@ -143,8 +154,9 @@ export async function POST(request: NextRequest) {
             .update({
               plan: 'free',
               billing_status: 'cancelled',
-              credits_remaining: 0, // No free credits after cancellation
+              credits_remaining: 0, // Monthly credits removed
               credits_total: 0,
+              // credits_topup is NOT touched — frozen, preserved for resubscribe
               max_active_missions: freeConfig.maxActiveMissions,
               model_tier: freeConfig.modelTier,
               max_storage_mb: freeConfig.maxStorageMb,
@@ -154,12 +166,23 @@ export async function POST(request: NextRequest) {
             })
             .eq('tenant_id', tenantId);
 
+          // Get frozen top-up balance for the email
+          const { data: billingAfter } = await supabase
+            .from('tenant_billing')
+            .select('credits_topup')
+            .eq('tenant_id', tenantId)
+            .single();
+          const frozenCredits = billingAfter?.credits_topup ?? 0;
+
           const email = subscription.notes?.email;
           if (email) {
+            const frozenMsg = frozenCredits > 0
+              ? `\n\n🔒 You have ${frozenCredits} frozen top-up credits. These will be restored when you resubscribe.`
+              : '';
             await sendEmail({
               to: email,
               subject: '⚠️ Agentic Factor Subscription Cancelled',
-              body: `Your subscription has been cancelled.\n\nYour credits have been removed. Resubscribe to get fresh credits.\n\nhttps://agenticfactor.io/pricing`,
+              body: `Your subscription has been cancelled.\n\nYour monthly credits have been removed.${frozenMsg}\n\nResubscribe to get fresh credits: https://agenticfactor.io/pricing`,
             });
           }
 
@@ -188,7 +211,7 @@ export async function POST(request: NextRequest) {
             await sendEmail({
               to: email,
               subject: '❌ Agentic Factor Payment Failed',
-              body: `Your payment of ₹${(payment.amount / 100).toFixed(0)} failed.\n\nReason: ${payment.error_description || 'Unknown'}\n\nPlease update your payment method: https://agenticfactor.io/pricing`,
+              body: `Your payment of $${((payment.amount / 100) / 85).toFixed(0)} (₹${(payment.amount / 100).toFixed(0)}) failed.\n\nReason: ${payment.error_description || 'Unknown'}\n\nPlease update your payment method: https://agenticfactor.io/pricing`,
             });
           }
         }
@@ -196,7 +219,67 @@ export async function POST(request: NextRequest) {
       }
 
       default:
-        console.log(`[Razorpay Webhook] Unhandled event: ${eventType}`);
+        // ── Handle payment.captured for top-up purchases ──
+        if (eventType === 'payment.captured') {
+          const payment = payload.payment?.entity;
+          if (!payment) break;
+
+          const notes = payment.notes || {};
+          // Only process top-up payments (not subscription payments)
+          if (notes.type !== 'topup' || !notes.tenant_id || !notes.pack_credits) break;
+
+          const tenantId = notes.tenant_id;
+          const packCredits = parseInt(notes.pack_credits, 10);
+          const packId = notes.pack_id || 'unknown';
+
+          if (packCredits > 0) {
+            // Add credits to top-up bucket
+            const { data: currentBilling } = await supabase
+              .from('tenant_billing')
+              .select('credits_topup')
+              .eq('tenant_id', tenantId)
+              .single();
+
+            const currentTopup = currentBilling?.credits_topup ?? 0;
+
+            await supabase
+              .from('tenant_billing')
+              .update({
+                credits_topup: currentTopup + packCredits,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('tenant_id', tenantId);
+
+            // Log the event
+            await supabase.from('events').insert({
+              tenant_id: tenantId,
+              event_type: 'billing.topup_purchased',
+              entity_type: 'billing',
+              entity_id: payment.id,
+              payload: {
+                packId,
+                credits: packCredits,
+                amount: payment.amount,
+                currency: payment.currency,
+                newTopupBalance: currentTopup + packCredits,
+              },
+            });
+
+            // Send confirmation email
+            const email = notes.email;
+            if (email) {
+              await sendEmail({
+                to: email,
+                subject: `✅ ${packCredits} Credits Added — Agentic Factor`,
+                body: `Your top-up purchase was successful!\n\n🪙 ${packCredits} credits have been added to your account.\n\nThese top-up credits never expire and will be preserved even if you cancel your subscription.\n\nView your balance: https://agenticfactor.io/pricing`,
+              });
+            }
+
+            console.log(`[Razorpay Webhook] Top-up: +${packCredits} credits for tenant ${tenantId}`);
+          }
+        } else {
+          console.log(`[Razorpay Webhook] Unhandled event: ${eventType}`);
+        }
     }
 
     return NextResponse.json({ received: true });

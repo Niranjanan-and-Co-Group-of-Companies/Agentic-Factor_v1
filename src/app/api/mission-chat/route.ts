@@ -44,11 +44,12 @@ export async function POST(request: NextRequest) {
     // ── Fetch REAL billing data for this tenant ──
     const { data: billingRow } = await supabase
       .from('tenant_billing')
-      .select('plan, credits_remaining, credits_total, credits_used_this_month')
+      .select('plan, credits_remaining, credits_topup, credits_total, credits_used_this_month')
       .eq('tenant_id', tenantId)
       .single();
 
     const creditsRemaining = billingRow?.credits_remaining ?? 0;
+    const creditsTopup = billingRow?.credits_topup ?? 0;
     const creditsTotal = billingRow?.credits_total ?? 1000;
     const creditsUsedThisMonth = billingRow?.credits_used_this_month ?? 0;
     const plan = billingRow?.plan ?? 'free';
@@ -103,7 +104,9 @@ CRITICAL BILLING RULES:
 - NEVER mention profit margins, LLM pricing, or cost per token.
 - When asked about usage/cost, use this REAL data:
   📊 Credits used by this mission: ${missionCreditsUsed} credits
-  📊 Credits remaining (account-wide): ${creditsRemaining} / ${creditsTotal} credits
+  📊 Monthly credits remaining: ${creditsRemaining} / ${creditsTotal}
+  📊 Top-up credits: ${creditsTopup} (purchased, never expire)
+  📊 Total available: ${creditsRemaining + creditsTopup} credits
   📊 Plan: ${plan}
   📊 Total credits used this month: ${creditsUsedThisMonth} credits
 

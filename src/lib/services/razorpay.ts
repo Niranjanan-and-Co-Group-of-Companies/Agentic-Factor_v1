@@ -155,3 +155,46 @@ export function resolvePlanName(razorpayPlanId: string): string {
   };
   return envMap[razorpayPlanId] || 'free';
 }
+
+// ── Top-Up Pack Configurations ──
+export const TOPUP_PACKS: Record<string, { credits: number; amountPaisa: number; name: string }> = {
+  starter: { credits: 200,  amountPaisa: 59900,  name: 'Starter Pack' },
+  power:   { credits: 500,  amountPaisa: 129900, name: 'Power Pack' },
+  mega:    { credits: 1500, amountPaisa: 349900, name: 'Mega Pack' },
+};
+
+/**
+ * Create a Razorpay one-time order for credit top-up purchase.
+ * Returns orderId for frontend checkout.
+ */
+export async function createOrder(
+  tenantId: string,
+  packId: string,
+  email: string
+): Promise<{ orderId: string; amount: number; currency: string }> {
+  const razorpay = getRazorpay();
+  const pack = TOPUP_PACKS[packId];
+
+  if (!pack) {
+    throw new Error(`Invalid top-up pack: ${packId}. Valid packs: ${Object.keys(TOPUP_PACKS).join(', ')}`);
+  }
+
+  const order = await razorpay.orders.create({
+    amount: pack.amountPaisa,
+    currency: 'INR',
+    receipt: `topup_${tenantId}_${packId}_${Date.now()}`,
+    notes: {
+      tenant_id: tenantId,
+      pack_id: packId,
+      pack_credits: String(pack.credits),
+      email,
+      type: 'topup',
+    },
+  });
+
+  return {
+    orderId: order.id,
+    amount: pack.amountPaisa,
+    currency: 'INR',
+  };
+}

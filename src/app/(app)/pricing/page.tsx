@@ -119,6 +119,8 @@ function getSupabase() {
 export default function PricingPage() {
   const [currentPlan, setCurrentPlan] = useState<string>("free");
   const [creditsRemaining, setCreditsRemaining] = useState<number>(30);
+  const [creditsTopup, setCreditsTopup] = useState<number>(0);
+  const [billingStatus, setBillingStatus] = useState<string>("active");
   const [loading, setLoading] = useState<string | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -134,12 +136,14 @@ export default function PricingPage() {
 
     const { data } = await supabase
       .from("tenant_billing")
-      .select("plan, credits_remaining")
+      .select("plan, credits_remaining, credits_topup, billing_status")
       .eq("tenant_id", user.id)
       .single();
 
     if (data?.plan) setCurrentPlan(data.plan);
     if (data?.credits_remaining != null) setCreditsRemaining(data.credits_remaining);
+    if (data?.credits_topup != null) setCreditsTopup(data.credits_topup);
+    if (data?.billing_status) setBillingStatus(data.billing_status);
   };
 
   const handleUpgrade = async (planId: string) => {
@@ -208,9 +212,14 @@ export default function PricingPage() {
         {isLoggedIn && (
           <div style={{ marginTop: "var(--space-md)", display: "inline-flex", alignItems: "center", gap: "var(--space-md)", padding: "8px 20px", background: "var(--bg-glass)", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }}>
             <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Your balance:</span>
-            <span style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--accent)" }}>{creditsRemaining.toLocaleString()} credits</span>
+            <span style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--accent)" }}>{creditsRemaining.toLocaleString()} monthly{creditsTopup > 0 ? ` + ${creditsTopup.toLocaleString()} top-up` : ''}</span>
             <span className={`badge ${currentPlan === 'free' ? 'badge-amber' : 'badge-green'}`} style={{ fontSize: "0.7rem" }}>{currentPlan.toUpperCase()}</span>
           </div>
+          {billingStatus === 'cancelled' && creditsTopup > 0 && (
+            <div style={{ marginTop: "var(--space-sm)", padding: "8px 16px", background: "hsla(45,90%,50%,0.1)", borderRadius: "var(--radius-sm)", border: "1px solid hsla(45,90%,50%,0.3)", fontSize: "0.78rem", color: "hsla(45,90%,70%,1)" }}>
+              🔒 You have <strong>{creditsTopup}</strong> frozen top-up credits. Resubscribe to unlock them.
+            </div>
+          )}
         )}
       </div>
 
@@ -352,9 +361,9 @@ export default function PricingPage() {
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-md)" }}>
           {[
-            { name: "Starter Pack", credits: 200, price: 7, originalPrice: null, discount: null },
-            { name: "Power Pack", credits: 500, price: 15, originalPrice: 18, discount: "13.4%" },
-            { name: "Mega Pack", credits: 1500, price: 42, originalPrice: 53, discount: "22.2%" },
+            { name: "Starter Pack", credits: 200, price: 7, originalPrice: null, discount: null, packId: "starter" },
+            { name: "Power Pack", credits: 500, price: 15, originalPrice: 18, discount: "13.4%", packId: "power" },
+            { name: "Mega Pack", credits: 1500, price: 42, originalPrice: 53, discount: "22.2%", packId: "mega" },
           ].map((pack, i) => (
             <div key={i} className="card" style={{ padding: "var(--space-lg)", textAlign: "center", position: "relative" }}>
               {pack.discount && (
@@ -381,13 +390,43 @@ export default function PricingPage() {
               <button
                 className="btn btn-ghost btn-sm"
                 style={{ width: "100%" }}
-                onClick={() => {
+                disabled={loading === pack.packId}
+                onClick={async () => {
                   if (!isLoggedIn) { window.location.href = "/login?returnTo=/pricing"; return; }
                   if (currentPlan === "free") { setToast("⚠️ Top-ups are for paid plans only. Please upgrade first."); return; }
-                  setToast(`✅ Top-up purchase coming soon! ${pack.credits} credits for $${pack.price.toLocaleString("en-US")}`);
+                  if (billingStatus === "cancelled") { setToast("⚠️ Your subscription is cancelled. Resubscribe first to buy top-ups."); return; }
+                  setLoading(pack.packId);
+                  try {
+                    const res = await fetch("/api/razorpay/create-order", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ packId: pack.packId }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) { setToast(data.error || "Failed to create order"); setLoading(null); return; }
+                    const options = {
+                      key: data.keyId,
+                      order_id: data.orderId,
+                      amount: data.amount,
+                      currency: data.currency,
+                      name: "Agentic Factor",
+                      description: `${pack.name} — ${pack.credits} Credits`,
+                      handler: function () {
+                        setToast(`🎉 ${pack.credits} credits added to your account!`);
+                        setTimeout(() => { fetchBilling(); }, 2000);
+                      },
+                      theme: { color: "#6366f1" },
+                    };
+                    const rzp = new (window as any).Razorpay(options);
+                    rzp.open();
+                  } catch {
+                    setToast("Payment failed. Please try again.");
+                  } finally {
+                    setLoading(null);
+                  }
                 }}
               >
-                Buy Now
+                {loading === pack.packId ? "Processing..." : "Buy Now"}
               </button>
             </div>
           ))}
