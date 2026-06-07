@@ -210,16 +210,18 @@ export default function PricingPage() {
           Every agent action costs credits. Start with 30 free credits and upgrade when you need more power.
         </p>
         {isLoggedIn && (
-          <div style={{ marginTop: "var(--space-md)", display: "inline-flex", alignItems: "center", gap: "var(--space-md)", padding: "8px 20px", background: "var(--bg-glass)", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }}>
-            <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Your balance:</span>
-            <span style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--accent)" }}>{creditsRemaining.toLocaleString()} monthly{creditsTopup > 0 ? ` + ${creditsTopup.toLocaleString()} top-up` : ''}</span>
-            <span className={`badge ${currentPlan === 'free' ? 'badge-amber' : 'badge-green'}`} style={{ fontSize: "0.7rem" }}>{currentPlan.toUpperCase()}</span>
-          </div>
-          {billingStatus === 'cancelled' && creditsTopup > 0 && (
-            <div style={{ marginTop: "var(--space-sm)", padding: "8px 16px", background: "hsla(45,90%,50%,0.1)", borderRadius: "var(--radius-sm)", border: "1px solid hsla(45,90%,50%,0.3)", fontSize: "0.78rem", color: "hsla(45,90%,70%,1)" }}>
-              🔒 You have <strong>{creditsTopup}</strong> frozen top-up credits. Resubscribe to unlock them.
+          <>
+            <div style={{ marginTop: "var(--space-md)", display: "inline-flex", alignItems: "center", gap: "var(--space-md)", padding: "8px 20px", background: "var(--bg-glass)", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }}>
+              <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Your balance:</span>
+              <span style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--accent)" }}>{creditsRemaining.toLocaleString()} monthly{creditsTopup > 0 ? ` + ${creditsTopup.toLocaleString()} top-up` : ''}</span>
+              <span className={`badge ${currentPlan === 'free' ? 'badge-amber' : 'badge-green'}`} style={{ fontSize: "0.7rem" }}>{currentPlan.toUpperCase()}</span>
             </div>
-          )}
+            {billingStatus === 'cancelled' && creditsTopup > 0 && (
+              <div style={{ marginTop: "var(--space-sm)", padding: "8px 16px", background: "hsla(45,90%,50%,0.1)", borderRadius: "var(--radius-sm)", border: "1px solid hsla(45,90%,50%,0.3)", fontSize: "0.78rem", color: "hsla(45,90%,70%,1)" }}>
+                🔒 You have <strong>{creditsTopup}</strong> frozen top-up credits. Resubscribe to unlock them.
+              </div>
+            )}
+          </>
         )}
       </div>
 
