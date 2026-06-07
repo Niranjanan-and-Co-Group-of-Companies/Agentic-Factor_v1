@@ -321,7 +321,7 @@ export async function deductCredits(
         payload: {
           amount,
           actionType,
-          remainingAfter: newRemaining,
+          remainingAfter: newMonthly + newTopup,
           // Internal cost tracking (not exposed to customer)
           ...(tokenMeta ? {
             provider: tokenMeta.provider,
