@@ -337,7 +337,21 @@ export async function generateMissionJSON(
   intent: string,
   tenantId: string
 ): Promise<{ mission?: Mission; rawLLMOutput?: LLMOutput; isDiscovery?: boolean; question?: string }> {
-  // ── Parallelized initial calls (saves ~5-10 seconds) ──
+  // ── Template Matching (FAST PATH — skip LLM entirely) ──
+  try {
+    const { matchTemplate, buildMissionFromTemplate } = await import('./templates');
+    const templateMatch = matchTemplate(intent);
+    
+    if (templateMatch && templateMatch.confidence > 20) {
+      console.log(`[intake] Template matched: "${templateMatch.templateId}" (confidence: ${templateMatch.confidence.toFixed(1)}%)`);
+      const mission = buildMissionFromTemplate(templateMatch.template, tenantId, intent);
+      return { mission };
+    }
+  } catch (err) {
+    console.warn('[intake] Template matching failed, falling back to LLM:', err);
+  }
+
+  // ── LLM Path (for non-template missions) ──
   const { getPlanConfig } = await import('@/lib/middleware/billing');
   
   // Run ALL pre-checks in parallel instead of sequentially

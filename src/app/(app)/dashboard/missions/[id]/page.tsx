@@ -460,9 +460,14 @@ export default function MissionDetailPage() {
                 {isStarting ? "Restarting..." : "↻ Run Again"}
               </button>
             ) : null}
-            {mission.status === "active" || mission.status === "failed" ? (
+            {mission.status === "active" ? (
               <button className="btn btn-secondary" onClick={handleStartMission} disabled={isStarting}>
-                {isStarting ? "Forcing Restart..." : "⚠️ Force Restart"}
+                {isStarting ? "Restarting..." : "⚠️ Force Restart"}
+              </button>
+            ) : null}
+            {mission.status === "failed" ? (
+              <button className="btn btn-primary" onClick={handleStartMission} disabled={isStarting} style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}>
+                {isStarting ? "Fixing..." : "🔄 Fix & Re-run"}
               </button>
             ) : null}
             {mission.status === "awaiting_input" ? (
@@ -605,6 +610,30 @@ export default function MissionDetailPage() {
       {connectorToast && (
         <div style={{ position: "fixed", bottom: 24, right: 24, background: "var(--bg-card)", border: "1px solid var(--border)", padding: "12px 20px", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.3)", fontSize: "0.85rem", zIndex: 10000, animation: "slideIn 0.3s ease" }}>
           {connectorToast}
+        </div>
+      )}
+
+      {/* MISSION FAILURE CARD */}
+      {mission.status === "failed" && (
+        <div className="card animate-slide-in" style={{ marginBottom: "var(--space-xl)", borderColor: "hsla(0,84%,60%,0.4)", background: "hsla(0,84%,60%,0.06)" }}>
+          <div className="card-header">
+            <span className="card-title">❌ Mission Failed</span>
+            <span className="badge badge-red">Error</span>
+          </div>
+          <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginBottom: "var(--space-md)", lineHeight: 1.6 }}>
+            One or more agents encountered an error during execution. You can fix and re-run the mission — it will attempt to recover from the failed point.
+          </p>
+          {agents.filter((a: any) => a.status === "failed" || a.status === "error").length > 0 && (
+            <div style={{ marginBottom: "var(--space-md)" }}>
+              <p style={{ fontSize: "0.8rem", fontWeight: 600, marginBottom: "var(--space-xs)" }}>Failed agents:</p>
+              {agents.filter((a: any) => a.status === "failed" || a.status === "error").map((a: any) => (
+                <span key={a.id} className="badge badge-red" style={{ marginRight: 6, marginBottom: 4 }}>🤖 {a.role}</span>
+              ))}
+            </div>
+          )}
+          <button className="btn btn-primary" onClick={handleStartMission} disabled={isStarting} style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}>
+            {isStarting ? "Fixing..." : "🔄 Fix & Re-run Mission"}
+          </button>
         </div>
       )}
 
