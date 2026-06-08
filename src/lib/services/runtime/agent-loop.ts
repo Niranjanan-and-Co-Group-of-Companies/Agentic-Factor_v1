@@ -319,7 +319,7 @@ INSTRUCTIONS:
 
       const response = await callLLM(
         [{ role: 'system', content: systemPrompt }], 
-        { temperature: 0.1, jsonMode: false, tier: 1 }
+        { temperature: 0.1, jsonMode: false, tier: 2 }
       );
 
       // ── Deduct LLM credit based on actual model used ──
@@ -771,7 +771,7 @@ Does the generated output structurally match the requested format and fulfill th
 Check for schema compliance, correct keys, and data types. Do NOT check for literal data matching (the actual data values can differ from the sample).
 Respond with a JSON object: {"valid": boolean, "reason": "string explaining why if invalid"}
           `;
-          const validationResult = await callLLM([{ role: 'user', content: validationPrompt }], { temperature: 0, jsonMode: true, tier: 1 });
+          const validationResult = await callLLM([{ role: 'user', content: validationPrompt }], { temperature: 0, jsonMode: true, tier: 3 });
           const validationParsed = JSON.parse(validationResult.content);
           if (!validationParsed.valid) {
             throw new Error(`Output failed structural validation against the expected format. Reason: ${validationParsed.reason}`);
