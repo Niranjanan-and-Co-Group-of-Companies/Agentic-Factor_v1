@@ -612,25 +612,38 @@ export default function MissionDetailPage() {
       {pendingActions.length > 0 && (
         <div className="card" style={{ marginBottom: "var(--space-xl)", borderColor: "var(--amber)", background: "hsla(38,92%,55%,0.05)" }}>
           <div className="card-header">
-            <span className="card-title">⚠️ Requires Attention</span>
+            <span className="card-title">⚠️ Requires Your Permission</span>
             <span className="badge badge-amber">{pendingActions.length} pending</span>
           </div>
           <div className="stack" style={{ gap: "var(--space-md)" }}>
-            {pendingActions.map((action) => (
-              <div key={action.id} className="card animate-slide-in">
-                <div style={{ fontWeight: 600, marginBottom: "var(--space-xs)" }}>Agent: {action.agent_id}</div>
-                <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "var(--space-sm)" }}>
-                  {action.description || "The agent has generated a payload and requires manual approval before proceeding."}
+            {pendingActions.map((action) => {
+              const target = (action.target || action.description || '').toLowerCase();
+              let icon = '🔌', label = 'Connect to external service';
+              if (target.includes('gmail') || target.includes('email')) { icon = '📧'; label = 'Send emails on your behalf'; }
+              else if (target.includes('sheet')) { icon = '📊'; label = 'Create & edit Google Sheets'; }
+              else if (target.includes('calendar')) { icon = '📅'; label = 'Access your Google Calendar'; }
+              else if (target.includes('drive')) { icon = '📁'; label = 'Access your Google Drive'; }
+              else if (target.includes('tavily') || target.includes('search') || target.includes('web')) { icon = '🔍'; label = 'Search the web'; }
+              else if (target.includes('twitter')) { icon = '🐦'; label = 'Post to Twitter/X'; }
+              else if (target.includes('slack')) { icon = '💬'; label = 'Send Slack messages'; }
+              return (
+                <div key={action.id} className="card animate-slide-in">
+                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", padding: "var(--space-md)", marginBottom: "var(--space-sm)" }}>
+                    <span style={{ fontSize: "2rem" }}>{icon}</span>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: "1rem", marginBottom: 2 }}>{label}</div>
+                      <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+                        {action.description || "This agent needs permission to proceed."}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="row">
+                    <button className="btn btn-danger" onClick={() => handleAction(action.id, "rejected")}>❌ Deny</button>
+                    <button className="btn btn-primary" onClick={() => handleAction(action.id, "approved")}>✅ Allow</button>
+                  </div>
                 </div>
-                <div style={{ background: "var(--bg-glass)", padding: "var(--space-md)", borderRadius: "var(--radius-sm)", fontFamily: "monospace", fontSize: "0.8rem", overflowX: "auto", marginBottom: "var(--space-sm)" }}>
-                  {JSON.stringify(action.payload, null, 2)}
-                </div>
-                <div className="row">
-                  <button className="btn btn-secondary" onClick={() => handleAction(action.id, "rejected")}>Reject</button>
-                  <button className="btn btn-primary" onClick={() => handleAction(action.id, "approved")}>Approve payload</button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

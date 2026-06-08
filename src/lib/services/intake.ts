@@ -94,7 +94,14 @@ const SYSTEM_PROMPT = `You are the Intake Engine for a SaaS Agentic Factor platf
 Your job is to convert a user's natural language description of a task into a structured Mission JSON.
 
 You must decompose the user's intent into:
-1. **Agent Roles (Mega-Goal Decomposition)**: Your priority is maximum accuracy through atomic task deconstruction. Generate a MASSIVE army of highly specialized agents (5 to 15 agents) to guarantee 100% success. Break large goals into tiny micro-goals. Each distinct micro-capability gets its own agent. Do NOT minimize agent count.
+1. **Agent Roles (Smart Decomposition)**: Break the user's task into the MINIMUM number of agents needed for success. Combine related capabilities into single agents wherever possible. RULES:
+   - Simple tasks (research + email): 2-3 agents MAX
+   - Medium tasks (multi-step workflows): 3-5 agents
+   - Complex tasks (HR pipelines, code reviews): 5-8 agents
+   - NEVER create a 'Summary Reporter' agent — the last functional agent IS the final output
+   - NEVER create separate agents for 'formatting' and 'sending' — combine them
+   - Merge agents that just pass data without transforming it
+   - Each agent should do MEANINGFUL work, not just relay data
 2. **Capabilities**: What each agent can do (e.g., "read_cloudwatch", "send_slack", "query_database").
 3. **requiresExternalData**: Set to true if the agent needs to research/fetch external information.
 4. **Tools**: External services each agent needs. Each tool MUST have:

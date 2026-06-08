@@ -28,13 +28,32 @@ function getSupabase() {
 export default function ApprovalsPage() {
   const [actions, setActions] = useState<ProposedAction[]>([]);
   const [filter, setFilter] = useState<string>("all");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [showExplanation, setShowExplanation] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [circuitState, setCircuitState] = useState<string>("CLOSED");
   const [loading, setLoading] = useState(true);
+  const [showExplanation, setShowExplanation] = useState<string | null>(null);
   
   const { triggerAuth } = useAuthPopup();
+
+  // Map technical targets to simple human-readable labels
+  const getActionDisplay = (target: string): { icon: string; label: string } => {
+    const t = target.toLowerCase();
+    if (t.includes('gmail') || t.includes('email')) return { icon: '📧', label: 'Send emails on your behalf' };
+    if (t.includes('sheet') || t.includes('spreadsheet')) return { icon: '📊', label: 'Create & edit Google Sheets' };
+    if (t.includes('calendar')) return { icon: '📅', label: 'Access your Google Calendar' };
+    if (t.includes('drive')) return { icon: '📁', label: 'Access your Google Drive files' };
+    if (t.includes('tavily') || t.includes('search') || t.includes('web')) return { icon: '🔍', label: 'Search the web' };
+    if (t.includes('twitter') || t.includes('tweet')) return { icon: '🐦', label: 'Post to Twitter/X' };
+    if (t.includes('slack')) return { icon: '💬', label: 'Send Slack messages' };
+    if (t.includes('github')) return { icon: '🐙', label: 'Access GitHub' };
+    if (t.includes('linkedin')) return { icon: '💼', label: 'Post to LinkedIn' };
+    if (t.includes('notion')) return { icon: '📝', label: 'Access Notion' };
+    if (t.includes('facebook') || t.includes('fb')) return { icon: '📘', label: 'Post to Facebook' };
+    if (t.includes('instagram')) return { icon: '📷', label: 'Post to Instagram' };
+    if (t.includes('discord')) return { icon: '🎮', label: 'Send Discord messages' };
+    if (t.includes('whatsapp')) return { icon: '📱', label: 'Send WhatsApp messages' };
+    return { icon: '🔌', label: 'Connect to external service' };
+  };
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -197,62 +216,60 @@ export default function ApprovalsPage() {
       </div>
 
       <div className="stack">
-        {filtered.map((action) => (
-          <div key={action.id} className="card animate-slide-in" style={{ padding: "var(--space-lg)" }}>
-            <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
-              <div className="row">
-                <span className="badge badge-purple" style={{ fontSize: "0.75rem" }}>🤖 {action.agentRole}</span>
-                <span className={`badge ${riskColors[action.riskLevel]}`} style={{ fontSize: "0.7rem", textTransform: "uppercase" }}>{action.riskLevel}</span>
-                {!action.reversible && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}>⚠ Irreversible</span>}
+        {filtered.map((action) => {
+          const display = getActionDisplay(action.target);
+          return (
+            <div key={action.id} className="card animate-slide-in" style={{ padding: "var(--space-lg)" }}>
+              <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
+                <div className="row" style={{ gap: "var(--space-sm)" }}>
+                  <span className="badge badge-purple" style={{ fontSize: "0.75rem" }}>🤖 {action.agentRole}</span>
+                  <span className={`badge ${riskColors[action.riskLevel]}`} style={{ fontSize: "0.7rem", textTransform: "uppercase" }}>{action.riskLevel}</span>
+                  {!action.reversible && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}>⚠ Irreversible</span>}
+                </div>
+                <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{action.missionTitle}</span>
               </div>
-              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{action.missionTitle}</span>
-            </div>
 
-            <p style={{ fontSize: "0.92rem", fontWeight: 500, marginBottom: "var(--space-sm)", lineHeight: 1.5 }}>{action.description}</p>
-            <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: "var(--space-md)" }}>
-              Target: <code style={{ color: "var(--accent)", fontSize: "0.75rem", background: "var(--bg-glass)", padding: "1px 6px", borderRadius: 4 }}>{action.target}</code>
-            </div>
-
-            {/* Expandable Payload */}
-            <button className="btn btn-ghost btn-sm" style={{ marginBottom: "var(--space-sm)" }}
-              onClick={() => setExpandedId(expandedId === action.id ? null : action.id)}>
-              {expandedId === action.id ? "▼ Hide" : "▶ Show"} Redacted Payload
-            </button>
-            {expandedId === action.id && (
-              <pre className="code-block animate-slide-in" style={{ fontSize: "0.75rem", marginBottom: "var(--space-md)", maxHeight: 200, overflow: "auto" }}>
-                {JSON.stringify(action.payload_redacted, null, 2)}
-              </pre>
-            )}
-
-            {/* Explanation */}
-            <button className="btn btn-ghost btn-sm" style={{ marginBottom: "var(--space-md)" }}
-              onClick={() => setShowExplanation(showExplanation === action.id ? null : action.id)}>
-              {showExplanation === action.id ? "▼ Hide" : "ℹ️ Why this agent needs this"}
-            </button>
-            {showExplanation === action.id && (
-              <div className="animate-slide-in" style={{ fontSize: "0.82rem", color: "var(--text-secondary)", padding: "var(--space-sm) var(--space-md)", background: "var(--accent-subtle)", borderRadius: "var(--radius-sm)", marginBottom: "var(--space-md)", lineHeight: 1.6 }}>
-                {action.explanation}
+              {/* Simple icon + label card */}
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", padding: "var(--space-md) var(--space-lg)", background: "var(--bg-glass)", borderRadius: "var(--radius-md)", marginBottom: "var(--space-md)", border: "1px solid var(--border)" }}>
+                <span style={{ fontSize: "2rem" }}>{display.icon}</span>
+                <div>
+                  <div style={{ fontSize: "1rem", fontWeight: 600, marginBottom: 2 }}>{display.label}</div>
+                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>{action.description || `This agent needs permission to proceed.`}</div>
+                </div>
               </div>
-            )}
 
-            {/* Action Buttons */}
-            <div className="row" style={{ gap: "var(--space-sm)" }}>
-              {action.status === "pending" ? (
-                <>
-                  <button className="btn btn-success btn-sm" onClick={() => handleDecision(action.id, "approved")}>✓ Approve</button>
-                  <button className="btn btn-danger btn-sm" onClick={() => handleDecision(action.id, "rejected")}>✕ Reject</button>
-                </>
-              ) : (
-                <>
-                  <span className={`badge ${action.status === "approved" ? "badge-green" : "badge-red"}`} style={{ padding: "6px 16px" }}>
-                    {action.status === "approved" ? "✓ Approved" : "✕ Rejected"}
-                  </span>
-                  <button className="btn btn-ghost btn-sm" onClick={() => handleUndo(action.id)}>↩ Undo</button>
-                </>
+              {/* Explanation (expandable) */}
+              {action.explanation && (
+                <button className="btn btn-ghost btn-sm" style={{ marginBottom: "var(--space-md)" }}
+                  onClick={() => setShowExplanation(showExplanation === action.id ? null : action.id)}>
+                  {showExplanation === action.id ? "▼ Hide" : "ℹ️ Why this agent needs this"}
+                </button>
               )}
+              {showExplanation === action.id && (
+                <div className="animate-slide-in" style={{ fontSize: "0.82rem", color: "var(--text-secondary)", padding: "var(--space-sm) var(--space-md)", background: "var(--accent-subtle)", borderRadius: "var(--radius-sm)", marginBottom: "var(--space-md)", lineHeight: 1.6 }}>
+                  {action.explanation}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="row" style={{ gap: "var(--space-sm)" }}>
+                {action.status === "pending" ? (
+                  <>
+                    <button className="btn btn-success" style={{ padding: "8px 24px", fontSize: "0.9rem" }} onClick={() => handleDecision(action.id, "approved")}>✅ Allow</button>
+                    <button className="btn btn-danger" style={{ padding: "8px 24px", fontSize: "0.9rem" }} onClick={() => handleDecision(action.id, "rejected")}>❌ Deny</button>
+                  </>
+                ) : (
+                  <>
+                    <span className={`badge ${action.status === "approved" ? "badge-green" : "badge-red"}`} style={{ padding: "6px 16px" }}>
+                      {action.status === "approved" ? "✅ Allowed" : "❌ Denied"}
+                    </span>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleUndo(action.id)}>↩ Undo</button>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {filtered.length === 0 && (
           <div className="card" style={{ textAlign: "center", padding: "var(--space-2xl)", color: "var(--text-muted)" }}>
             No {filter === "all" ? "" : filter} actions in queue
