@@ -337,21 +337,21 @@ export async function generateMissionJSON(
   intent: string,
   tenantId: string
 ): Promise<{ mission?: Mission; rawLLMOutput?: LLMOutput; isDiscovery?: boolean; question?: string }> {
-  // ── Template Matching (FAST PATH — skip LLM entirely) ──
+  // ── Template Matching (GUIDE PATH — helps LLM, doesn't replace it) ──
+  let templateHint = '';
   try {
-    const { matchTemplate, buildMissionFromTemplate } = await import('./templates');
+    const { matchTemplate, buildTemplateHint } = await import('./templates');
     const templateMatch = matchTemplate(intent);
     
-    if (templateMatch && templateMatch.confidence > 20) {
-      console.log(`[intake] Template matched: "${templateMatch.templateId}" (confidence: ${templateMatch.confidence.toFixed(1)}%)`);
-      const mission = buildMissionFromTemplate(templateMatch.template, tenantId, intent);
-      return { mission };
+    if (templateMatch && templateMatch.confidence > 25) {
+      console.log(`[intake] Template hint: "${templateMatch.templateId}" (confidence: ${templateMatch.confidence.toFixed(1)}%) — guiding LLM`);
+      templateHint = buildTemplateHint(templateMatch.template);
     }
   } catch (err) {
-    console.warn('[intake] Template matching failed, falling back to LLM:', err);
+    console.warn('[intake] Template matching failed, proceeding without hint:', err);
   }
 
-  // ── LLM Path (for non-template missions) ──
+  // ── LLM Path (always used — template hint gives it a head start) ──
   const { getPlanConfig } = await import('@/lib/middleware/billing');
   
   // Run ALL pre-checks in parallel instead of sequentially
@@ -392,15 +392,26 @@ export async function generateMissionJSON(
     return { isDiscovery: true, question: discoveryData.question as string };
   }
 
-  // 2. Call LLM with system prompt + intent + memory context
-  const llmResponse = await callLLM([
+  // 2. Call LLM with system prompt + intent + template hint + memory context
+  const messages: Array<{ role: string; content: string }> = [
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: `Examples for reference:\n${FEW_SHOT_EXAMPLES}` },
-    {
-      role: 'user',
-      content: `Generate a Mission JSON for the following intent:\n\n"${intent}"${memoryContext}${globalMemory}`,
-    },
-  ], { temperature: 0.3, jsonMode: true, tier: 1, budgetContext: { tenantId, missionId: 'blueprint_generation' } }); // Tier 1 for complex code generation
+  ];
+
+  // Inject template hint if matched — gives LLM a structural head start
+  if (templateHint) {
+    messages.push({ role: 'user', content: templateHint });
+  }
+
+  messages.push({
+    role: 'user',
+    content: `Generate a Mission JSON for the following intent:\n\n"${intent}"${memoryContext}${globalMemory}`,
+  });
+
+  const llmResponse = await callLLM(
+    messages as any,
+    { temperature: 0.3, jsonMode: true, tier: 1, budgetContext: { tenantId, missionId: 'blueprint_generation' } }
+  );
 
   console.log(`[intake] LLM provider: ${llmResponse.provider}, tokens: ${llmResponse.tokensUsed}`);
 

@@ -756,20 +756,27 @@ ${pythonCode}`;
           console.warn(`[Agent ${agent.id}] Artifact extraction failed (non-fatal):`, artifactErr.message);
         }
 
-        // --- PHASE 3: STRUCTURAL VALIDATION ---
+        // --- PHASE 3: STRUCTURAL VALIDATION (Lenient) ---
         if (isFinalAgent && expectedOutputFormat) {
           console.log(`[Agent ${agent.id}] Validating final output against expected format...`);
           const validationPrompt = `
-You are a strict data validation agent. 
-The user requested the final output to follow this expected structural format/schema:
+You are a LENIENT data validation agent.
+The user expected the output to roughly follow this schema:
 ${expectedOutputFormat}
 
 The agent generated this JSON output:
 ${finalOutputJSON}
 
-Does the generated output structurally match the requested format and fulfill the core requirements? 
-Check for schema compliance, correct keys, and data types. Do NOT check for literal data matching (the actual data values can differ from the sample).
-Respond with a JSON object: {"valid": boolean, "reason": "string explaining why if invalid"}
+VALIDATION RULES (be lenient):
+1. PASS if the core required fields from the schema are present (even if extra fields exist)
+2. PASS if the data types are correct for the core fields
+3. Extra keys are ALWAYS OK — agents often add useful metadata like "answer", "html_report", "summary", etc.
+4. Status values like "no_email", "failed:...", "skipped" are all valid — don't reject for status wording
+5. FAIL ONLY if REQUIRED core fields are completely missing or have wrong data types
+6. An empty array [] is valid for "results" if the search found nothing
+7. Do NOT reject for having MORE data than expected
+
+Respond: {"valid": boolean, "reason": "string if invalid"}
           `;
           const validationResult = await callLLM([{ role: 'user', content: validationPrompt }], { temperature: 0, jsonMode: true, tier: 3 });
           const validationParsed = JSON.parse(validationResult.content);

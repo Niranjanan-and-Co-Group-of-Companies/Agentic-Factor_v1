@@ -6,6 +6,7 @@ import { executeMission } from '@/lib/services/runtime/executor';
 // Cron Scheduler — Wakes up paused/scheduled missions
 // Called every minute by Vercel Cron or external cron service.
 // Secured with CRON_SECRET header.
+// Supports: presets (daily_9am), custom JSON configs (day + time + endDate + maxRuns)
 // ============================================================
 
 export const maxDuration = 60;
@@ -68,7 +69,6 @@ export async function GET(request: NextRequest) {
 
       if (payload.action === 'sleep') {
         // Simple delay: check if enough time has passed
-        // payload.config should be a duration like "30m", "1h", "24h"
         const config = payload.config as string;
         const eventCreated = new Date(event.created_at || now);
         const delayMs = parseDuration(config);
@@ -77,9 +77,40 @@ export async function GET(request: NextRequest) {
           shouldWake = true;
         }
       } else if (payload.action === 'schedule') {
-        // Cron expression: check if current minute matches
-        // For MVP, we support simple patterns: "every_hour", "daily_9am", "weekly_monday"
-        const config = payload.config as string;
+        const config = payload.config;
+        
+        // Check max runs limit before evaluating schedule
+        if (typeof config === 'object' && config !== null && config.maxRuns) {
+          const { count: runCount } = await supabase
+            .from('events')
+            .select('*', { count: 'exact', head: true })
+            .eq('entity_id', missionId)
+            .eq('event_type', 'mission.resumed_by_cron');
+          
+          if (runCount !== null && runCount >= config.maxRuns) {
+            console.log(`[Cron Scheduler] Mission ${missionId} reached max runs (${runCount}/${config.maxRuns}). Auto-unscheduling.`);
+            // Auto-unschedule: remove wait event
+            await supabase.from('events').delete()
+              .eq('entity_id', missionId).eq('event_type', 'mission.wait');
+            // Mark as completed
+            await supabase.from('missions').update({ status: 'completed' }).eq('id', missionId);
+            continue;
+          }
+        }
+        
+        // Check end date before evaluating schedule
+        if (typeof config === 'object' && config !== null && config.endDate) {
+          const endDate = new Date(config.endDate);
+          if (now > endDate) {
+            console.log(`[Cron Scheduler] Mission ${missionId} past end date (${config.endDate}). Auto-unscheduling.`);
+            await supabase.from('events').delete()
+              .eq('entity_id', missionId).eq('event_type', 'mission.wait');
+            await supabase.from('missions').update({ status: 'completed' }).eq('id', missionId);
+            continue;
+          }
+        }
+        
+        // Evaluate if current time matches the schedule
         shouldWake = matchesSchedule(config, now);
       }
 
@@ -91,7 +122,6 @@ export async function GET(request: NextRequest) {
         // Block free plan from scheduling
         if (!planConfig.schedulingEnabled) {
           console.log(`[Cron Scheduler] Skipping mission ${missionId} — free plan, scheduling disabled.`);
-          // Clean up the wait event so it doesn't keep checking
           await supabase.from('events').delete()
             .eq('entity_id', missionId).eq('event_type', 'mission.wait');
           continue;
@@ -101,13 +131,13 @@ export async function GET(request: NextRequest) {
         const creditCheck = await checkCredits(tenantId, CREDIT_COSTS.schedule_daily);
         if (!creditCheck.allowed) {
           console.log(`[Cron Scheduler] Skipping mission ${missionId} — insufficient credits.`);
-          continue; // Don't wake, don't charge, leave paused
+          continue;
         }
 
-        // Deduct schedule maintenance credit (1 credit/day/mission)
+        // Deduct schedule maintenance credit
         await deductCredits(tenantId, CREDIT_COSTS.schedule_daily, `schedule_maintenance:${missionId}`).catch(() => {});
 
-        console.log(`[Cron Scheduler] Waking mission ${missionId} (${payload.action}: ${payload.config})`);
+        console.log(`[Cron Scheduler] Waking mission ${missionId} (${payload.action}: ${typeof payload.config === 'object' ? JSON.stringify(payload.config) : payload.config})`);
         
         // Transition mission back to active
         await supabase
@@ -124,7 +154,7 @@ export async function GET(request: NextRequest) {
           payload: { previousAction: payload.action, config: payload.config, wokeAt: now.toISOString() },
         });
 
-        // Remove the wait event so it doesn't fire again (unless it's a recurring schedule)
+        // Remove the wait event for one-time schedules only
         if (payload.action !== 'schedule') {
           await supabase
             .from('events')
@@ -165,12 +195,58 @@ function parseDuration(config: string): number {
   return value * (multipliers[unit] || 0);
 }
 
-function matchesSchedule(config: string, now: Date): boolean {
+/**
+ * Match a schedule config against the current time.
+ * Supports:
+ *   - String presets: "every_minute", "every_5_minutes", "every_hour", "daily_9am", etc.
+ *   - "HH:MM" format: "14:30" → runs daily at 14:30
+ *   - JSON custom config: { type: "custom", dayOfWeek: "friday", time: "12:30", endDate: "...", maxRuns: 3 }
+ */
+function matchesSchedule(config: string | Record<string, any>, now: Date): boolean {
   const hour = now.getHours();
   const minute = now.getMinutes();
   const dayOfWeek = now.getDay(); // 0 = Sunday
 
-  switch (config) {
+  // Handle JSON config objects (custom schedules)
+  if (typeof config === 'object' && config !== null) {
+    if (config.type === 'custom') {
+      // Check day of week (if specified)
+      if (config.dayOfWeek && config.dayOfWeek !== 'everyday') {
+        const dayMap: Record<string, number> = {
+          sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+          thursday: 4, friday: 5, saturday: 6
+        };
+        const targetDay = dayMap[config.dayOfWeek.toLowerCase()];
+        if (targetDay !== undefined && dayOfWeek !== targetDay) return false;
+      }
+
+      // Check multiple days of week (if specified as array)
+      if (Array.isArray(config.daysOfWeek)) {
+        const dayMap: Record<string, number> = {
+          sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+          thursday: 4, friday: 5, saturday: 6
+        };
+        const targetDays = config.daysOfWeek.map((d: string) => dayMap[d.toLowerCase()]).filter((d: number | undefined) => d !== undefined);
+        if (targetDays.length > 0 && !targetDays.includes(dayOfWeek)) return false;
+      }
+
+      // Check time (HH:MM)
+      if (config.time) {
+        const [h, m] = config.time.split(':').map(Number);
+        if (hour !== h || minute !== m) return false;
+      }
+
+      return true;
+    }
+    
+    // Unknown config type
+    return false;
+  }
+
+  // Handle string presets
+  const configStr = String(config);
+  
+  switch (configStr) {
     case 'every_minute':
       return true;
     case 'every_5_minutes':
@@ -187,7 +263,7 @@ function matchesSchedule(config: string, now: Date): boolean {
       return dayOfWeek === 5 && hour === 17 && minute === 0;
     default:
       // Try to parse as "HH:MM" format
-      const timeMatch = config.match(/^(\d{1,2}):(\d{2})$/);
+      const timeMatch = configStr.match(/^(\d{1,2}):(\d{2})$/);
       if (timeMatch) {
         return hour === parseInt(timeMatch[1]) && minute === parseInt(timeMatch[2]);
       }

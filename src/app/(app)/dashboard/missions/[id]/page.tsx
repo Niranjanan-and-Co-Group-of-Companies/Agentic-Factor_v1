@@ -79,7 +79,13 @@ export default function MissionDetailPage() {
 
   // Schedule & Run History state
   const [showSchedulePicker, setShowSchedulePicker] = useState(false);
-  const [scheduleConfig, setScheduleConfig] = useState('daily_9am');
+  const [scheduleMode, setScheduleMode] = useState<'preset' | 'custom'>('preset');
+  const [schedulePreset, setSchedulePreset] = useState('daily_9am');
+  const [customDay, setCustomDay] = useState('everyday');
+  const [customTime, setCustomTime] = useState('09:00');
+  const [endCondition, setEndCondition] = useState<'forever' | 'max_runs' | 'end_date'>('forever');
+  const [maxRuns, setMaxRuns] = useState(5);
+  const [endDate, setEndDate] = useState('');
   const [runHistory, setRunHistory] = useState<Array<{event_type: string; payload: any; created_at: string}>>([]);
   const [isScheduled, setIsScheduled] = useState(false);
 
@@ -676,17 +682,142 @@ export default function MissionDetailPage() {
           )}
           {showSchedulePicker && (
             <div style={{ marginTop: "var(--space-md)" }}>
-              <select value={scheduleConfig} onChange={(e) => setScheduleConfig(e.target.value)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: "0.9rem", marginBottom: "var(--space-sm)", width: "100%" }}>
-                <option value="every_hour">Every hour</option>
-                <option value="daily_9am">Daily at 9:00 AM</option>
-                <option value="daily_6pm">Daily at 6:00 PM</option>
-                <option value="weekly_monday">Weekly on Monday (9 AM)</option>
-                <option value="weekly_friday">Weekly on Friday (5 PM)</option>
-              </select>
-              <div className="row" style={{ gap: "var(--space-sm)", marginTop: "var(--space-sm)" }}>
+              {/* Frequency Mode Toggle */}
+              <div style={{ display: "flex", gap: "var(--space-sm)", marginBottom: "var(--space-md)" }}>
+                <button 
+                  className={`btn ${scheduleMode === 'preset' ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ flex: 1, fontSize: "0.85rem" }}
+                  onClick={() => setScheduleMode('preset')}
+                >
+                  ⚡ Preset
+                </button>
+                <button 
+                  className={`btn ${scheduleMode === 'custom' ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ flex: 1, fontSize: "0.85rem" }}
+                  onClick={() => setScheduleMode('custom')}
+                >
+                  🎛️ Custom
+                </button>
+              </div>
+
+              {scheduleMode === 'preset' ? (
+                /* Preset Mode */
+                <select 
+                  value={schedulePreset} 
+                  onChange={(e) => setSchedulePreset(e.target.value)} 
+                  style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: "0.9rem", marginBottom: "var(--space-sm)", width: "100%" }}
+                >
+                  <option value="every_5_minutes">Every 5 minutes (testing)</option>
+                  <option value="every_hour">Every hour</option>
+                  <option value="daily_9am">Daily at 9:00 AM</option>
+                  <option value="daily_6pm">Daily at 6:00 PM</option>
+                  <option value="weekly_monday">Weekly on Monday (9 AM)</option>
+                  <option value="weekly_friday">Weekly on Friday (5 PM)</option>
+                </select>
+              ) : (
+                /* Custom Mode */
+                <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
+                  {/* Day of Week */}
+                  <div>
+                    <label style={{ fontSize: "0.78rem", fontWeight: 600, marginBottom: 6, display: "block", color: "var(--text-secondary)" }}>Day</label>
+                    <select 
+                      value={customDay} 
+                      onChange={(e) => setCustomDay(e.target.value)}
+                      style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: "0.9rem", width: "100%" }}
+                    >
+                      <option value="everyday">Every day</option>
+                      <option value="monday">Monday</option>
+                      <option value="tuesday">Tuesday</option>
+                      <option value="wednesday">Wednesday</option>
+                      <option value="thursday">Thursday</option>
+                      <option value="friday">Friday</option>
+                      <option value="saturday">Saturday</option>
+                      <option value="sunday">Sunday</option>
+                    </select>
+                  </div>
+
+                  {/* Time Input */}
+                  <div>
+                    <label style={{ fontSize: "0.78rem", fontWeight: 600, marginBottom: 6, display: "block", color: "var(--text-secondary)" }}>Time</label>
+                    <input 
+                      type="time" 
+                      value={customTime}
+                      onChange={(e) => setCustomTime(e.target.value)}
+                      style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: "0.9rem", width: "100%" }}
+                    />
+                  </div>
+
+                  {/* End Condition */}
+                  <div>
+                    <label style={{ fontSize: "0.78rem", fontWeight: 600, marginBottom: 6, display: "block", color: "var(--text-secondary)" }}>End Condition</label>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-sm)" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", cursor: "pointer" }}>
+                        <input type="radio" name="endCondition" checked={endCondition === 'forever'} onChange={() => setEndCondition('forever')} style={{ accentColor: "hsl(270,100%,70%)" }} />
+                        Run forever
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", cursor: "pointer" }}>
+                        <input type="radio" name="endCondition" checked={endCondition === 'max_runs'} onChange={() => setEndCondition('max_runs')} style={{ accentColor: "hsl(270,100%,70%)" }} />
+                        Run for
+                        <input 
+                          type="number" 
+                          min={1} max={100} 
+                          value={maxRuns}
+                          onChange={(e) => setMaxRuns(parseInt(e.target.value) || 1)}
+                          disabled={endCondition !== 'max_runs'}
+                          style={{ width: 60, padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", background: endCondition === 'max_runs' ? "var(--bg-card)" : "var(--bg-glass)", color: "var(--text-primary)", fontSize: "0.85rem", textAlign: "center" }}
+                        />
+                        times
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", cursor: "pointer" }}>
+                        <input type="radio" name="endCondition" checked={endCondition === 'end_date'} onChange={() => setEndCondition('end_date')} style={{ accentColor: "hsl(270,100%,70%)" }} />
+                        Until
+                        <input 
+                          type="date"
+                          value={endDate}
+                          onChange={(e) => setEndDate(e.target.value)}
+                          disabled={endCondition !== 'end_date'}
+                          min={new Date().toISOString().split('T')[0]}
+                          style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", background: endCondition === 'end_date' ? "var(--bg-card)" : "var(--bg-glass)", color: "var(--text-primary)", fontSize: "0.85rem" }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Preview */}
+                  <div style={{ padding: "var(--space-sm) var(--space-md)", background: "hsla(270,100%,70%,0.08)", borderRadius: "var(--radius-sm)", border: "1px solid hsla(270,100%,70%,0.2)" }}>
+                    <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: 4 }}>Preview</div>
+                    <div style={{ fontSize: "0.85rem", fontWeight: 500, color: "hsl(270,100%,80%)" }}>
+                      {(() => {
+                        const dayLabel = customDay === 'everyday' ? 'Every day' : `Every ${customDay.charAt(0).toUpperCase() + customDay.slice(1)}`;
+                        const [h, m] = customTime.split(':').map(Number);
+                        const period = h >= 12 ? 'PM' : 'AM';
+                        const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+                        const timeLabel = `${h12}:${String(m).padStart(2, '0')} ${period}`;
+                        const endLabel = endCondition === 'forever' ? '' : endCondition === 'max_runs' ? ` • ${maxRuns} runs total` : endDate ? ` • until ${new Date(endDate).toLocaleDateString()}` : '';
+                        return `${dayLabel} at ${timeLabel}${endLabel}`;
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="row" style={{ gap: "var(--space-sm)", marginTop: "var(--space-md)" }}>
                 <button className="btn btn-ghost" onClick={() => setShowSchedulePicker(false)}>Cancel</button>
                 <button className="btn btn-primary" onClick={async () => {
-                  const res = await fetch(`/api/missions/${missionId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'schedule', scheduleConfig }) });
+                  let finalConfig: string | object;
+                  if (scheduleMode === 'preset') {
+                    finalConfig = schedulePreset;
+                  } else {
+                    finalConfig = {
+                      type: 'custom',
+                      dayOfWeek: customDay,
+                      time: customTime,
+                      ...(endCondition === 'max_runs' ? { maxRuns } : {}),
+                      ...(endCondition === 'end_date' && endDate ? { endDate } : {}),
+                    };
+                  }
+                  const res = await fetch(`/api/missions/${missionId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'schedule', scheduleConfig: finalConfig }) });
                   if (res.ok) { setIsScheduled(true); setShowSchedulePicker(false); window.location.reload(); }
                   else { const d = await res.json(); alert(d.error || 'Failed to schedule'); }
                 }}>✅ Set Schedule</button>
