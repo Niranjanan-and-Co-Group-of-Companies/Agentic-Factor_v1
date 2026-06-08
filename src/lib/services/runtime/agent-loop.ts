@@ -442,7 +442,7 @@ CRITICAL FIX RULES (follow these EXACTLY):
     lastPythonCode = pythonCode;
 
     try {
-      console.log(`[Agent ${agent.id}] Running E2B sandbox, attempt ${attempts}...`);
+      console.log(`[Agent ${agent.id}] Running E2B sandbox, attempt ${attempts} (dry-run: side effects deferred)...`);
 
       // Build environment variables for the sandbox
       const sandboxEnvs: Record<string, string> = {};
@@ -463,6 +463,12 @@ CRITICAL FIX RULES (follow these EXACTLY):
       if (process.env.SENDGRID_API_KEY) sandboxEnvs['SENDGRID_API_KEY'] = process.env.SENDGRID_API_KEY;
       if (process.env.TWITTER_BEARER_TOKEN) sandboxEnvs['TWITTER_BEARER_TOKEN'] = process.env.TWITTER_BEARER_TOKEN;
       if (process.env.FACEBOOK_APP_ID) sandboxEnvs['FACEBOOK_APP_ID'] = process.env.FACEBOOK_APP_ID;
+
+      // ── TWO-PHASE EXECUTION: DRY RUN ──
+      // Phase 1: Run with AF_DRY_RUN=1 — all write operations (POST/PUT) are mocked
+      // This allows data fetching (search, read) to work but prevents side effects (email, sheets)
+      // Phase 2 (after validation): Run ONCE more without dry-run to perform real side effects
+      sandboxEnvs['AF_DRY_RUN'] = '1';
 
       // Prepend import of input context from env — available as `_input` (raw string) and `_input_data` (parsed JSON)
       const wrappedCode = `import os, sys, json, base64
@@ -784,6 +790,108 @@ Respond: {"valid": boolean, "reason": "string if invalid"}
             throw new Error(`Output failed structural validation against the expected format. Reason: ${validationParsed.reason}`);
           }
           console.log(`[Agent ${agent.id}] Validation passed!`);
+        }
+
+        // ═══ PHASE 2: FINAL EXECUTION — Real Side Effects ═══
+        // Data was validated and correct. Now run the script ONE MORE TIME
+        // WITHOUT AF_DRY_RUN so emails/sheets/calendar events actually execute.
+        // Only do this if the script has write operations (check for SDK usage)
+        const hasWriteOps = pythonCode.includes('gmail.send') || pythonCode.includes('sheets.create') ||
+          pythonCode.includes('calendar.create') || pythonCode.includes('drive.upload') ||
+          pythonCode.includes('gmail.draft') || pythonCode.includes('api.call') ||
+          pythonCode.includes('api.slack_send') || pythonCode.includes('api.linkedin_post') ||
+          pythonCode.includes('sheets.update') || pythonCode.includes('sheets.append');
+
+        if (hasWriteOps) {
+          console.log(`[Agent ${agent.id}] Phase 2: Executing REAL side effects (dry-run off)...`);
+          try {
+            // Remove the dry-run flag for the final execution
+            const finalEnvs = { ...sandboxEnvs };
+            delete finalEnvs['AF_DRY_RUN'];
+
+            const finalSandbox = await Sandbox.create({
+              apiKey: process.env.E2B_API_KEY,
+              timeoutMs: 120_000,
+            });
+
+            try {
+              // Install packages
+              await finalSandbox.runCode(
+                'import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "requests", "beautifulsoup4", "google-api-python-client", "google-auth-oauthlib", "openai", "anthropic", "matplotlib", "pandas", "numpy", "openpyxl", "python-docx", "python-pptx", "PyPDF2"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)',
+                { envs: finalEnvs }
+              );
+
+              // Install SDK
+              const { getSDKFiles } = await import('@/lib/sandbox/sdk-loader');
+              const sdkFiles2 = getSDKFiles();
+              for (const [filename, content] of Object.entries(sdkFiles2)) {
+                try {
+                  await finalSandbox.files.write(`/home/user/agenticfactor/${filename}`, content);
+                } catch (e) {
+                  // non-fatal
+                }
+              }
+              await finalSandbox.runCode('import sys; sys.path.insert(0, "/home/user")', { envs: finalEnvs });
+
+              // Build the same wrapped code
+              const finalWrapped = `import os, sys, json, base64
+try:
+    _b64 = os.environ.get('INPUT_CONTEXT_B64', '')
+    _input = base64.b64decode(_b64).decode('utf-8') if _b64 else '{}'
+    try:
+        _input_data = json.loads(_input, strict=False)
+    except:
+        cleaned = ''.join(c if ord(c) > 31 or c in '\\n\\r\\t' else ' ' for c in _input)
+        try:
+            _input_data = json.loads(cleaned)
+        except:
+            _input_data = {}
+except:
+    _input = '{}'
+    _input_data = {}
+
+import matplotlib
+matplotlib.use('Agg')
+
+${pythonCode}`.replace(/\x00/g, '');
+
+              const finalExec = await finalSandbox.runCode(finalWrapped, { envs: finalEnvs });
+
+              const finalStdout = finalExec.logs.stdout.join('\n').trim();
+              const finalStderr = finalExec.logs.stderr.join('\n').trim();
+
+              if (finalExec.error) {
+                console.error(`[Agent ${agent.id}] Phase 2 (side effects) failed: ${finalExec.error.value}`);
+                // Don't fail the mission — data was already validated
+                // Just log the error and continue with the dry-run output
+              } else {
+                console.log(`[Agent ${agent.id}] Phase 2: Side effects executed successfully.`);
+                // Use the Phase 2 output (which has real email IDs, sheet URLs, etc.)
+                let cleanFinalStdout = finalStdout.split('\n').filter(line => !line.startsWith('__SIGNAL__:')).join('\n').trim();
+                if (cleanFinalStdout) {
+                  try {
+                    const parsed2 = robustJSONParse(cleanFinalStdout);
+                    // Merge artifacts from Phase 1 into Phase 2 output
+                    const parsed1 = JSON.parse(finalOutputJSON);
+                    if (parsed1._artifacts) {
+                      parsed2._artifacts = parsed1._artifacts;
+                    }
+                    finalOutputJSON = JSON.stringify(parsed2);
+                    console.log(`[Agent ${agent.id}] Phase 2 output replaced dry-run output with real data.`);
+                  } catch {
+                    console.warn(`[Agent ${agent.id}] Phase 2 output not JSON, keeping Phase 1 output.`);
+                  }
+                }
+              }
+            } finally {
+              await finalSandbox.kill().catch(() => {});
+            }
+          } catch (phase2Err: any) {
+            // Phase 2 failure is non-fatal — we already have validated data
+            console.error(`[Agent ${agent.id}] Phase 2 sandbox creation failed (non-fatal):`, phase2Err.message);
+          }
+        } else {
+          console.log(`[Agent ${agent.id}] No write operations detected — skipping Phase 2.`);
         }
 
         // True Payload Approval: Pause AFTER execution if manual

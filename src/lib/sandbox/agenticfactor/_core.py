@@ -70,6 +70,28 @@ def _request(
 ) -> Dict:
     """Make an HTTP request with retry logic and error handling."""
     
+    # ── DRY RUN MODE ──
+    # When AF_DRY_RUN=1, WRITE operations (POST/PUT/PATCH/DELETE) return mock success
+    # READ operations (GET) still execute normally so data fetching works
+    # This prevents side effects (email sending, sheet creation) during retry attempts
+    dry_run = os.environ.get("AF_DRY_RUN", "0") == "1"
+    if dry_run and method.upper() in ("POST", "PUT", "PATCH", "DELETE"):
+        sys.stderr.write(f"[DRY_RUN] Skipped {method} {url} (side effects deferred to final run)\n")
+        # Return realistic mock responses based on the URL/provider
+        mock_id = f"dryrun_{int(time.time())}"
+        if "messages/send" in url or "gmail" in provider:
+            return {"id": mock_id, "threadId": mock_id, "labelIds": ["SENT"]}
+        elif "spreadsheets" in url or "sheets" in provider:
+            return {"spreadsheetId": mock_id, "spreadsheetUrl": f"https://docs.google.com/spreadsheets/d/{mock_id}"}
+        elif "events" in url or "calendar" in provider:
+            return {"id": mock_id, "status": "confirmed", "htmlLink": f"https://calendar.google.com/event?eid={mock_id}"}
+        elif "files" in url or "drive" in provider:
+            return {"id": mock_id, "name": "dryrun_file", "webViewLink": f"https://drive.google.com/file/d/{mock_id}"}
+        elif "drafts" in url:
+            return {"id": mock_id, "status": "draft_created"}
+        else:
+            return {"id": mock_id, "status": "ok", "dry_run": True}
+    
     _headers = {"Content-Type": "application/json"}
     if token:
         _headers["Authorization"] = f"Bearer {token}"

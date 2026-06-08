@@ -297,6 +297,20 @@ export async function executeMission(missionId: string, tenantId: string) {
 
     console.error(`[Executor] Mission failed:`, error);
     
+    // ── STATUS GUARD: Don't overwrite "completed" with "failed" ──
+    // If the mission already completed successfully but a late error occurred
+    // (e.g., notification email failed), don't mark it as failed
+    const { data: currentMission } = await supabase
+      .from('missions')
+      .select('status')
+      .eq('id', missionId)
+      .single();
+
+    if (currentMission?.status === 'completed') {
+      console.warn(`[Executor] Mission ${missionId} already completed — ignoring late error: ${error.message}`);
+      return; // Don't overwrite completed status
+    }
+
     await supabase.from('events').insert({
       tenant_id: tenantId,
       event_type: 'mission.failed',
