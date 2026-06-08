@@ -18,7 +18,7 @@ export async function PATCH(
   const { id: missionId } = await context.params;
 
   try {
-    const { action } = await request.json();
+    const { action, scheduleConfig } = await request.json();
     const supabase = createServiceClient();
 
     // Validate the mission exists and belongs to the tenant
@@ -40,10 +40,12 @@ export async function PATCH(
       pause: ['active', 'building'],
       resume: ['paused', 'deadlocked'],
       cancel: ['active', 'building', 'paused', 'draft', 'pending_permissions', 'pending_validation', 'pending_approval', 'deadlocked'],
+      schedule: ['completed', 'paused', 'draft', 'failed'],
+      unschedule: ['paused'],
     };
 
     if (!allowedTransitions[action]) {
-      return NextResponse.json({ error: `Invalid action: ${action}. Allowed: pause, resume, cancel` }, { status: 400 });
+      return NextResponse.json({ error: `Invalid action: ${action}. Allowed: pause, resume, cancel, schedule, unschedule` }, { status: 400 });
     }
 
     if (!allowedTransitions[action].includes(currentStatus)) {
@@ -55,8 +57,53 @@ export async function PATCH(
     const statusMap: Record<string, string> = {
       pause: 'paused',
       resume: 'active',
-      cancel: 'failed', // Using 'failed' as the terminal state for cancelled missions
+      cancel: 'failed',
+      schedule: 'paused',
+      unschedule: 'paused',
     };
+
+    // ── Schedule: Set a recurring cron schedule ──
+    if (action === 'schedule') {
+      if (!scheduleConfig) {
+        return NextResponse.json({ error: 'scheduleConfig is required for schedule action' }, { status: 400 });
+      }
+
+      // Remove any existing wait event for this mission first
+      await supabase.from('events').delete()
+        .eq('entity_id', missionId).eq('event_type', 'mission.wait');
+
+      // Create the wait event for the cron scheduler to pick up
+      await supabase.from('events').insert({
+        tenant_id: tenantId,
+        event_type: 'mission.wait',
+        entity_type: 'mission',
+        entity_id: missionId,
+        payload: { action: 'schedule', config: scheduleConfig },
+      });
+
+      // Log the schedule event
+      await supabase.from('events').insert({
+        tenant_id: tenantId,
+        event_type: 'mission.scheduled',
+        entity_type: 'mission',
+        entity_id: missionId,
+        payload: { scheduleConfig, scheduledAt: new Date().toISOString() },
+      });
+    }
+
+    // ── Unschedule: Remove recurring schedule ──
+    if (action === 'unschedule') {
+      await supabase.from('events').delete()
+        .eq('entity_id', missionId).eq('event_type', 'mission.wait');
+
+      await supabase.from('events').insert({
+        tenant_id: tenantId,
+        event_type: 'mission.unscheduled',
+        entity_type: 'mission',
+        entity_id: missionId,
+        payload: { unscheduledAt: new Date().toISOString() },
+      });
+    }
 
     const newStatus = statusMap[action];
 

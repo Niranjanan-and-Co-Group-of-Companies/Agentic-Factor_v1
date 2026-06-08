@@ -77,6 +77,12 @@ export default function MissionDetailPage() {
   
   const { triggerAuth } = useAuthPopup();
 
+  // Schedule & Run History state
+  const [showSchedulePicker, setShowSchedulePicker] = useState(false);
+  const [scheduleConfig, setScheduleConfig] = useState('daily_9am');
+  const [runHistory, setRunHistory] = useState<Array<{event_type: string; payload: any; created_at: string}>>([]);
+  const [isScheduled, setIsScheduled] = useState(false);
+
   const handleRequestConnector = async () => {
     if (!connectorRequest.trim()) return;
     setConnectorSending(true);
@@ -283,6 +289,16 @@ export default function MissionDetailPage() {
           setEmailConfig(emailData);
         }
       } catch { /* email config fetch is non-critical */ }
+
+      // Fetch Run History & Schedule status
+      try {
+        const runsRes = await fetch(`/api/missions/${missionId}/runs`);
+        if (runsRes.ok) {
+          const runsData = await runsRes.json();
+          setRunHistory(runsData.runs || []);
+          setIsScheduled(runsData.hasActiveSchedule || false);
+        }
+      } catch { /* run history fetch is non-critical */ }
 
       setLoading(false);
     }
@@ -634,6 +650,73 @@ export default function MissionDetailPage() {
           <button className="btn btn-primary" onClick={handleStartMission} disabled={isStarting} style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}>
             {isStarting ? "Fixing..." : "🔄 Fix & Re-run Mission"}
           </button>
+        </div>
+      )}
+
+      {/* SCHEDULE PICKER */}
+      {['completed', 'paused', 'draft', 'failed'].includes(mission.status) && (
+        <div className="card" style={{ marginBottom: "var(--space-xl)", borderColor: "hsla(270,100%,70%,0.3)", background: "hsla(270,100%,70%,0.04)" }}>
+          <div className="card-header">
+            <span className="card-title">⏰ Schedule This Mission</span>
+            {isScheduled && <span className="badge" style={{ background: "hsla(270,100%,70%,0.15)", color: "hsl(270,100%,70%)" }}>Scheduled</span>}
+          </div>
+          <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "var(--space-md)" }}>
+            {isScheduled ? "This mission is set to run on a recurring schedule. The cron system will automatically execute it at the configured time." : "Set this mission to run automatically on a recurring schedule."}
+          </p>
+          {!showSchedulePicker && !isScheduled && (
+            <button className="btn btn-ghost" onClick={() => setShowSchedulePicker(true)}>📅 Set Schedule</button>
+          )}
+          {isScheduled && (
+            <button className="btn btn-ghost" style={{ color: "var(--ruby)" }} onClick={async () => {
+              if (!confirm('Stop the recurring schedule for this mission?')) return;
+              await fetch(`/api/missions/${missionId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unschedule' }) });
+              setIsScheduled(false);
+              window.location.reload();
+            }}>✕ Remove Schedule</button>
+          )}
+          {showSchedulePicker && (
+            <div style={{ marginTop: "var(--space-md)" }}>
+              <select value={scheduleConfig} onChange={(e) => setScheduleConfig(e.target.value)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: "0.9rem", marginBottom: "var(--space-sm)", width: "100%" }}>
+                <option value="every_hour">Every hour</option>
+                <option value="daily_9am">Daily at 9:00 AM</option>
+                <option value="daily_6pm">Daily at 6:00 PM</option>
+                <option value="weekly_monday">Weekly on Monday (9 AM)</option>
+                <option value="weekly_friday">Weekly on Friday (5 PM)</option>
+              </select>
+              <div className="row" style={{ gap: "var(--space-sm)", marginTop: "var(--space-sm)" }}>
+                <button className="btn btn-ghost" onClick={() => setShowSchedulePicker(false)}>Cancel</button>
+                <button className="btn btn-primary" onClick={async () => {
+                  const res = await fetch(`/api/missions/${missionId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'schedule', scheduleConfig }) });
+                  if (res.ok) { setIsScheduled(true); setShowSchedulePicker(false); window.location.reload(); }
+                  else { const d = await res.json(); alert(d.error || 'Failed to schedule'); }
+                }}>✅ Set Schedule</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* RUN HISTORY */}
+      {runHistory.length > 0 && (
+        <div className="card" style={{ marginBottom: "var(--space-xl)" }}>
+          <div className="card-header">
+            <span className="card-title">📊 Run History</span>
+            <span className="badge badge-blue">{runHistory.length} runs</span>
+          </div>
+          <div className="stack" style={{ gap: "var(--space-xs)", maxHeight: 300, overflowY: "auto" }}>
+            {runHistory.map((run, i) => {
+              const icon = run.event_type.includes('completed') ? '✅' : run.event_type.includes('failed') ? '❌' : run.event_type.includes('resumed') ? '🔄' : run.event_type.includes('scheduled') ? '⏰' : run.event_type.includes('unscheduled') ? '⏹' : run.event_type.includes('cancelled') ? '🚫' : '📌';
+              const label = run.event_type.includes('completed') ? 'Completed' : run.event_type.includes('failed') ? 'Failed' : run.event_type.includes('resumed') ? 'Started (cron)' : run.event_type.includes('unscheduled') ? 'Schedule removed' : run.event_type.includes('scheduled') ? `Scheduled: ${run.payload?.scheduleConfig || ''}` : run.event_type.includes('cancelled') ? 'Cancelled' : run.event_type.includes('wait') ? `Waiting: ${run.payload?.config || ''}` : run.event_type;
+              const time = new Date(run.created_at).toLocaleString();
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)", padding: "8px 12px", background: "var(--bg-glass)", borderRadius: 8, fontSize: "0.82rem" }}>
+                  <span>{icon}</span>
+                  <span style={{ flex: 1 }}>{label}</span>
+                  <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>{time}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
