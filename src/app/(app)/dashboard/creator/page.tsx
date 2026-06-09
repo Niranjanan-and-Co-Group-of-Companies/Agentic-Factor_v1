@@ -57,7 +57,41 @@ function MissionCreatorInner() {
   const [confirmResult, setConfirmResult] = useState<Record<string, unknown> | null>(null);
   const [showAuthPopup, setShowAuthPopup] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<{name: string; content: string; size: number}[]>([]);
   const searchParams = useSearchParams();
+
+  // ── Extract text content from File objects ──
+  const extractFileContent = async (file: File): Promise<string> => {
+    const textExts = /\.(txt|md|csv|json|html|log|yaml|yml|toml|ini|cfg|env|xml|sql)$/i;
+    if (file.type.startsWith('text/') || textExts.test(file.name)) {
+      return await file.text();
+    }
+    // For PDF/DOCX — read as base64 and send to /api/ingest for server-side parsing
+    if (file.name.endsWith('.pdf') || file.name.endsWith('.docx') || file.name.endsWith('.xlsx')) {
+      const buffer = await file.arrayBuffer();
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+      try {
+        const res = await fetch('/api/ingest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            content: `__BASE64_BINARY__:${file.name}:${base64}`,
+            assetType: file.name.endsWith('.pdf') ? 'pdf' : 'text',
+            classification: 'resource',
+            title: file.name,
+            sourceUri: `file://${file.name}`,
+          }),
+        });
+        if (res.ok) {
+          return `[Binary file: ${file.name} — content indexed for RAG retrieval]`;
+        }
+      } catch { /* fall through */ }
+      return `[Binary file: ${file.name} (${(file.size / 1024).toFixed(1)}KB) — could not extract text]`;
+    }
+    // Fallback: try reading as text
+    try { return await file.text(); } catch { return `[File: ${file.name}]`; }
+  };
 
   // ── Check auth state on mount ──
   useEffect(() => {
@@ -89,17 +123,37 @@ function MissionCreatorInner() {
   }, [searchParams]);
 
   // ── Phase 1: Generate Blueprint (ASYNC via Inngest + Polling) ──
-  const handleGenerate = async (overrideIntent?: string) => {
+  const handleGenerate = async (overrideIntent?: string, overrideFiles?: File[]) => {
     const finalIntent = overrideIntent || intent;
     if (!finalIntent.trim() || finalIntent.length < 10) { setError("Describe your mission in at least 10 characters."); return; }
     setLoading(true); setError(""); setProgressMessage("Starting blueprint generation...");
     
     try {
+      // Process any new files from this submission
+      let filesToSend = attachedFiles;
+      if (overrideFiles && overrideFiles.length > 0) {
+        setProgressMessage("Extracting content from attached files...");
+        const newFiles: {name: string; content: string; size: number}[] = [];
+        for (const f of overrideFiles) {
+          const content = await extractFileContent(f);
+          newFiles.push({ name: f.name, content, size: f.size });
+        }
+        // Merge with existing attached files (deduplicate by name)
+        const existingNames = new Set(attachedFiles.map(f => f.name));
+        const merged = [...attachedFiles, ...newFiles.filter(f => !existingNames.has(f.name))];
+        setAttachedFiles(merged);
+        filesToSend = merged;
+      }
+
       // Step 1: Fire the Inngest event (returns instantly)
+      setProgressMessage("Starting blueprint generation...");
       const res = await fetch("/api/missions?action=blueprint", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ intent: finalIntent }),
+        body: JSON.stringify({
+          intent: finalIntent,
+          files: filesToSend.map(f => ({ name: f.name, content: f.content })),
+        }),
         credentials: "include",
       });
       
@@ -365,14 +419,27 @@ function MissionCreatorInner() {
                   submitLabel={loading ? "⏳ Architecting..." : "⚡ Generate Blueprint"}
                   initialValue={intent}
                   onTextChange={(text) => setIntent(text)}
-                  onSubmit={(text) => {
+                  onSubmit={(text, files) => {
                     if (text.trim()) setIntent(text.trim());
-                    handleGenerate(text.trim() || undefined);
+                    handleGenerate(text.trim() || undefined, files.length > 0 ? files : undefined);
                   }}
                 />
+                {/* Attached file chips */}
+                {attachedFiles.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "var(--space-xs)" }}>
+                    {attachedFiles.map((f, i) => (
+                      <span key={i} className="file-chip" style={{ fontSize: "0.75rem" }}>
+                        🧠 {f.name} <span style={{ color: "var(--text-muted)" }}>({(f.size / 1024).toFixed(1)}KB)</span>
+                        <span style={{ color: "var(--emerald)", fontSize: "0.65rem", marginLeft: 4 }}>✓ attached</span>
+                        <button onClick={() => setAttachedFiles(prev => prev.filter((_, idx) => idx !== i))}>✕</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="row" style={{ justifyContent: "space-between", marginTop: "var(--space-sm)" }}>
                   <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
                     {intent.length > 0 ? `${intent.length} chars` : "Min 10 characters · Use 📎 for files · 🎙️ for voice"}
+                    {attachedFiles.length > 0 && ` · ${attachedFiles.length} file(s) attached`}
                   </span>
                 </div>
                 {loading && (
@@ -560,10 +627,23 @@ function MissionCreatorInner() {
             {/* Context Files — Blueprint Stage */}
             <div className="card">
               <div className="card-header">
-                <span className="card-title">📎 Add Context</span>
-                <span className="badge badge-purple">Blueprint stage</span>
+                <span className="card-title">📎 Attached Context Files</span>
+                <span className="badge badge-purple">{attachedFiles.length} file(s)</span>
               </div>
-              <UnifiedInput context="command" compact placeholder="Add notes, files, or voice context..." onSubmit={() => {}} />
+              {attachedFiles.length > 0 ? (
+                <div className="stack" style={{ gap: "var(--space-xs)" }}>
+                  {attachedFiles.map((f, i) => (
+                    <div key={i} className="row" style={{ padding: "var(--space-sm)", background: "var(--bg-glass)", borderRadius: "var(--radius-sm)", fontSize: "0.82rem" }}>
+                      <span>🧠</span>
+                      <span style={{ flex: 1, fontWeight: 500 }}>{f.name}</span>
+                      <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>({(f.size / 1024).toFixed(1)}KB)</span>
+                      <span style={{ color: "var(--emerald)", fontSize: "0.65rem" }}>✓ injected into agents</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", textAlign: "center", padding: "var(--space-md)" }}>No files attached. Use 📎 in the input bar to add files.</p>
+              )}
             </div>
 
             {/* Orchestration Graph */}

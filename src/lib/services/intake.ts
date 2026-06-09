@@ -335,8 +335,26 @@ async function retrieveTenantMemory(tenantId: string): Promise<string> {
 // ============================================================
 export async function generateMissionJSON(
   intent: string,
-  tenantId: string
+  tenantId: string,
+  files?: Array<{name: string; content: string}>
 ): Promise<{ mission?: Mission; rawLLMOutput?: LLMOutput; isDiscovery?: boolean; question?: string }> {
+  // ── Build file context from attached files ──
+  let fileContext = '';
+  if (files && files.length > 0) {
+    fileContext = '\n\n=== ATTACHED FILES ===\n';
+    for (const f of files) {
+      const sizeKB = (f.content.length / 1024).toFixed(1);
+      fileContext += `\n--- File: ${f.name} (${sizeKB}KB) ---\n`;
+      // Truncate to ~8K chars per file to avoid context overflow
+      fileContext += f.content.slice(0, 8192);
+      if (f.content.length > 8192) {
+        fileContext += '\n[... truncated for context limits ...]';
+      }
+      fileContext += '\n';
+    }
+    fileContext += '=== END ATTACHED FILES ===\n';
+    console.log(`[intake] ${files.length} file(s) attached: ${files.map(f => f.name).join(', ')}`);
+  }
   // ── Template Matching (GUIDE PATH — helps LLM, doesn't replace it) ──
   let templateHint = '';
   try {
@@ -378,7 +396,7 @@ export async function generateMissionJSON(
 
   const discoveryCheck = await callLLM([
     { role: 'system', content: discoveryPrompts[promptKey] },
-    { role: 'user', content: `Intent: ${intent}${globalMemory}` }
+    { role: 'user', content: `Intent: ${intent}${fileContext}${globalMemory}` }
   ], { jsonMode: true, temperature: 0.1, tier: 2, budgetContext: { tenantId, missionId: 'blueprint_generation' } });
   
   let discoveryData;
@@ -405,7 +423,7 @@ export async function generateMissionJSON(
 
   messages.push({
     role: 'user',
-    content: `Generate a Mission JSON for the following intent:\n\n"${intent}"${memoryContext}${globalMemory}`,
+    content: `Generate a Mission JSON for the following intent:\n\n"${intent}"${fileContext}${memoryContext}${globalMemory}`,
   });
 
   const llmResponse = await callLLM(

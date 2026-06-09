@@ -13,6 +13,10 @@ export const maxDuration = 300; // Blueprint generation can take 60-120s for com
 // ============================================================
 const GenerateBlueprintRequest = z.object({
   intent: z.string().min(10, 'Intent must be at least 10 characters'),
+  files: z.array(z.object({
+    name: z.string().max(500),
+    content: z.string().max(500_000), // ~500KB per file
+  })).optional().default([]),
 });
 
 const ConfirmBlueprintRequest = z.object({
@@ -48,7 +52,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: creditCheck.reason }, { status: 402 });
       }
 
-      const { intent } = GenerateBlueprintRequest.parse(body);
+      const { intent, files } = GenerateBlueprintRequest.parse(body);
       
       // Generate a job ID and fire Inngest event (returns INSTANTLY)
       const jobId = crypto.randomUUID();
@@ -56,7 +60,7 @@ export async function POST(request: NextRequest) {
       const { inngest } = await import('@/lib/inngest/client');
       await inngest.send({
         name: 'mission/blueprint.generate',
-        data: { jobId, intent, tenantId },
+        data: { jobId, intent, tenantId, files },
       });
 
       return NextResponse.json({

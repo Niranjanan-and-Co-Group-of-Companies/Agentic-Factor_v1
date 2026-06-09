@@ -329,7 +329,7 @@ export const generateBlueprintBackground = inngest.createFunction(
     triggers: [{ event: 'mission/blueprint.generate' }],
   },
   async ({ event, step }) => {
-    const { jobId, intent, tenantId } = event.data;
+    const { jobId, intent, tenantId, files } = event.data;
     const supabase = createServiceClient();
 
     // Helper: update job status in events table
@@ -349,7 +349,7 @@ export const generateBlueprintBackground = inngest.createFunction(
         await updateJobStatus('processing', { step: 'Analyzing your intent...' });
 
         const { generateMissionJSON } = await import('@/lib/services/intake');
-        const result = await generateMissionJSON(intent, tenantId);
+        const result = await generateMissionJSON(intent, tenantId, files);
 
         if (result.isDiscovery && result.question) {
           return { type: 'discovery' as const, question: result.question };
