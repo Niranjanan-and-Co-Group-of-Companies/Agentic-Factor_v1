@@ -800,7 +800,21 @@ Respond: {"valid": boolean, "reason": "string if invalid"}
           pythonCode.includes('calendar.create') || pythonCode.includes('drive.upload') ||
           pythonCode.includes('gmail.draft') || pythonCode.includes('api.call') ||
           pythonCode.includes('api.slack_send') || pythonCode.includes('api.linkedin_post') ||
-          pythonCode.includes('sheets.update') || pythonCode.includes('sheets.append');
+          pythonCode.includes('sheets.update') || pythonCode.includes('sheets.append') ||
+          // Social SDK functions (CRITICAL — these were missing, causing dry-run-only execution)
+          pythonCode.includes('social.post_linkedin') || pythonCode.includes('social.post_tweet') ||
+          pythonCode.includes('social.post_facebook') || pythonCode.includes('social.post_instagram') ||
+          pythonCode.includes('social.post_to_all') || pythonCode.includes('social.delete_tweet') ||
+          pythonCode.includes('social.delete_linkedin_post') || pythonCode.includes('social.delete_facebook_post') ||
+          // API module write functions
+          pythonCode.includes('api.github_create_issue') || pythonCode.includes('api.notion_create_page') ||
+          // Generic write patterns (catch-all for custom API calls)
+          pythonCode.includes('_request("POST"') || pythonCode.includes('_request("PUT"') ||
+          pythonCode.includes('_request("PATCH"') || pythonCode.includes('_request("DELETE"') ||
+          pythonCode.includes('requests.post') || pythonCode.includes('requests.put') ||
+          pythonCode.includes('requests.patch') || pythonCode.includes('requests.delete') ||
+          // Notification functions
+          pythonCode.includes('notify_user') || pythonCode.includes('ask_user');
 
         if (hasWriteOps) {
           console.log(`[Agent ${agent.id}] Phase 2: Executing REAL side effects (dry-run off)...`);
@@ -893,6 +907,39 @@ ${pythonCode}`.replace(/\x00/g, '');
         } else {
           console.log(`[Agent ${agent.id}] No write operations detected — skipping Phase 2.`);
         }
+
+        // ═══ MOCK OUTPUT DETECTION ═══
+        // Check if the output contains known mock/fake patterns that indicate
+        // the script fabricated results instead of making real API calls
+        try {
+          const outputStr = finalOutputJSON.toLowerCase();
+          const mockPatterns = [
+            'urn:li:activity:pending',
+            'urn:li:share:pending',
+            '"pending"',
+            '"placeholder"',
+            '"simulated"',
+            '"mock"',
+            '"attempted"',
+            '"example.com"',
+            '"fake_',
+            '"test_id"',
+            '"sample_id"',
+            '"dummy"',
+            'todo: implement',
+          ];
+          const detectedMocks = mockPatterns.filter(p => outputStr.includes(p));
+          if (detectedMocks.length > 0) {
+            console.warn(`[Agent ${agent.id}] ⚠️ MOCK OUTPUT DETECTED: ${detectedMocks.join(', ')}`);
+            console.warn(`[Agent ${agent.id}] This agent may have fabricated results instead of making real API calls.`);
+            // Don't fail the mission, but add a warning to the output
+            try {
+              const outputObj = JSON.parse(finalOutputJSON);
+              outputObj._mock_warning = `Potential mock output detected. Patterns: ${detectedMocks.join(', ')}. Verify this agent actually called the API.`;
+              finalOutputJSON = JSON.stringify(outputObj);
+            } catch { /* ignore if not valid JSON */ }
+          }
+        } catch { /* non-fatal */ }
 
         // True Payload Approval: Pause AFTER execution if manual
         if (agent.trustLevel === 'manual') {
