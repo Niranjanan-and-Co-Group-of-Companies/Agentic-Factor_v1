@@ -161,7 +161,14 @@ IMPORTANT RULES:
 - NEVER use sys.exit() in pythonScript — the sandbox crashes on it. Let scripts end naturally.
 - For social media tasks, ALWAYS use the agenticfactor.social module — NEVER write raw API calls.
 
-Respond ONLY with valid JSON matching the schema. No markdown, no explanation.`;
+OUTPUT SIZE CONSTRAINTS (CRITICAL):
+- Agent systemPrompt: MAX 150 words. Be dense and specific — no filler.
+- Agent pythonScript: MAX 80 lines per agent. Focus on core logic, not boilerplate.
+- Total output: Target under 8,000 tokens. Prioritize precision over verbosity.
+- DO NOT repeat the user's intent back in system prompts. Reference it by context.
+- Combine similar capabilities into fewer agents.
+
+Respond ONLY with valid JSON matching the schema. No markdown, no explanation, no code fences.`;
 
 // ============================================================
 // Few-shot examples for common mission types
@@ -456,16 +463,27 @@ export async function generateMissionJSON(
   } catch (parseError1) {
     console.warn(`[intake] JSON parse failed, attempting local repair...`);
     
-    // Step 2: Local JSON repair — fix common LLM JSON mistakes
+    // Step 2: Aggressive local JSON repair — fix common LLM JSON mistakes
     try {
       let repaired = llmResponse.content;
-      // Remove markdown code block wrappers
-      repaired = repaired.replace(/^```json?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+      // Remove markdown code block wrappers (multi-line)
+      repaired = repaired.replace(/^[\s\S]*?```json?\s*\n?/i, '');
+      repaired = repaired.replace(/\n?```[\s\S]*$/i, '');
+      // Remove any leading/trailing non-JSON text
+      const firstBrace = repaired.indexOf('{');
+      if (firstBrace > 0) repaired = repaired.substring(firstBrace);
+      const lastBrace = repaired.lastIndexOf('}');
+      if (lastBrace > 0) repaired = repaired.substring(0, lastBrace + 1);
       // Remove trailing commas before ] or }
       repaired = repaired.replace(/,\s*([}\]])/g, '$1');
       // Fix missing commas between array elements or object properties
       repaired = repaired.replace(/}\s*{/g, '},{');
       repaired = repaired.replace(/"\s*\n\s*"/g, '",\n"');
+      // Remove JavaScript-style comments
+      repaired = repaired.replace(/\/\/[^\n]*/g, '');
+      repaired = repaired.replace(/\/\*[\s\S]*?\*\//g, '');
+      // Fix unescaped newlines in string values
+      repaired = repaired.replace(/([^\\])\n\s*(?=[^"]*"\s*[:,}\]])/g, '$1\\n');
       // Try to close unclosed brackets
       const openBraces = (repaired.match(/{/g) || []).length;
       const closeBraces = (repaired.match(/}/g) || []).length;
@@ -477,25 +495,29 @@ export async function generateMissionJSON(
       rawJSON = robustJSONParse(repaired);
       console.log(`[intake] Local JSON repair succeeded!`);
     } catch (repairError) {
-      console.warn(`[intake] Local repair failed, retrying LLM...`);
+      console.warn(`[intake] Local repair failed, trying lightweight LLM JSON fix...`);
       
-      // Step 3: Retry LLM with error context
+      // Step 3: Lightweight JSON-fix-only call (NOT full regeneration)
+      // Send the FULL raw output and ask the LLM to ONLY fix JSON syntax
+      // Uses tier 2 (faster, cheaper) and caps output tokens
       const retryResponse = await callLLM([
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `Generate a Mission JSON for: "${intent}"${memoryContext}${globalMemory}` },
-        { role: 'assistant', content: llmResponse.content.substring(0, 2000) },
-        { role: 'user', content: `Your previous response had a JSON syntax error: ${(parseError1 as Error).message}. Please regenerate the COMPLETE valid JSON response. Respond with ONLY valid JSON, no markdown.` }
-      ], { temperature: 0.1, jsonMode: true, tier: 1, budgetContext: { tenantId, missionId: 'blueprint_retry' } });
+        { role: 'system', content: 'You are a JSON repair tool. The user will give you malformed JSON. Your ONLY job is to fix the JSON syntax and return valid JSON. Do NOT change any content, values, or structure. Do NOT add commentary. Return ONLY the repaired JSON.' },
+        { role: 'user', content: `Fix this JSON (error: ${(parseError1 as Error).message}):\n\n${llmResponse.content}` }
+      ], { temperature: 0, jsonMode: true, tier: 2, maxTokens: 16384, budgetContext: { tenantId, missionId: 'blueprint_repair' } });
       
-      console.log(`[intake] LLM retry provider: ${retryResponse.provider}, tokens: ${retryResponse.tokensUsed}`);
+      console.log(`[intake] JSON repair LLM: ${retryResponse.provider}, tokens: ${retryResponse.tokensUsed}`);
       
       try {
         rawJSON = robustJSONParse(retryResponse.content);
-        console.log(`[intake] LLM retry succeeded!`);
+        console.log(`[intake] LLM JSON repair succeeded!`);
       } catch (parseError2) {
         // Last attempt: clean the retry response too
         let cleaned = retryResponse.content;
-        cleaned = cleaned.replace(/^```json?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+        cleaned = cleaned.replace(/^[\s\S]*?```json?\s*\n?/i, '').replace(/\n?```[\s\S]*$/i, '');
+        const fb = cleaned.indexOf('{');
+        if (fb > 0) cleaned = cleaned.substring(fb);
+        const lb = cleaned.lastIndexOf('}');
+        if (lb > 0) cleaned = cleaned.substring(0, lb + 1);
         cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
         rawJSON = robustJSONParse(cleaned); // If this fails, the error propagates to the user
       }
