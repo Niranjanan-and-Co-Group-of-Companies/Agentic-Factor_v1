@@ -1,6 +1,29 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { executeAgent } from './agent-loop';
 import { transitionMissionStatus } from '../orchestrator';
+import { runPreflightCheck } from '../preflight-validator';
+
+function isEmptyOutput(output: string): boolean {
+  if (!output || output.trim() === '') return true;
+  try {
+    const parsed = JSON.parse(output);
+    if (parsed === null || parsed === undefined) return true;
+    if (Array.isArray(parsed)) return parsed.length === 0;
+    if (typeof parsed === 'object') {
+      // Ignore internal metadata keys (prefixed with _)
+      const criticalEntries = Object.entries(parsed).filter(([k]) => !k.startsWith('_'));
+      if (criticalEntries.length === 0) return true;
+      return criticalEntries.every(([, v]) => {
+        if (Array.isArray(v)) return v.length === 0;
+        if (typeof v === 'string') return v.trim() === '' || v.toLowerCase() === 'null';
+        return false; // numbers, booleans, and nested objects are considered non-empty
+      });
+    }
+    return false;
+  } catch {
+    return output.trim() === '';
+  }
+}
 
 export async function executeMission(missionId: string, tenantId: string) {
   const supabase = createServiceClient();
@@ -47,8 +70,34 @@ export async function executeMission(missionId: string, tenantId: string) {
   let currentContext = '';
 
   try {
+    // ── PRE-FLIGHT CHECK: verify tokens, credits, and mission requirements before any agent runs ──
+    const preflight = await runPreflightCheck(missionId, tenantId);
+    if (!preflight.ok) {
+      const blockerMsg = preflight.blockers.join(' | ');
+      await supabase.from('events').insert({
+        tenant_id: tenantId,
+        event_type: 'mission.preflight_failed',
+        entity_type: 'mission',
+        entity_id: missionId,
+        payload: { blockers: preflight.blockers, warnings: preflight.warnings },
+      });
+      throw new Error(`PREFLIGHT_FAILED: ${blockerMsg}`);
+    }
+    if (preflight.warnings.length > 0) {
+      try {
+        await supabase.from('events').insert({
+          tenant_id: tenantId,
+          event_type: 'mission.preflight_warning',
+          entity_type: 'mission',
+          entity_id: missionId,
+          payload: { warnings: preflight.warnings },
+        });
+      } catch { /* non-fatal */ }
+      console.warn(`[Executor] Preflight warnings for mission ${missionId}:`, preflight.warnings);
+    }
+
     // Traverse the graph
-    // For MVP, we handle sequential chains natively. 
+    // For MVP, we handle sequential chains natively.
     while (currentAgentId) {
       const agent = agentMap.get(currentAgentId);
       if (!agent) {
@@ -67,6 +116,10 @@ export async function executeMission(missionId: string, tenantId: string) {
         .order('created_at', { ascending: false })
         .limit(1);
 
+      // Determine if this is the final agent (hoisted so the empty-data guard can reference it)
+      const outEdges = orchestration.edges?.filter((e: any) => e.from === agent.id) || [];
+      const isFinalAgent = outEdges.length === 0 && orchestration.pattern !== 'supervisor';
+
       let output = '';
       if (existingEvents && existingEvents.length > 0 && existingEvents[0].payload.output) {
         console.log(`[Executor] Agent ${agent.role} already completed. Resuming from saved output.`);
@@ -81,10 +134,6 @@ export async function executeMission(missionId: string, tenantId: string) {
           await transitionMissionStatus(missionId, tenantId, 'paused');
           return;
         }
-
-        // Determine if this is the final agent (no outgoing edges)
-        const outEdges = orchestration.edges?.filter((e: any) => e.from === agent.id) || [];
-        const isFinalAgent = outEdges.length === 0 && orchestration.pattern !== 'supervisor';
 
         const result = await executeAgent(tenantId, missionId, agent, currentContext, tokens, isFinalAgent, mission.expectedOutputFormat);
         output = result.output;
@@ -173,6 +222,27 @@ export async function executeMission(missionId: string, tenantId: string) {
         } catch (e) {
           // Not JSON, continue normally
         }
+      }
+
+      // ── EMPTY DATA GUARD: abort pipeline if a non-final agent returned empty data ──
+      // Prevents silent empty-data cascades that waste credits on downstream agents.
+      if (!isFinalAgent && isEmptyOutput(output)) {
+        const edges = orchestration.edges || [];
+        const visited = new Set<string>();
+        let scanId: string | null = (edges.find((e: any) => e.from === currentAgentId) as any)?.to ?? null;
+        let skippedCount = 0;
+        while (scanId && !visited.has(scanId)) {
+          visited.add(scanId);
+          skippedCount++;
+          const next = edges.find((e: any) => e.from === scanId) as any;
+          scanId = next?.to ?? null;
+        }
+        throw new Error(
+          `EMPTY_DATA_CASCADE: Agent "${agent.role}" returned empty data. ` +
+          `Pipeline halted — ${skippedCount > 0 ? `${skippedCount} downstream agent(s) skipped` : 'no downstream agents to skip'} ` +
+          `to prevent wasting credits on empty input. ` +
+          `Fix: ensure this agent fetches real data from a valid source (correct URL, API endpoint, folder, or channel).`
+        );
       }
 
       // ═══ ORCHESTRATION PATTERNS ═══

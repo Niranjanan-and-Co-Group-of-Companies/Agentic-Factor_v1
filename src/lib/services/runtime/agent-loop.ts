@@ -87,6 +87,103 @@ function sanitizePythonCode(code: string): string {
   return fixedLines.join('\n');
 }
 
+function translateAgentError(error: string, agentRole: string): string {
+  // LinkedIn-specific 403 — most common cause of failed social missions
+  if (
+    (error.toLowerCase().includes('linkedin') || error.includes('ugcPosts') || error.includes('linkedin.com')) &&
+    (error.includes('403') || error.toLowerCase().includes('forbidden'))
+  ) {
+    return (
+      `LinkedIn 403 Forbidden: Your LinkedIn Developer App needs "Share on LinkedIn" product approval. ` +
+      `Visit developer.linkedin.com → Your App → Products and request it (3–7 day review). ` +
+      `Original: ${error}`
+    );
+  }
+  // Generic 403
+  if (error.includes('403') || error.toLowerCase().includes('forbidden')) {
+    return (
+      `Permission denied (403) in agent "${agentRole}": The OAuth token lacks the required scope. ` +
+      `Go to the Connectors page and reconnect the account with the correct permissions.`
+    );
+  }
+  // 401
+  if (error.includes('401') || error.toLowerCase().includes('unauthorized')) {
+    return (
+      `Authentication failed (401) in agent "${agentRole}": The OAuth token has expired or been revoked. ` +
+      `Go to the Connectors page and reconnect the account.`
+    );
+  }
+  // Rate limit
+  if (
+    error.includes('429') ||
+    error.toLowerCase().includes('rate limit') ||
+    error.toLowerCase().includes('too many requests')
+  ) {
+    return `Rate limited (429): Too many requests to this API. Wait a few minutes before retrying the mission.`;
+  }
+  // Network errors
+  if (
+    error.toLowerCase().includes('econnrefused') ||
+    error.toLowerCase().includes('econnreset') ||
+    (error.toLowerCase().includes('fetch') && error.toLowerCase().includes('failed'))
+  ) {
+    return (
+      `Network error in agent "${agentRole}": Cannot reach the external API. ` +
+      `Check that your credentials are valid and the service is online.`
+    );
+  }
+  // E2B timeout
+  if (error.toLowerCase().includes('timed out') || error.toLowerCase().includes('timeout')) {
+    return (
+      `Timeout (120s) in agent "${agentRole}": The script ran too long. ` +
+      `The external API may be slow or unresponsive. ` +
+      `Try reducing the data fetch scope in the mission description.`
+    );
+  }
+  // No output
+  if (
+    error.includes('produced no output') ||
+    error.includes('Script succeeded but produced no output')
+  ) {
+    return (
+      `No output from agent "${agentRole}": The script ran successfully but printed nothing to stdout. ` +
+      `Ensure the script ends with: print(json.dumps(result))`
+    );
+  }
+  // Empty data cascade (already formatted)
+  if (error.includes('EMPTY_DATA_CASCADE')) return error;
+  // Preflight failure (already formatted)
+  if (error.includes('PREFLIGHT_FAILED')) return error;
+  // Insufficient credits
+  if (error.includes('InsufficientCredits') || error.includes('Insufficient credits')) {
+    return `Out of credits mid-mission. Purchase a top-up pack from your dashboard to continue.`;
+  }
+  // E2B execution error — extract the useful Python exception
+  if (error.includes('E2B execution error:')) {
+    const match = error.match(/E2B execution error: (\w+Error): ([^\n]+)/);
+    if (match) return `Script error (${match[1]}) in agent "${agentRole}": ${match[2].trim()}`;
+  }
+  return error;
+}
+
+function isTransientError(errorMsg: string): boolean {
+  if (!errorMsg) return false;
+  const lower = errorMsg.toLowerCase();
+  return (
+    lower.includes('timeout') ||
+    lower.includes('timed out') ||
+    lower.includes('econnreset') ||
+    lower.includes('econnrefused') ||
+    lower.includes('429') ||
+    lower.includes('rate limit') ||
+    lower.includes('too many requests') ||
+    lower.includes(' 500') ||
+    lower.includes(' 502') ||
+    lower.includes(' 503') ||
+    (lower.includes('e2b') && lower.includes('failed to start'))
+  );
+}
+
 export interface AgentResult {
   output: string;
   finalCode: string;
@@ -176,8 +273,18 @@ export async function executeAgent(
     if (existingAction && existingAction.status === 'approved' && existingAction.payload && existingAction.payload.pythonCode) {
       console.log(`[Agent ${agent.id}] Resuming execution with approved Python code.`);
       pythonCode = existingAction.payload.pythonCode;
-    } else if (attempts === 1 && agent.pythonScript && agent.pythonScript.trim() !== '') {
-      console.log(`[Agent ${agent.id}] Executing predefined pythonScript from blueprint.`);
+    } else if (
+      agent.pythonScript &&
+      agent.pythonScript.trim() !== '' &&
+      (attempts === 1 || (attempts === 2 && isTransientError(lastError)))
+    ) {
+      // Attempt 1: always use the locked script from the blueprint.
+      // Attempt 2: if the failure was transient (timeout, network, rate limit) retry the same
+      // locked script instead of asking the LLM to regenerate from scratch.
+      console.log(
+        `[Agent ${agent.id}] Using locked script from blueprint (attempt ${attempts}` +
+        `${attempts > 1 ? ' — transient error on attempt 1, retrying locked script' : ''}).`
+      );
       pythonCode = agent.pythonScript;
     } else {
       // Ask the LLM to generate one dynamically
@@ -1005,10 +1112,10 @@ ${pythonCode}`.replace(/\x00/g, '');
       if (error.message === 'PausedForApproval') {
         throw error; // Let it bubble up to executor
       }
-      lastError = error.message;
-      console.error(`[Agent ${agent.id}] E2B execution failed on attempt ${attempts}: ${error.message}`);
+      lastError = translateAgentError(error.message, agent.role);
+      console.error(`[Agent ${agent.id}] E2B execution failed on attempt ${attempts}: ${lastError}`);
     }
   }
 
-  throw new Error(`Agent ${agent.role} failed after ${maxAttempts} attempts. Last error: ${lastError}`);
+  throw new Error(`Agent "${agent.role}" failed after ${maxAttempts} attempts. ${lastError}`);
 }
