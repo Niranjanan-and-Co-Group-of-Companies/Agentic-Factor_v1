@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { generateMissionJSON, persistMission, editBlueprint } from '@/lib/services/intake';
-import { buildTeam } from '@/lib/services/orchestrator';
 import { createServiceClient } from '@/lib/supabase/server';
 import { MissionSchema, LLMOutputSchema, type Mission } from '@/lib/schemas/mission';
 import { z } from 'zod';
@@ -177,27 +176,16 @@ export async function POST(request: NextRequest) {
         }, { status: 400 });
       }
 
-      // NOW persist — lazy execution only on confirm.
-      // This will return the mission with REAL database-generated UUIDs!
+      // Persist blueprint — mission created in 'draft' status.
+      // Agent provisioning (buildTeam) happens when the user clicks "Start Mission".
       const persistedMission = await persistMission(mission, tenantId);
-
-      // Build the team using the true UUIDs
-      const result = await buildTeam(persistedMission, tenantId);
 
       return NextResponse.json({
         success: true,
-        phase: 'confirmed',
-        graph: {
-          pattern: result.graph.pattern,
-          agentCount: result.graph.agents.length,
-          edgeCount: result.graph.edges.length,
-        },
-        dryRun: {
-          success: result.dryRunReport.success,
-          estimatedTokens: result.dryRunReport.totalEstimatedTokens,
-          estimatedCostUsd: result.dryRunReport.totalEstimatedCostUsd,
-        },
-        snapshotVersion: result.snapshotVersion,
+        phase: 'draft',
+        missionId: persistedMission.id,
+        agentCount: persistedMission.agents?.length ?? 0,
+        message: 'Blueprint saved. Open your mission and click Start Mission to begin execution.',
       }, { status: 201 });
     }
 

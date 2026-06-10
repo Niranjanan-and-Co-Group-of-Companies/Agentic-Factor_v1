@@ -327,7 +327,10 @@ export default function MissionDetailPage() {
     setChatMessages([{ role: "assistant", text: "Hi! I'm the Mission Assistant. Ask me anything about this active mission." }]); // Clear chat history
     
     try {
-      const res = await fetch(`/api/missions/${missionId}/execute`, { method: "POST" });
+      const endpoint = mission?.status === 'draft'
+        ? `/api/missions/${missionId}/run`
+        : `/api/missions/${missionId}/execute`;
+      const res = await fetch(endpoint, { method: "POST" });
       const data = await res.json();
       
       if (res.status === 403 && data.error === 'missing_permission') {

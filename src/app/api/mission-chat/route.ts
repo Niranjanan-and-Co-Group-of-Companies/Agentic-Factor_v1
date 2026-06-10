@@ -124,10 +124,13 @@ You MUST respond in valid JSON format matching this schema:
   "mutation_instruction": "A clear, concise instruction for the AI Architect to modify the blueprint (e.g., 'Add a Twitter agent'). Only include this if the user EXPLICITLY asks to change the mission. Otherwise, omit this field or set it to null."
 }`;
 
+    // Chat uses callLLM without budgetContext so the circuit breaker (designed for
+    // agent execution loops) never blocks a user conversation mid-session.
+    // callLLM cascades internally: Claude → Gemini → OpenAI on any 429/rate-limit.
     const response = await callLLM([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: message }
-    ], { jsonMode: true, temperature: 0.2, tier: 2, budgetContext: { tenantId, missionId } });
+    ], { jsonMode: true, temperature: 0.2, tier: 2 });
 
     let parsedResponse: any;
     try {
@@ -157,24 +160,25 @@ You MUST respond in valid JSON format matching this schema:
     const errMsg = (err as Error).message || 'Unknown error';
     console.error('[POST /api/mission-chat]', errMsg);
     
-    // Surface specific error types
-    if (errMsg.includes('Rate limit') || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota')) {
-      return NextResponse.json({ 
-        error: 'The AI is temporarily busy. Please try again in a few seconds.',
-        reply: 'I\'m temporarily unavailable due to high demand. Please try again in a moment.' 
-      }, { status: 429 });
-    }
-    
-    if (errMsg.includes('No LLM provider')) {
-      return NextResponse.json({ 
-        error: 'AI service unavailable',
-        reply: 'The AI service is currently down. Our team has been notified.' 
+    // All providers in the cascade exhausted (Claude → Gemini → OpenAI all rate-limited)
+    if (errMsg.includes('No LLM provider') || errMsg.includes('models exhausted')) {
+      return NextResponse.json({
+        error: 'AI service temporarily unavailable',
+        reply: 'All AI providers are temporarily rate-limited. Please try again in 30 seconds.',
       }, { status: 503 });
     }
-    
-    return NextResponse.json({ 
+
+    // Single-provider rate limit surfaced before cascade could run (defensive)
+    if (errMsg.includes('Rate limit') || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota')) {
+      return NextResponse.json({
+        error: 'The AI is temporarily busy. Please try again in a few seconds.',
+        reply: 'I\'m temporarily unavailable due to high demand. Please try again in a moment.'
+      }, { status: 429 });
+    }
+
+    return NextResponse.json({
       error: 'Failed to process chat',
-      reply: 'Sorry, I encountered an error. Please try again.' 
+      reply: 'Sorry, I encountered an error. Please try again.'
     }, { status: 500 });
   }
 }

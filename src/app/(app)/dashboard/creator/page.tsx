@@ -821,20 +821,18 @@ function MissionCreatorInner() {
   return (
     <>
       <div className="page-header">
-        <h1 className="page-title">🚀 Team Deployed</h1>
-        <p className="page-subtitle">Your agent team has been provisioned and is running.</p>
+        <h1 className="page-title">✅ Blueprint Saved</h1>
+        <p className="page-subtitle">Your mission blueprint has been saved. Open your mission and click <strong>Start Mission</strong> to begin execution.</p>
       </div>
       <div className="card animate-slide-in" style={{ maxWidth: 700, margin: "0 auto", textAlign: "center", padding: "var(--space-2xl)" }}>
-        <div style={{ fontSize: "3rem", marginBottom: "var(--space-md)" }}>✅</div>
+        <div style={{ fontSize: "3rem", marginBottom: "var(--space-md)" }}>📋</div>
         <h2 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}>{blueprint?.title}</h2>
-        <p style={{ color: "var(--text-secondary)", marginBottom: "var(--space-xl)" }}>{blueprint?.agents.length} agents provisioned · Pattern: {blueprint?.orchestration.pattern}</p>
-        {confirmResult && (
-          <div className="grid-3" style={{ marginBottom: "var(--space-xl)" }}>
-            <div className="stat-card"><div className="stat-value" style={{ color: "var(--emerald)", fontSize: "1.5rem" }}>{(confirmResult as Record<string, Record<string, unknown>>).graph?.agentCount as number}</div><div className="stat-label">Agents</div></div>
-            <div className="stat-card"><div className="stat-value" style={{ color: "var(--accent)", fontSize: "1.5rem" }}>{Math.ceil(((confirmResult as Record<string, Record<string, unknown>>).dryRun?.estimatedTokens as number || 0) / 1000 * 0.005 * 4 * 1000)}</div><div className="stat-label">Est. Credits</div></div>
-            <div className="stat-card"><div className="stat-value" style={{ color: "var(--amber)", fontSize: "1.5rem" }}>v{confirmResult.snapshotVersion as number}</div><div className="stat-label">Snapshot</div></div>
-          </div>
-        )}
+        <p style={{ color: "var(--text-secondary)", marginBottom: "var(--space-xl)" }}>{blueprint?.agents.length} agents ready · Pattern: {blueprint?.orchestration.pattern}</p>
+        <div className="grid-3" style={{ marginBottom: "var(--space-xl)" }}>
+          <div className="stat-card"><div className="stat-value" style={{ color: "var(--emerald)", fontSize: "1.5rem" }}>{blueprint?.agents.length ?? 0}</div><div className="stat-label">Agents</div></div>
+          <div className="stat-card"><div className="stat-value" style={{ color: "var(--accent)", fontSize: "1.5rem" }}>{blueprint?.orchestration.pattern ?? '—'}</div><div className="stat-label">Pattern</div></div>
+          <div className="stat-card"><div className="stat-value" style={{ color: "var(--amber)", fontSize: "1.5rem" }}>Draft</div><div className="stat-label">Status</div></div>
+        </div>
         {/* Trust level summary */}
         {blueprint && (
           <div className="row" style={{ justifyContent: "center", marginBottom: "var(--space-lg)" }}>
@@ -847,7 +845,11 @@ function MissionCreatorInner() {
         )}
         <div className="row" style={{ justifyContent: "center" }}>
           <button className="btn btn-ghost" onClick={() => { setPhase("input"); setBlueprint(null); setConfirmResult(null); }}>+ New Mission</button>
-          <a href="/dashboard" className="btn btn-primary">📊 View Dashboard</a>
+          {confirmResult?.missionId ? (
+            <a href={`/dashboard/missions/${confirmResult.missionId as string}`} className="btn btn-primary">▶ Start Mission</a>
+          ) : (
+            <a href="/dashboard" className="btn btn-primary">📊 View Dashboard</a>
+          )}
         </div>
       </div>
     </>
