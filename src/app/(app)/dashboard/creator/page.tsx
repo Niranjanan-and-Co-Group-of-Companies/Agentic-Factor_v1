@@ -147,6 +147,7 @@ function MissionCreatorInner() {
 
       // Step 1: Fire the Inngest event (returns instantly)
       setProgressMessage("Starting blueprint generation...");
+      console.log(`[Creator] Sending blueprint request with ${filesToSend.length} file(s):`, filesToSend.map(f => `${f.name} (${(f.content.length/1024).toFixed(1)}KB)`));
       const res = await fetch("/api/missions?action=blueprint", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -174,75 +175,77 @@ function MissionCreatorInner() {
         throw new Error("No job ID returned. Please try again.");
       }
       
-      // Step 2: Poll for status every 3 seconds
+      // Step 2: Stream status via SSE (no timeout — stays open until done)
       setProgressMessage("Analyzing your intent...");
+      console.log(`[Creator] Opening SSE stream for job: ${jobId}`);
       
-      const maxPolls = 120; // 120 * 3s = 6 minutes max
-      for (let poll = 0; poll < maxPolls; poll++) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise<void>((resolve, reject) => {
+        const eventSource = new EventSource(`/api/missions/blueprint-status?jobId=${jobId}`, {
+          // Note: EventSource doesn't support custom headers or credentials natively.
+          // We use cookies (credentials: include) which EventSource sends automatically.
+        });
         
-        try {
-          const statusRes = await fetch(`/api/missions/blueprint-status?jobId=${jobId}`, {
-            credentials: "include",
-          });
-          
-          let statusData: any;
+        eventSource.onmessage = (event) => {
           try {
-            const text = await statusRes.text();
-            statusData = JSON.parse(text);
-          } catch {
-            continue; // Retry on parse failure
+            const statusData = JSON.parse(event.data);
+            
+            // Update progress message
+            if (statusData.step) {
+              setProgressMessage(statusData.step);
+            }
+            
+            // Handle terminal states
+            if (statusData.status === 'completed') {
+              console.log('[Creator] Blueprint completed via SSE');
+              const agentsWithTrust = (statusData.blueprint.agents as BlueprintAgent[]).map((a: any) => ({
+                ...a, trustLevel: ("conditional" as TrustLevel),
+              }));
+              setBlueprint({ ...statusData.blueprint, agents: agentsWithTrust });
+              setPhase("reviewing");
+              setProgressMessage("");
+              setLoading(false);
+              eventSource.close();
+              resolve();
+              return;
+            }
+            
+            if (statusData.status === 'discovery') {
+              console.log('[Creator] Discovery question via SSE');
+              setDiscoveryQuestion(statusData.question);
+              setPhase("discovery");
+              setProgressMessage("");
+              setLoading(false);
+              eventSource.close();
+              resolve();
+              return;
+            }
+            
+            if (statusData.status === 'failed') {
+              eventSource.close();
+              reject(new Error(statusData.error || "Blueprint generation failed."));
+              return;
+            }
+            
+            // Processing / pending — update UI
+            if (statusData.status === 'processing') {
+              setProgressMessage(statusData.step || "Designing agent team...");
+            } else if (statusData.status === 'pending') {
+              setProgressMessage("Starting blueprint generation...");
+            }
+          } catch (parseErr) {
+            console.warn('[Creator] SSE parse error, continuing...', parseErr);
           }
-          
-          // Update progress message
-          if (statusData.step) {
-            setProgressMessage(statusData.step);
+        };
+        
+        eventSource.onerror = (err) => {
+          console.warn('[Creator] SSE connection error, will retry automatically...', err);
+          // EventSource auto-reconnects on error. Only reject if readyState is CLOSED (2)
+          if (eventSource.readyState === EventSource.CLOSED) {
+            reject(new Error("Lost connection to server. Please try again."));
           }
-          
-          // Handle each status
-          if (statusData.status === 'completed') {
-            // Blueprint ready!
-            const agentsWithTrust = (statusData.blueprint.agents as BlueprintAgent[]).map((a: any) => ({
-              ...a, trustLevel: ("conditional" as TrustLevel),
-            }));
-            setBlueprint({ ...statusData.blueprint, agents: agentsWithTrust });
-            setPhase("reviewing");
-            setProgressMessage("");
-            setLoading(false);
-            return;
-          }
-          
-          if (statusData.status === 'discovery') {
-            // Discovery question
-            setDiscoveryQuestion(statusData.question);
-            setPhase("discovery");
-            setProgressMessage("");
-            setLoading(false);
-            return;
-          }
-          
-          if (statusData.status === 'failed') {
-            throw new Error(statusData.error || "Blueprint generation failed.");
-          }
-          
-          // 'processing' or 'pending' — continue polling
-          if (statusData.status === 'processing') {
-            setProgressMessage(statusData.step || "Designing agent team...");
-          } else if (statusData.status === 'pending') {
-            setProgressMessage("Starting blueprint generation...");
-          }
-          
-        } catch (pollErr: any) {
-          if (pollErr.message && !pollErr.message.includes('fetch')) {
-            throw pollErr; // Re-throw non-network errors (like 'failed' status)
-          }
-          // Network error during poll — continue trying
-          console.warn('[Creator] Poll error, retrying...', pollErr);
-        }
-      }
-      
-      // If we get here, we exceeded max polls
-      throw new Error("Blueprint generation is taking too long. Please try again with a simpler description.");
+          // Otherwise let it auto-reconnect
+        };
+      });
       
     } catch (err: any) {
       setError(err.message);

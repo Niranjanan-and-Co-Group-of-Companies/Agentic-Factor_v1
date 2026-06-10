@@ -385,18 +385,30 @@ export async function generateMissionJSON(
   // Phase 2.2: Plan-Aware Discovery Loop
   const maxQ = planConfig.maxClarifications;
 
+  // File awareness clause — prevents LLM from asking for files that are already attached
+  const fileAwarenessClause = files && files.length > 0
+    ? ` IMPORTANT: The user has already attached ${files.length} file(s) whose FULL CONTENT is included below in the === ATTACHED FILES === section. Do NOT ask for any files that are already attached. Treat the attached file content as available source material.`
+    : '';
+
   const discoveryPrompts: Record<number, string> = {
-    2:  'You are a quick intake assistant. Ask only if truly critical details are missing. Be forgiving of vagueness — infer reasonable defaults. Return {\"ready\": true} unless the intent is genuinely unusable.',
-    4:  'You are a thorough Solutions Architect. Analyze the intent carefully. If key requirements are missing (target platform, success metrics, data sources), ask ONE precise clarifying question. Do NOT re-ask anything the user has already provided in the intent. Return {\"ready\": false, \"question\": \"...\"} or {\"ready\": true}.',
-    6:  'You are a senior Enterprise Solutions Architect. Analyze the intent deeply. Identify gaps in scope, edge cases, constraints, target audience, data formats, and success criteria. Ask ONE highly specific, non-redundant question. Never ask generic questions — every question must directly improve agent accuracy. Do NOT re-ask anything already stated. Return {\"ready\": false, \"question\": \"...\"} or {\"ready\": true}.',
-    10: 'You are the Chief Architect at a top consulting firm. Perform exhaustive requirements discovery. Leave NOTHING to assumption. Cover: exact scope, success metrics, edge cases, error handling, data formats, target demographics, compliance requirements, integration specifics, output format expectations, and rollback criteria. Ask ONE laser-focused question per round. Never repeat or rephrase a previously answered question. Return {\"ready\": false, \"question\": \"...\"} or {\"ready\": true}.',
+    2:  `You are a quick intake assistant. Ask only if truly critical details are missing. Be forgiving of vagueness — infer reasonable defaults.${fileAwarenessClause} Return {\"ready\": true} unless the intent is genuinely unusable.`,
+    4:  `You are a thorough Solutions Architect. Analyze the intent carefully. If key requirements are missing (target platform, success metrics, data sources), ask ONE precise clarifying question. Do NOT re-ask anything the user has already provided in the intent or attached files.${fileAwarenessClause} Return {\"ready\": false, \"question\": \"...\"} or {\"ready\": true}.`,
+    6:  `You are a senior Enterprise Solutions Architect. Analyze the intent deeply. Identify gaps in scope, edge cases, constraints, target audience, data formats, and success criteria. Ask ONE highly specific, non-redundant question. Never ask generic questions — every question must directly improve agent accuracy. Do NOT re-ask anything already stated or provided in attached files.${fileAwarenessClause} Return {\"ready\": false, \"question\": \"...\"} or {\"ready\": true}.`,
+    10: `You are the Chief Architect at a top consulting firm. Perform exhaustive requirements discovery. Leave NOTHING to assumption. Cover: exact scope, success metrics, edge cases, error handling, data formats, target demographics, compliance requirements, integration specifics, output format expectations, and rollback criteria. Ask ONE laser-focused question per round. Never repeat or rephrase a previously answered question. Do NOT ask for documents or files that are already attached.${fileAwarenessClause} Return {\"ready\": false, \"question\": \"...\"} or {\"ready\": true}.`,
   };
 
   const promptKey = maxQ <= 2 ? 2 : maxQ <= 4 ? 4 : maxQ <= 6 ? 6 : 10;
 
+  // Build discovery user message with explicit file notice
+  const fileNotice = files && files.length > 0
+    ? `\n\n[NOTE: ${files.length} file(s) are attached below with full content: ${files.map(f => f.name).join(', ')}]`
+    : '';
+
+  console.log(`[intake] Discovery check — intent: ${intent.length} chars, fileContext: ${fileContext.length} chars, files: ${files?.length || 0}`);
+
   const discoveryCheck = await callLLM([
     { role: 'system', content: discoveryPrompts[promptKey] },
-    { role: 'user', content: `Intent: ${intent}${fileContext}${globalMemory}` }
+    { role: 'user', content: `Intent: ${intent}${fileNotice}${fileContext}${globalMemory}` }
   ], { jsonMode: true, temperature: 0.1, tier: 2, budgetContext: { tenantId, missionId: 'blueprint_generation' } });
   
   let discoveryData;
