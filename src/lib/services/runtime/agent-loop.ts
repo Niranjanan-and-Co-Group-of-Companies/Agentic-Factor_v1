@@ -184,6 +184,47 @@ function isTransientError(errorMsg: string): boolean {
   );
 }
 
+// Maps Python import names → the pip package(s) they require.
+// Used to install only what the script actually needs instead of the full set every time.
+function getRequiredPackages(code: string): string[] {
+  const PIP_MAP: Record<string, string[]> = {
+    'requests':             ['requests'],
+    'bs4':                  ['beautifulsoup4'],
+    'beautifulsoup4':       ['beautifulsoup4'],
+    'googleapiclient':      ['google-api-python-client'],
+    'google_auth_oauthlib': ['google-auth-oauthlib'],
+    'google':               ['google-api-python-client', 'google-auth-oauthlib'],
+    'openai':               ['openai'],
+    'anthropic':            ['anthropic'],
+    'matplotlib':           ['matplotlib'],
+    'pandas':               ['pandas'],
+    'numpy':                ['numpy'],
+    'openpyxl':             ['openpyxl'],
+    'docx':                 ['python-docx'],
+    'pptx':                 ['python-pptx'],
+    'PyPDF2':               ['PyPDF2'],
+    'pypdf2':               ['PyPDF2'],
+    'feedparser':           ['feedparser'],
+    'lxml':                 ['lxml'],
+    'PIL':                  ['Pillow'],
+    'yaml':                 ['pyyaml'],
+    'dotenv':               ['python-dotenv'],
+    'tweepy':               ['tweepy'],
+    'slack_sdk':            ['slack-sdk'],
+  };
+
+  const needed = new Set<string>();
+  // requests is always required — the agenticfactor SDK core uses it
+  needed.add('requests');
+
+  for (const match of code.matchAll(/^(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)/gm)) {
+    const pkgs = PIP_MAP[match[1]];
+    if (pkgs) pkgs.forEach(p => needed.add(p));
+  }
+
+  return [...needed];
+}
+
 export interface AgentResult {
   output: string;
   finalCode: string;
@@ -548,8 +589,28 @@ CRITICAL FIX RULES (follow these EXACTLY):
 
     lastPythonCode = pythonCode;
 
+    // ── SMART EXECUTION MODE: detect write ops before any sandbox is allocated ──
+    // Write agents:    Phase 1 (dry run, AF_DRY_RUN=1) validates safety → Phase 2 executes real side effects.
+    // Read-only agents: bypass dry run entirely — one sandbox, direct execution. ~50% fewer sandbox launches.
+    const hasWriteOps =
+      pythonCode.includes('gmail.send') || pythonCode.includes('sheets.create') ||
+      pythonCode.includes('calendar.create') || pythonCode.includes('drive.upload') ||
+      pythonCode.includes('gmail.draft') || pythonCode.includes('api.call') ||
+      pythonCode.includes('api.slack_send') || pythonCode.includes('api.linkedin_post') ||
+      pythonCode.includes('sheets.update') || pythonCode.includes('sheets.append') ||
+      pythonCode.includes('social.post_linkedin') || pythonCode.includes('social.post_tweet') ||
+      pythonCode.includes('social.post_facebook') || pythonCode.includes('social.post_instagram') ||
+      pythonCode.includes('social.post_to_all') || pythonCode.includes('social.delete_tweet') ||
+      pythonCode.includes('social.delete_linkedin_post') || pythonCode.includes('social.delete_facebook_post') ||
+      pythonCode.includes('api.github_create_issue') || pythonCode.includes('api.notion_create_page') ||
+      pythonCode.includes('_request("POST"') || pythonCode.includes('_request("PUT"') ||
+      pythonCode.includes('_request("PATCH"') || pythonCode.includes('_request("DELETE"') ||
+      pythonCode.includes('requests.post') || pythonCode.includes('requests.put') ||
+      pythonCode.includes('requests.patch') || pythonCode.includes('requests.delete') ||
+      pythonCode.includes('notify_user') || pythonCode.includes('ask_user');
+
     try {
-      console.log(`[Agent ${agent.id}] Running E2B sandbox, attempt ${attempts} (dry-run: side effects deferred)...`);
+      console.log(`[Agent ${agent.id}] Sandbox attempt ${attempts} — ${hasWriteOps ? 'write-ops: dry-run → real-run (2 sandboxes)' : 'read-only: direct single-run (1 sandbox)'}...`);
 
       // Build environment variables for the sandbox
       const sandboxEnvs: Record<string, string> = {};
@@ -571,11 +632,10 @@ CRITICAL FIX RULES (follow these EXACTLY):
       if (process.env.TWITTER_BEARER_TOKEN) sandboxEnvs['TWITTER_BEARER_TOKEN'] = process.env.TWITTER_BEARER_TOKEN;
       if (process.env.FACEBOOK_APP_ID) sandboxEnvs['FACEBOOK_APP_ID'] = process.env.FACEBOOK_APP_ID;
 
-      // ── TWO-PHASE EXECUTION: DRY RUN ──
-      // Phase 1: Run with AF_DRY_RUN=1 — all write operations (POST/PUT) are mocked
-      // This allows data fetching (search, read) to work but prevents side effects (email, sheets)
-      // Phase 2 (after validation): Run ONCE more without dry-run to perform real side effects
-      sandboxEnvs['AF_DRY_RUN'] = '1';
+      // Only apply dry-run guard for write-op agents — read-only agents run directly
+      if (hasWriteOps) {
+        sandboxEnvs['AF_DRY_RUN'] = '1';
+      }
 
       // Prepend import of input context from env — available as `_input` (raw string) and `_input_data` (parsed JSON)
       const wrappedCode = `import os, sys, json, base64
@@ -607,11 +667,13 @@ ${pythonCode}`;
       });
 
       try {
-        // Install common packages + agenticfactor SDK (suppress all output to prevent stdout pollution)
-        await sandbox.runCode(
-          'import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "requests", "beautifulsoup4", "google-api-python-client", "google-auth-oauthlib", "openai", "anthropic", "matplotlib", "pandas", "numpy", "openpyxl", "python-docx", "python-pptx", "PyPDF2"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)',
-          { envs: sandboxEnvs }
-        );
+        // Install only the packages this script actually imports — skip unused heavy deps.
+        // --prefer-binary: download pre-built wheels, avoids source compilation.
+        // --no-cache-dir: skip cache I/O (ephemeral sandbox, no persistent cache anyway).
+        // --disable-pip-version-check: removes one extra network round-trip.
+        const phase1Pkgs = getRequiredPackages(pythonCode);
+        const phase1PipCmd = `import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "--prefer-binary", "--no-cache-dir", "--disable-pip-version-check"] + ${JSON.stringify(phase1Pkgs)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)`;
+        await sandbox.runCode(phase1PipCmd, { envs: sandboxEnvs });
 
         // Install agenticfactor SDK by writing files into the sandbox
         const { getSDKFiles } = await import('@/lib/sandbox/sdk-loader');
@@ -899,32 +961,11 @@ Respond: {"valid": boolean, "reason": "string if invalid"}
           console.log(`[Agent ${agent.id}] Validation passed!`);
         }
 
-        // ═══ PHASE 2: FINAL EXECUTION — Real Side Effects ═══
-        // Data was validated and correct. Now run the script ONE MORE TIME
-        // WITHOUT AF_DRY_RUN so emails/sheets/calendar events actually execute.
-        // Only do this if the script has write operations (check for SDK usage)
-        const hasWriteOps = pythonCode.includes('gmail.send') || pythonCode.includes('sheets.create') ||
-          pythonCode.includes('calendar.create') || pythonCode.includes('drive.upload') ||
-          pythonCode.includes('gmail.draft') || pythonCode.includes('api.call') ||
-          pythonCode.includes('api.slack_send') || pythonCode.includes('api.linkedin_post') ||
-          pythonCode.includes('sheets.update') || pythonCode.includes('sheets.append') ||
-          // Social SDK functions (CRITICAL — these were missing, causing dry-run-only execution)
-          pythonCode.includes('social.post_linkedin') || pythonCode.includes('social.post_tweet') ||
-          pythonCode.includes('social.post_facebook') || pythonCode.includes('social.post_instagram') ||
-          pythonCode.includes('social.post_to_all') || pythonCode.includes('social.delete_tweet') ||
-          pythonCode.includes('social.delete_linkedin_post') || pythonCode.includes('social.delete_facebook_post') ||
-          // API module write functions
-          pythonCode.includes('api.github_create_issue') || pythonCode.includes('api.notion_create_page') ||
-          // Generic write patterns (catch-all for custom API calls)
-          pythonCode.includes('_request("POST"') || pythonCode.includes('_request("PUT"') ||
-          pythonCode.includes('_request("PATCH"') || pythonCode.includes('_request("DELETE"') ||
-          pythonCode.includes('requests.post') || pythonCode.includes('requests.put') ||
-          pythonCode.includes('requests.patch') || pythonCode.includes('requests.delete') ||
-          // Notification functions
-          pythonCode.includes('notify_user') || pythonCode.includes('ask_user');
-
+        // ═══ PHASE 2: REAL SIDE EFFECTS ═══
+        // hasWriteOps is already computed above before sandbox creation.
+        // Only write-op agents reach here with hasWriteOps=true.
         if (hasWriteOps) {
-          console.log(`[Agent ${agent.id}] Phase 2: Executing REAL side effects (dry-run off)...`);
+          console.log(`[Agent ${agent.id}] Phase 2: Executing real side effects (write-ops confirmed)...`);
           try {
             // Remove the dry-run flag for the final execution
             const finalEnvs = { ...sandboxEnvs };
@@ -936,11 +977,10 @@ Respond: {"valid": boolean, "reason": "string if invalid"}
             });
 
             try {
-              // Install packages
-              await finalSandbox.runCode(
-                'import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "requests", "beautifulsoup4", "google-api-python-client", "google-auth-oauthlib", "openai", "anthropic", "matplotlib", "pandas", "numpy", "openpyxl", "python-docx", "python-pptx", "PyPDF2"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)',
-                { envs: finalEnvs }
-              );
+              // Install only the packages this script actually imports (same set as Phase 1)
+              const phase2Pkgs = getRequiredPackages(pythonCode);
+              const phase2PipCmd = `import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "--prefer-binary", "--no-cache-dir", "--disable-pip-version-check"] + ${JSON.stringify(phase2Pkgs)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)`;
+              await finalSandbox.runCode(phase2PipCmd, { envs: finalEnvs });
 
               // Install SDK
               const { getSDKFiles } = await import('@/lib/sandbox/sdk-loader');
