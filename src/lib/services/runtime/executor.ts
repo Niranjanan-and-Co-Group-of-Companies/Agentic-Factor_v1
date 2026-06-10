@@ -25,6 +25,82 @@ function isEmptyOutput(output: string): boolean {
   }
 }
 
+function buildMissionDiagnosis(errorMsg: string, missionTitle: string): Record<string, string> {
+  // EMPTY_DATA_CASCADE
+  if (errorMsg.includes('EMPTY_DATA_CASCADE')) {
+    const agentMatch = errorMsg.match(/Agent "([^"]+)"/);
+    const agentRole = agentMatch?.[1] || 'Data-fetching agent';
+    const skippedMatch = errorMsg.match(/(\d+) downstream/);
+    const skipped = skippedMatch?.[1] ? `${skippedMatch[1]} downstream agent(s) were skipped` : 'Downstream agents were skipped';
+    return {
+      failedAt: agentRole,
+      attempting: `Fetching data to pass through the "${missionTitle}" pipeline`,
+      errorType: 'empty_data',
+      error: `${agentRole} returned empty data (empty list or null values). ${skipped} to prevent wasting credits.`,
+      actionStep: 'Provide a specific, reachable data source in the mission description — e.g. an exact RSS feed URL, a named Google Drive folder, or a real Slack channel. Vague or guessed sources return no data.',
+    };
+  }
+  // PREFLIGHT_FAILED
+  if (errorMsg.includes('PREFLIGHT_FAILED')) {
+    const detail = errorMsg.replace('PREFLIGHT_FAILED: ', '');
+    const isToken = detail.toLowerCase().includes('oauth') || detail.toLowerCase().includes('connector') || detail.toLowerCase().includes('token');
+    const isCredit = detail.toLowerCase().includes('credit') || detail.toLowerCase().includes('insufficient');
+    return {
+      failedAt: 'Pre-flight check (before any agent ran — no credits consumed)',
+      attempting: `Verifying all connectors and credits are ready for "${missionTitle}"`,
+      errorType: isToken ? 'auth' : isCredit ? 'credits' : 'preflight',
+      error: detail,
+      actionStep: isToken
+        ? 'Go to the Connectors page and reconnect the required account, then retry.'
+        : isCredit
+        ? 'Buy a credit top-up from your dashboard, then retry.'
+        : 'Resolve each blocker listed above, then retry the mission.',
+    };
+  }
+  // Auth / permission errors
+  if (errorMsg.includes('403') || errorMsg.includes('401') || errorMsg.toLowerCase().includes('authentication failed') || errorMsg.toLowerCase().includes('permission denied')) {
+    const agentMatch = errorMsg.match(/agent "([^"]+)"/i);
+    return {
+      failedAt: agentMatch?.[1] || 'Agent',
+      attempting: 'Calling an external API with your OAuth credentials',
+      errorType: 'auth',
+      error: errorMsg,
+      actionStep: 'Go to the Connectors page and reconnect the account. Your token may have expired or lost the required API permissions.',
+    };
+  }
+  // Rate limit
+  if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('rate limit')) {
+    const agentMatch = errorMsg.match(/agent "([^"]+)"/i);
+    return {
+      failedAt: agentMatch?.[1] || 'Agent',
+      attempting: 'Sending requests to an external API',
+      errorType: 'rate_limit',
+      error: errorMsg,
+      actionStep: 'Wait a few minutes and retry. If this recurs on scheduled runs, reduce the run frequency.',
+    };
+  }
+  // Timeout
+  if (errorMsg.toLowerCase().includes('timeout') || errorMsg.toLowerCase().includes('timed out')) {
+    const agentMatch = errorMsg.match(/agent "([^"]+)"/i);
+    return {
+      failedAt: agentMatch?.[1] || 'Agent',
+      attempting: 'Running the agent script in a cloud sandbox',
+      errorType: 'timeout',
+      error: errorMsg,
+      actionStep: 'The script exceeded the 2-minute limit. Narrow the data scope in the mission description — fewer results, a shorter date range, or a smaller file.',
+    };
+  }
+  // Generic script failure
+  const agentMatch = errorMsg.match(/Agent "([^"]+)" failed/);
+  return {
+    failedAt: agentMatch?.[1] || 'Agent',
+    attempting: 'Executing its assigned task',
+    errorType: 'script_error',
+    error: errorMsg,
+    actionStep: 'The agent failed after all retry attempts. Edit the mission with more specific instructions, or check the event log for the raw error details.',
+  };
+}
+
 export async function executeMission(missionId: string, tenantId: string) {
   const supabase = createServiceClient();
 
@@ -237,6 +313,19 @@ export async function executeMission(missionId: string, tenantId: string) {
           const next = edges.find((e: any) => e.from === scanId) as any;
           scanId = next?.to ?? null;
         }
+
+        // ── CREDIT REFUND: return credits for every agent that never ran ──
+        if (skippedCount > 0) {
+          try {
+            const { addCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
+            const refundAmount = skippedCount * (CREDIT_COSTS.code_execution + CREDIT_COSTS.llm_call_pro);
+            await addCredits(tenantId, refundAmount, `early_halt:${agent.role}:${skippedCount}_agents_skipped`);
+            console.log(`[Executor] Refunded ${refundAmount} credits for ${skippedCount} skipped agent(s).`);
+          } catch (refundErr) {
+            console.warn('[Executor] Credit refund failed (non-fatal):', refundErr);
+          }
+        }
+
         throw new Error(
           `EMPTY_DATA_CASCADE: Agent "${agent.role}" returned empty data. ` +
           `Pipeline halted — ${skippedCount > 0 ? `${skippedCount} downstream agent(s) skipped` : 'no downstream agents to skip'} ` +
@@ -379,6 +468,24 @@ export async function executeMission(missionId: string, tenantId: string) {
     if (currentMission?.status === 'completed') {
       console.warn(`[Executor] Mission ${missionId} already completed — ignoring late error: ${error.message}`);
       return; // Don't overwrite completed status
+    }
+
+    // ── FAILURE DIAGNOSIS: structured report written to mission + events table ──
+    // The UI reads validation_report from the missions row to show the user what went wrong.
+    try {
+      const diagnosis = buildMissionDiagnosis(error.message, mission?.title || 'This mission');
+      await supabase.from('missions')
+        .update({ validation_report: diagnosis })
+        .eq('id', missionId);
+      await supabase.from('events').insert({
+        tenant_id: tenantId,
+        event_type: 'mission.diagnosis',
+        entity_type: 'mission',
+        entity_id: missionId,
+        payload: diagnosis,
+      });
+    } catch (diagErr) {
+      console.warn('[Executor] Diagnosis report failed (non-fatal):', diagErr);
     }
 
     await supabase.from('events').insert({

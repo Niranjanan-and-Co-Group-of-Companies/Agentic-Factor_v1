@@ -354,6 +354,36 @@ export function getModelCreditCost(model: string): number {
 }
 
 /**
+ * Refund credits back to a tenant after an early-halt or system error.
+ * Restores to monthly credits first and reduces the usage counter.
+ */
+export async function addCredits(tenantId: string, amount: number, reason: string): Promise<void> {
+  const supabase = createServiceClient();
+  const { data } = await supabase
+    .from('tenant_billing')
+    .select('credits_remaining, credits_used_this_month')
+    .eq('tenant_id', tenantId)
+    .single();
+  if (!data) return;
+  await supabase
+    .from('tenant_billing')
+    .update({
+      credits_remaining: (data.credits_remaining || 0) + amount,
+      credits_used_this_month: Math.max(0, (data.credits_used_this_month || 0) - amount),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('tenant_id', tenantId);
+  // Log refund event (non-fatal fire-and-forget)
+  supabase.from('events').insert({
+    tenant_id: tenantId,
+    event_type: 'billing.credit_refunded',
+    entity_type: 'billing',
+    entity_id: tenantId,
+    payload: { amount, reason },
+  }).then(() => {}, () => {});
+}
+
+/**
  * Get the full plan config for a tenant.
  * Used by intake engine to determine clarification depth, model tier, etc.
  */

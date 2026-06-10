@@ -149,7 +149,35 @@ export async function POST(request: NextRequest) {
         updatedAt: now,
       };
 
-      // NOW persist — lazy execution only on confirm. 
+      // ── INPUT SPECIFICITY GUARD: reject blueprints with unresolved placeholders ──
+      // Catches missions where the LLM left generic values instead of real inputs,
+      // e.g. YOUR_RSS_FEED_URL, [INSERT_CHANNEL], <your-folder-name>, example.com.
+      const blueprintStr = JSON.stringify(mission);
+      const PLACEHOLDER_CHECKS: { pattern: RegExp; label: string }[] = [
+        { pattern: /YOUR_[A-Z_]{3,}/,              label: 'unset YOUR_... placeholder' },
+        { pattern: /\[INSERT[^\]]*\]/i,             label: '[INSERT...] placeholder' },
+        { pattern: /<(your|insert|add|specify|replace)[^>]{0,40}>/i, label: 'angle-bracket placeholder' },
+        { pattern: /\bPLACEHOLDER\b/i,             label: '"PLACEHOLDER" text' },
+        { pattern: /https?:\/\/example\.com/i,      label: 'example.com URL' },
+        { pattern: /\bTODO[:;]?\s*(implement|replace|add|insert)/i, label: 'TODO marker' },
+      ];
+      const placeholderIssues = PLACEHOLDER_CHECKS
+        .filter(({ pattern }) => pattern.test(blueprintStr))
+        .map(({ label }) => label);
+
+      if (placeholderIssues.length > 0) {
+        return NextResponse.json({
+          error: 'incomplete_blueprint',
+          message:
+            `This blueprint contains placeholder values that must be replaced before running: ` +
+            `${placeholderIssues.join(', ')}. ` +
+            `Edit the blueprint and provide real values — for example, a specific RSS feed URL, ` +
+            `an exact Slack channel name, or a real Google Drive folder path.`,
+          placeholders: placeholderIssues,
+        }, { status: 400 });
+      }
+
+      // NOW persist — lazy execution only on confirm.
       // This will return the mission with REAL database-generated UUIDs!
       const persistedMission = await persistMission(mission, tenantId);
 
