@@ -64,6 +64,77 @@ const PROVIDERS: Record<string, ProviderConfig> = {
     clientIdEnv: 'FACEBOOK_APP_ID',
     clientSecretEnv: 'FACEBOOK_APP_SECRET',
   },
+  // ── New OAuth Providers ──
+  atlassian: {
+    tokenUrl: 'https://auth.atlassian.com/oauth/token',
+    clientIdEnv: 'ATLASSIAN_CLIENT_ID',
+    clientSecretEnv: 'ATLASSIAN_CLIENT_SECRET',
+  },
+  salesforce: {
+    tokenUrl: 'https://login.salesforce.com/services/oauth2/token',
+    clientIdEnv: 'SALESFORCE_CLIENT_ID',
+    clientSecretEnv: 'SALESFORCE_CLIENT_SECRET',
+  },
+  hubspot: {
+    tokenUrl: 'https://api.hubapi.com/oauth/v1/token',
+    clientIdEnv: 'HUBSPOT_CLIENT_ID',
+    clientSecretEnv: 'HUBSPOT_CLIENT_SECRET',
+  },
+  mailchimp: {
+    tokenUrl: 'https://login.mailchimp.com/oauth2/token',
+    clientIdEnv: 'MAILCHIMP_CLIENT_ID',
+    clientSecretEnv: 'MAILCHIMP_CLIENT_SECRET',
+  },
+  intercom: {
+    tokenUrl: 'https://api.intercom.io/auth/eagle/token',
+    clientIdEnv: 'INTERCOM_CLIENT_ID',
+    clientSecretEnv: 'INTERCOM_CLIENT_SECRET',
+  },
+  dropbox: {
+    tokenUrl: 'https://api.dropboxapi.com/oauth2/token',
+    clientIdEnv: 'DROPBOX_CLIENT_ID',
+    clientSecretEnv: 'DROPBOX_CLIENT_SECRET',
+  },
+  box: {
+    tokenUrl: 'https://api.box.com/oauth2/token',
+    clientIdEnv: 'BOX_CLIENT_ID',
+    clientSecretEnv: 'BOX_CLIENT_SECRET',
+  },
+  monday: {
+    tokenUrl: 'https://auth.monday.com/oauth2/token',
+    clientIdEnv: 'MONDAY_CLIENT_ID',
+    clientSecretEnv: 'MONDAY_CLIENT_SECRET',
+  },
+  asana: {
+    tokenUrl: 'https://app.asana.com/-/oauth_token',
+    clientIdEnv: 'ASANA_CLIENT_ID',
+    clientSecretEnv: 'ASANA_CLIENT_SECRET',
+  },
+  paypal: {
+    tokenUrl: 'https://api-m.paypal.com/v1/oauth2/token',
+    clientIdEnv: 'PAYPAL_CLIENT_ID',
+    clientSecretEnv: 'PAYPAL_CLIENT_SECRET',
+  },
+  square: {
+    tokenUrl: 'https://connect.squareup.com/oauth2/token',
+    clientIdEnv: 'SQUARE_CLIENT_ID',
+    clientSecretEnv: 'SQUARE_CLIENT_SECRET',
+  },
+  reddit: {
+    tokenUrl: 'https://www.reddit.com/api/v1/access_token',
+    clientIdEnv: 'REDDIT_CLIENT_ID',
+    clientSecretEnv: 'REDDIT_CLIENT_SECRET',
+  },
+  microsoft: {
+    tokenUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+    clientIdEnv: 'MICROSOFT_CLIENT_ID',
+    clientSecretEnv: 'MICROSOFT_CLIENT_SECRET',
+  },
+  airtable: {
+    tokenUrl: 'https://airtable.com/oauth2/v1/token',
+    clientIdEnv: 'AIRTABLE_CLIENT_ID',
+    clientSecretEnv: 'AIRTABLE_CLIENT_SECRET',
+  },
 };
 
 export async function GET(
@@ -115,13 +186,12 @@ export async function GET(
           redirect_uri: redirectUri,
         }),
       });
-    } else if (provider === 'twitter') {
-      // Twitter OAuth 2.0 PKCE — requires code_verifier from cookie
-      const codeVerifier = request.cookies.get('twitter_code_verifier')?.value || '';
+    } else if (provider === 'twitter' || provider === 'airtable') {
+      // PKCE providers — require code_verifier from cookie + Basic Auth
+      const codeVerifier = request.cookies.get(`${provider}_code_verifier`)?.value || '';
       if (!codeVerifier) {
-        console.error('[OAuth twitter] Missing code_verifier cookie');
+        console.error(`[OAuth ${provider}] Missing ${provider}_code_verifier cookie`);
       }
-      // Twitter requires Basic Auth (client_id:client_secret)
       const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
       tokenRes = await fetch(config.tokenUrl, {
         method: 'POST',
@@ -134,6 +204,33 @@ export async function GET(
           grant_type: 'authorization_code',
           redirect_uri: redirectUri,
           code_verifier: codeVerifier,
+        }).toString(),
+      });
+    } else if (provider === 'monday') {
+      // Monday.com requires JSON body
+      tokenRes = await fetch(config.tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code,
+          redirect_uri: redirectUri,
+        }),
+      });
+    } else if (provider === 'paypal' || provider === 'reddit') {
+      // PayPal and Reddit require Basic Auth header
+      const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+      tokenRes = await fetch(config.tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${basicAuth}`,
+        },
+        body: new URLSearchParams({
+          code,
+          grant_type: 'authorization_code',
+          redirect_uri: redirectUri,
         }).toString(),
       });
     } else {
@@ -226,6 +323,42 @@ export async function GET(
       } catch (ltErr) {
         console.warn(`[OAuth ${provider}] Long-lived token exchange failed (non-fatal):`, ltErr);
       }
+    } else if (provider === 'atlassian') {
+      accessToken = tokenData.access_token;
+      refreshToken = tokenData.refresh_token || '';
+      expiresIn = tokenData.expires_in || 3600;
+      scope = tokenData.scope || '';
+      // Fetch the Atlassian cloudId (required for API calls to Jira/Confluence)
+      try {
+        const resourcesRes = await fetch('https://api.atlassian.com/oauth/token/accessible-resources', {
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' },
+        });
+        if (resourcesRes.ok) {
+          const resources = await resourcesRes.json();
+          if (resources[0]?.id) {
+            // Store token + cloudId as JSON so agents can construct Atlassian API URLs
+            accessToken = JSON.stringify({ token: tokenData.access_token, cloud_id: resources[0].id, site_url: resources[0].url });
+          }
+        }
+      } catch (cloudErr) {
+        console.warn('[OAuth atlassian] Could not fetch cloudId (non-fatal):', cloudErr);
+      }
+    } else if (provider === 'salesforce') {
+      // Salesforce returns instance_url alongside access_token — store both in JSON
+      const instanceUrl = tokenData.instance_url || '';
+      accessToken = instanceUrl
+        ? JSON.stringify({ token: tokenData.access_token, instance_url: instanceUrl })
+        : tokenData.access_token;
+      refreshToken = tokenData.refresh_token || '';
+      scope = tokenData.scope || '';
+    } else if (provider === 'hubspot' || provider === 'mailchimp' || provider === 'intercom' ||
+               provider === 'dropbox' || provider === 'box' || provider === 'monday' ||
+               provider === 'asana' || provider === 'paypal' || provider === 'square' ||
+               provider === 'reddit' || provider === 'microsoft' || provider === 'airtable') {
+      accessToken = tokenData.access_token;
+      refreshToken = tokenData.refresh_token || '';
+      expiresIn = tokenData.expires_in || 3600;
+      scope = tokenData.scope || '';
     }
 
     if (!accessToken) {
@@ -367,6 +500,10 @@ export async function GET(
       linkedin_oidc: 'LinkedIn', github: 'GitHub', slack: 'Slack',
       google: 'Google', notion: 'Notion', zoho: 'Zoho', discord: 'Discord',
       twitter: 'Twitter / X', facebook: 'Facebook', instagram: 'Instagram',
+      atlassian: 'Atlassian', salesforce: 'Salesforce', hubspot: 'HubSpot',
+      mailchimp: 'Mailchimp', intercom: 'Intercom', dropbox: 'Dropbox',
+      box: 'Box', monday: 'Monday.com', asana: 'Asana', paypal: 'PayPal',
+      square: 'Square', reddit: 'Reddit', microsoft: 'Microsoft', airtable: 'Airtable',
     };
     const displayName = DISPLAY_NAMES[provider] || provider.charAt(0).toUpperCase() + provider.slice(1);
 

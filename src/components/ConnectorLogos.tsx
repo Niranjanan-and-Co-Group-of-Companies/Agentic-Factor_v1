@@ -21,7 +21,7 @@ const logos: Record<string, (size: number) => React.JSX.Element> = {
     <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#5865F2"/><path d="M16.942 7.132a12.52 12.52 0 0 0-3.09-.96.047.047 0 0 0-.05.024c-.133.237-.281.546-.384.79a11.56 11.56 0 0 0-3.466 0 8.001 8.001 0 0 0-.39-.79.049.049 0 0 0-.05-.024 12.5 12.5 0 0 0-3.09.96.044.044 0 0 0-.02.017C4.506 10.088 3.995 12.96 4.246 15.797a.052.052 0 0 0 .02.036 12.578 12.578 0 0 0 3.787 1.914.05.05 0 0 0 .054-.017c.292-.398.552-.818.775-1.259a.048.048 0 0 0-.026-.067 8.28 8.28 0 0 1-1.185-.565.049.049 0 0 1-.005-.081c.08-.06.16-.121.236-.184a.047.047 0 0 1 .049-.007c2.487 1.135 5.18 1.135 7.637 0a.047.047 0 0 1 .05.006c.076.063.157.125.237.185a.049.049 0 0 1-.004.08 7.777 7.777 0 0 1-1.186.566.048.048 0 0 0-.026.068c.228.441.487.86.774 1.258a.048.048 0 0 0 .054.018 12.54 12.54 0 0 0 3.793-1.914.049.049 0 0 0 .02-.035c.3-3.112-.504-5.96-2.131-8.648a.039.039 0 0 0-.02-.018zM9.68 14.16c-.75 0-1.367-.688-1.367-1.533s.605-1.533 1.367-1.533c.769 0 1.381.695 1.367 1.533 0 .845-.605 1.533-1.367 1.533zm5.052 0c-.75 0-1.367-.688-1.367-1.533s.605-1.533 1.367-1.533c.769 0 1.381.695 1.367 1.533 0 .845-.598 1.533-1.367 1.533z" fill="white"/></svg>
   ),
   zoho: (s) => (
-    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#C8202B"/><text x="12" y="16" textAnchor="middle" fontSize="10" fontWeight="800" fill="white" fontFamily="Arial">Z</text></svg>
+    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#EE3124"/><polyline points="6,7.5 18,7.5 6,16.5 18,16.5" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
   ),
   azure: (s) => (
     <svg viewBox="0 0 24 24" width={s} height={s}><path d="M13.05 4.24l-4.26 12.3h-3.5L9.55 4.24h3.5zm-1.12 6.93L17.72 19h-4.2l-3.05-4.68 1.46-3.15zM14.26 4.24L21 16.54l-3.78 2.7-7.43-11.5h4.47z" fill="#0089D6"/></svg>
@@ -45,10 +45,20 @@ const logos: Record<string, (size: number) => React.JSX.Element> = {
     <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#FF7A59"/><circle cx="12" cy="12" r="3" fill="none" stroke="white" strokeWidth="1.5"/><circle cx="12" cy="6" r="1.5" fill="white"/><circle cx="12" cy="18" r="1.5" fill="white"/><circle cx="6.5" cy="9" r="1.5" fill="white"/><circle cx="17.5" cy="15" r="1.5" fill="white"/><line x1="12" y1="7.5" x2="12" y2="9" stroke="white" strokeWidth="1.2"/><line x1="12" y1="15" x2="12" y2="16.5" stroke="white" strokeWidth="1.2"/></svg>
   ),
   jira: (s) => (
-    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#0052CC"/><path d="M12 4L4 12l8 8 8-8-8-8zm0 2.83L17.17 12 12 17.17 6.83 12 12 6.83z" fill="white"/></svg>
+    <svg viewBox="0 0 24 24" width={s} height={s}>
+      <defs><linearGradient id="jira-g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#2684FF"/><stop offset="100%" stopColor="#0052CC"/></linearGradient></defs>
+      <rect width="24" height="24" rx="4" fill="#0052CC"/>
+      <path d="M12 4.5L4.5 12 9 16.5 12 13.5V4.5z" fill="white" opacity="0.6"/>
+      <path d="M12 4.5l7.5 7.5L15 16.5 12 13.5V4.5z" fill="white"/>
+    </svg>
   ),
   confluence: (s) => (
-    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#172B4D"/><path d="M5.5 16.5c.3-.5 1-.6 1.5-.3 1.5 1 3.2 1.5 5 1.5s3.5-.5 5-1.5c.5-.3 1.2-.2 1.5.3s.2 1.2-.3 1.5c-1.8 1.2-4 1.8-6.2 1.8s-4.4-.6-6.2-1.8c-.5-.3-.6-1-.3-1.5z" fill="#1868DB"/><path d="M18.5 7.5c-.3.5-1 .6-1.5.3-1.5-1-3.2-1.5-5-1.5s-3.5.5-5 1.5c-.5.3-1.2.2-1.5-.3s-.2-1.2.3-1.5C7.6 5.3 9.8 4.7 12 4.7s4.4.6 6.2 1.8c.5.3.6 1 .3 1.5z" fill="#1868DB"/></svg>
+    <svg viewBox="0 0 24 24" width={s} height={s}>
+      <defs><linearGradient id="conf-g" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stopColor="#0052CC"/><stop offset="100%" stopColor="#2684FF"/></linearGradient></defs>
+      <rect width="24" height="24" rx="4" fill="#172B4D"/>
+      <path d="M5 17c3-2.5 7-4 7-4s4 1.5 7 4" fill="none" stroke="url(#conf-g)" strokeWidth="2.2" strokeLinecap="round"/>
+      <path d="M5 7c3 2.5 7 4 7 4s4-1.5 7-4" fill="none" stroke="url(#conf-g)" strokeWidth="2.2" strokeLinecap="round"/>
+    </svg>
   ),
   airtable: (s) => (
     <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#18BFFF"/><path d="M4 8l8-3 8 3v2L12 14 4 10V8z" fill="#FCB400"/><path d="M12 14l8-4v6l-8 4v-6z" fill="#F82B60"/><path d="M12 14L4 10v6l8 4v-6z" fill="#7C39ED"/></svg>
@@ -60,7 +70,17 @@ const logos: Record<string, (size: number) => React.JSX.Element> = {
     <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#1A82E2"/><path d="M8 8h4v4H8V8zm4 0h4v4h-4V8zm-4 4h4v4H8v-4z" fill="white" opacity="0.9"/><path d="M12 12h4v4h-4v-4z" fill="white" opacity="0.5"/></svg>
   ),
   mailchimp: (s) => (
-    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#FFE01B"/><text x="12" y="16.5" textAnchor="middle" fontSize="12" fontWeight="800" fill="#241C15" fontFamily="Arial">M</text></svg>
+    <svg viewBox="0 0 24 24" width={s} height={s}>
+      <rect width="24" height="24" rx="4" fill="#FFE01B"/>
+      <ellipse cx="12" cy="9.5" rx="5" ry="4" fill="#241C15"/>
+      <ellipse cx="12" cy="9.5" rx="3.5" ry="2.8" fill="#FFE01B"/>
+      <circle cx="10.5" cy="9" r="0.8" fill="#241C15"/>
+      <circle cx="13.5" cy="9" r="0.8" fill="#241C15"/>
+      <path d="M10 11c.6.8 3.4.8 4 0" fill="none" stroke="#241C15" strokeWidth="0.7" strokeLinecap="round"/>
+      <path d="M7 10c0-1 5-5 10-1" fill="none" stroke="#241C15" strokeWidth="1.2" strokeLinecap="round"/>
+      <rect x="9" y="13" width="6" height="6" rx="1.5" fill="#241C15"/>
+      <rect x="10.5" y="14.5" width="3" height="2.5" rx="0.5" fill="#FFE01B"/>
+    </svg>
   ),
   zendesk: (s) => (
     <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#03363D"/><path d="M12 6l6 4v8H12V6zM6 6v12h6L6 14V6z" fill="white"/></svg>
@@ -81,7 +101,7 @@ const logos: Record<string, (size: number) => React.JSX.Element> = {
     <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#3ECF8E"/><path d="M13 4v8h5l-6 8v-8H7l6-8z" fill="white"/></svg>
   ),
   firebase: (s) => (
-    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#1A73E8"/><path d="M7 17L9 5l3 6-2 3L7 17z" fill="#FFA000"/><path d="M17 17L10 14l2-3 5 6z" fill="#F57C00"/><path d="M7 17l5.5-3L17 17H7z" fill="#FFCA28"/></svg>
+    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#FF6F00"/><path d="M7 18L9.5 6l3 5.5-2 2.5L7 18z" fill="#FFA000"/><path d="M17 18L10.5 14l2-2.5 4.5 6.5z" fill="#F57C00"/><path d="M7 18l5.5-3L17 18H7z" fill="#FFCA28"/></svg>
   ),
   openai_api: (s) => (
     <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#000"/><path d="M12 4C7.6 4 4 7.6 4 12s3.6 8 8 8 8-3.6 8-8-3.6-8-8-8zm0 14c-3.3 0-6-2.7-6-6s2.7-6 6-6 6 2.7 6 6-2.7 6-6 6z" fill="white" opacity="0.3"/><path d="M12 7v5l3 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/></svg>
@@ -132,7 +152,11 @@ const logos: Record<string, (size: number) => React.JSX.Element> = {
     <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#006AFF"/><rect x="6" y="6" width="12" height="12" rx="2" fill="none" stroke="white" strokeWidth="1.5"/><rect x="9" y="9" width="6" height="6" rx="1" fill="white"/></svg>
   ),
   woocommerce: (s) => (
-    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#96588A"/><text x="12" y="16" textAnchor="middle" fontSize="9" fontWeight="800" fill="white" fontFamily="Arial">Woo</text></svg>
+    <svg viewBox="0 0 24 24" width={s} height={s}>
+      <rect width="24" height="24" rx="4" fill="#7F54B3"/>
+      <rect x="3" y="7" width="18" height="11" rx="2" fill="white" opacity="0.95"/>
+      <path d="M5 10h2l1.5 4L10 11l1.5 3L13 10h2" fill="none" stroke="#7F54B3" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
   ),
   bamboohr: (s) => (
     <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#73C41D"/><path d="M12 5c-1 0-2 4-2 8s1 6 2 6 2-2 2-6-1-8-2-8z" fill="white"/><path d="M8 8c-.5.5-1 4 0 7s2 4 2.5 3.5" stroke="white" strokeWidth="1" fill="none"/><path d="M16 8c.5.5 1 4 0 7s-2 4-2.5 3.5" stroke="white" strokeWidth="1" fill="none"/></svg>
@@ -151,6 +175,25 @@ const logos: Record<string, (size: number) => React.JSX.Element> = {
   ),
   microsoft_teams: (s) => (
     <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#6264A7"/><path d="M15.5 8h2a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-2V8zm-1 6H9a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h5.5v6zM12 5.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm4 1a1 1 0 1 1 0 2 1 1 0 0 1 0-2zM9 15h5v2a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-2z" fill="white"/></svg>
+  ),
+  // ── Newly added logos ──
+  facebook: (s) => (
+    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#1877F2"/><path d="M16 8h-2c-.55 0-1 .45-1 1v2h3l-.5 3H13v7h-3v-7H8v-3h2V9c0-2.2 1.8-4 4-4h2v3z" fill="white"/></svg>
+  ),
+  microsoft: (s) => (
+    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#fff"/><rect x="4" y="4" width="7" height="7" fill="#F25022"/><rect x="13" y="4" width="7" height="7" fill="#7FBA00"/><rect x="4" y="13" width="7" height="7" fill="#00A4EF"/><rect x="13" y="13" width="7" height="7" fill="#FFB900"/></svg>
+  ),
+  heygen: (s) => (
+    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#0D0D0D"/><circle cx="9" cy="9" r="3.5" fill="none" stroke="#5B8DEF" strokeWidth="1.5"/><circle cx="9" cy="9" r="1.5" fill="#5B8DEF"/><path d="M13.5 7.5l6 4.5-6 4.5V7.5z" fill="#5B8DEF"/></svg>
+  ),
+  langsmith: (s) => (
+    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#1C1C2E"/><path d="M6 12h12M12 6v12" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="12" r="2.5" fill="#7C3AED"/><circle cx="6" cy="12" r="1.5" fill="#A78BFA"/><circle cx="18" cy="12" r="1.5" fill="#A78BFA"/><circle cx="12" cy="6" r="1.5" fill="#A78BFA"/><circle cx="12" cy="18" r="1.5" fill="#A78BFA"/></svg>
+  ),
+  shiprocket: (s) => (
+    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#E84D2A"/><path d="M12 4l2 5h5l-4 3.5 1.5 5L12 15l-4.5 2.5 1.5-5L5 9h5l2-5z" fill="white"/></svg>
+  ),
+  razorpay: (s) => (
+    <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#072654"/><path d="M7 19l4-9h3l-2 5h4L9 19H7z" fill="#3395FF"/><path d="M11 10l2-5h3l-2 5h-3z" fill="white"/></svg>
   ),
 };
 

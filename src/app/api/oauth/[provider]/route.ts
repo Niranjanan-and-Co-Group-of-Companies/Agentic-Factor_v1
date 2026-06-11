@@ -98,6 +98,94 @@ const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
     scopes: ['openid', 'profile', 'email', 'w_member_social'],
     callbackProviderKey: 'linkedin_oidc',
   },
+  // ── Atlassian (Jira + Confluence + Trello) ──
+  atlassian: {
+    authUrl: 'https://auth.atlassian.com/authorize',
+    clientIdEnv: 'ATLASSIAN_CLIENT_ID',
+    scopes: ['read:jira-work', 'write:jira-work', 'read:confluence-content.all', 'write:confluence-content', 'read:me', 'offline_access'],
+    additionalParams: { audience: 'api.atlassian.com', prompt: 'consent' },
+  },
+  // ── CRM ──
+  salesforce: {
+    authUrl: 'https://login.salesforce.com/services/oauth2/authorize',
+    clientIdEnv: 'SALESFORCE_CLIENT_ID',
+    scopes: ['full', 'refresh_token', 'offline_access'],
+    additionalParams: { prompt: 'consent' },
+  },
+  hubspot: {
+    authUrl: 'https://app.hubspot.com/oauth/authorize',
+    clientIdEnv: 'HUBSPOT_CLIENT_ID',
+    scopes: ['crm.objects.contacts.read', 'crm.objects.contacts.write', 'crm.objects.deals.read', 'crm.objects.deals.write', 'content'],
+  },
+  // ── Marketing ──
+  mailchimp: {
+    authUrl: 'https://login.mailchimp.com/oauth2/authorize',
+    clientIdEnv: 'MAILCHIMP_CLIENT_ID',
+    scopes: [],
+  },
+  // ── Customer Support ──
+  intercom: {
+    authUrl: 'https://app.intercom.com/oauth',
+    clientIdEnv: 'INTERCOM_CLIENT_ID',
+    scopes: [],
+  },
+  // ── Storage ──
+  dropbox: {
+    authUrl: 'https://www.dropbox.com/oauth2/authorize',
+    clientIdEnv: 'DROPBOX_CLIENT_ID',
+    scopes: ['files.content.read', 'files.content.write', 'account_info.read'],
+    additionalParams: { token_access_type: 'offline' },
+  },
+  box: {
+    authUrl: 'https://account.box.com/api/oauth2/authorize',
+    clientIdEnv: 'BOX_CLIENT_ID',
+    scopes: [],
+  },
+  // ── Project Management ──
+  monday: {
+    authUrl: 'https://auth.monday.com/oauth2/authorize',
+    clientIdEnv: 'MONDAY_CLIENT_ID',
+    scopes: ['me:read', 'boards:read', 'boards:write', 'users:read'],
+  },
+  asana: {
+    authUrl: 'https://app.asana.com/-/oauth_authorize',
+    clientIdEnv: 'ASANA_CLIENT_ID',
+    scopes: ['default'],
+  },
+  // ── Payments ──
+  paypal: {
+    authUrl: 'https://www.paypal.com/signin/authorize',
+    clientIdEnv: 'PAYPAL_CLIENT_ID',
+    scopes: ['openid', 'email', 'profile'],
+    additionalParams: { flowEntry: 'static' },
+  },
+  square: {
+    authUrl: 'https://connect.squareup.com/oauth2/authorize',
+    clientIdEnv: 'SQUARE_CLIENT_ID',
+    scopes: ['MERCHANT_PROFILE_READ', 'ORDERS_READ', 'ORDERS_WRITE', 'PAYMENTS_READ', 'PAYMENTS_WRITE'],
+    scopeSeparator: '+',
+  },
+  // ── Social ──
+  reddit: {
+    authUrl: 'https://www.reddit.com/api/v1/authorize',
+    clientIdEnv: 'REDDIT_CLIENT_ID',
+    scopes: ['identity', 'read', 'submit'],
+    additionalParams: { duration: 'permanent' },
+  },
+  // ── Microsoft (Azure AD + Teams + OneDrive) ──
+  microsoft: {
+    authUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
+    clientIdEnv: 'MICROSOFT_CLIENT_ID',
+    scopes: ['openid', 'profile', 'email', 'offline_access', 'User.Read', 'Files.ReadWrite', 'Teams.ReadBasic.All', 'ChannelMessage.Send'],
+    additionalParams: { prompt: 'consent' },
+  },
+  // ── Airtable (PKCE required) ──
+  airtable: {
+    authUrl: 'https://airtable.com/oauth2/v1/authorize',
+    clientIdEnv: 'AIRTABLE_CLIENT_ID',
+    scopes: ['data.records:read', 'data.records:write', 'schema.bases:read', 'webhook:manage'],
+    additionalParams: { code_challenge_method: 'S256' },
+  },
 };
 
 export async function GET(
@@ -154,9 +242,9 @@ export async function GET(
     }
   }
 
-  // ── Twitter PKCE: Generate code_verifier and code_challenge ──
+  // ── PKCE: Generate code_verifier + code_challenge (Twitter and Airtable require this) ──
   let codeVerifier = '';
-  if (provider === 'twitter') {
+  if (provider === 'twitter' || provider === 'airtable') {
     codeVerifier = randomBytes(32).toString('base64url');
     const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
     authUrl.searchParams.set('code_challenge', codeChallenge);
@@ -164,9 +252,9 @@ export async function GET(
 
   const response = NextResponse.redirect(authUrl.toString());
 
-  // Store code_verifier in a secure cookie for the callback to use
+  // Store code_verifier in a provider-scoped cookie for the callback to use
   if (codeVerifier) {
-    response.cookies.set('twitter_code_verifier', codeVerifier, {
+    response.cookies.set(`${provider}_code_verifier`, codeVerifier, {
       httpOnly: true,
       secure: true,
       sameSite: 'lax',
