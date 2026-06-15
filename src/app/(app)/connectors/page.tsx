@@ -168,6 +168,8 @@ export default function ConnectorsPage() {
   const [apiKeyValues, setApiKeyValues] = useState<Record<string, string>>({});
   const [submittingApiKey, setSubmittingApiKey] = useState(false);
   const [requestSending, setRequestSending] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+  const [apiKeyVerified, setApiKeyVerified] = useState(false);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -181,20 +183,18 @@ export default function ConnectorsPage() {
     const { data: { user } } = await supabase.auth.getUser();
     setUserEmail(user?.email || null);
 
-    const providers = new Set<string>();
-    const loginProvider = user?.app_metadata?.provider;
-    if (loginProvider) providers.add(loginProvider);
+    if (!user) { setLoading(false); return; }
 
-    if (user) {
-      try {
-        const { data: tenantData } = await supabase.from('tenants').select('id').eq('owner_user_id', user.id).single();
-        if (tenantData) {
-          const { data: perms } = await supabase.from('tenant_permissions').select('provider').eq('tenant_id', tenantData.id);
-          if (perms) perms.forEach(p => providers.add(p.provider));
-        }
-      } catch (e) {
-        console.warn('Failed to fetch tenant permissions:', e);
-      }
+    const providers = new Set<string>();
+    try {
+      // tenantId === user.id directly — skip tenants table (RLS often blocks browser client)
+      const { data: perms } = await supabase
+        .from('tenant_permissions')
+        .select('provider')
+        .eq('tenant_id', user.id);
+      if (perms) perms.forEach(p => providers.add(p.provider));
+    } catch (e) {
+      console.warn('Failed to fetch tenant permissions:', e);
     }
 
     setConnectedProviders(providers);
@@ -267,24 +267,44 @@ export default function ConnectorsPage() {
   const handleApiKeySubmit = async () => {
     if (!apiKeyModal) return;
     setSubmittingApiKey(true);
+    setApiKeyError(null);
+    setApiKeyVerified(false);
     try {
-      const res = await fetch('/api/connectors/apikey', {
+      // Step 1: Verify against the real API
+      const verifyRes = await fetch('/api/connectors/apikey/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ provider: apiKeyModal.id, fields: apiKeyValues }),
       });
-      if (res.ok) {
-        showToast(`✅ ${apiKeyModal.label} connected successfully!`);
-        setApiKeyModal(null);
-        setApiKeyValues({});
-        checkConnectionStatus();
+      const verifyData = await verifyRes.json();
+      if (!verifyData.verified) {
+        setApiKeyError(verifyData.error || 'Invalid credentials. Please check and try again.');
+        setSubmittingApiKey(false);
+        return;
+      }
+      // Step 2: Save to tenant_permissions
+      const saveRes = await fetch('/api/connectors/apikey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ provider: apiKeyModal.id, fields: apiKeyValues }),
+      });
+      if (saveRes.ok) {
+        setApiKeyVerified(true);
+        setTimeout(() => {
+          showToast(`✅ ${apiKeyModal.label} connected!`);
+          setApiKeyModal(null);
+          setApiKeyValues({});
+          setApiKeyVerified(false);
+          checkConnectionStatus();
+        }, 1500);
       } else {
-        const data = await res.json();
-        showToast(`❌ ${data.error || 'Failed to save credentials'}`);
+        const data = await saveRes.json();
+        setApiKeyError(data.error || 'Failed to save credentials');
       }
     } catch {
-      showToast('❌ Connection failed. Please try again.');
+      setApiKeyError('Connection failed. Please try again.');
     }
     setSubmittingApiKey(false);
   };
@@ -501,29 +521,49 @@ export default function ConnectorsPage() {
               </div>
             )}
 
-            {/* Fields */}
-            {apiKeyModal.apiKeyFields?.map(field => (
-              <div key={field.key} style={{ marginBottom: 'var(--space-md)' }}>
-                <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>{field.label}</label>
-                <input
-                  className="input"
-                  type={field.type || 'text'}
-                  placeholder={field.placeholder}
-                  value={apiKeyValues[field.key] || ''}
-                  onChange={e => setApiKeyValues(prev => ({ ...prev, [field.key]: e.target.value }))}
-                  style={{ fontSize: '0.85rem', fontFamily: field.type === 'password' ? 'inherit' : 'monospace' }}
-                  autoComplete="off"
-                />
+            {/* Verified success state */}
+            {apiKeyVerified ? (
+              <div style={{ padding: 'var(--space-lg)', textAlign: 'center' }}>
+                <div style={{ fontSize: '2.5rem', marginBottom: 'var(--space-sm)' }}>✅</div>
+                <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--emerald)' }}>{apiKeyModal.label} Connected!</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>Credentials saved securely.</div>
               </div>
-            ))}
+            ) : (
+              <>
+                {/* Fields */}
+                {apiKeyModal.apiKeyFields?.map(field => (
+                  <div key={field.key} style={{ marginBottom: 'var(--space-md)' }}>
+                    <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>{field.label}</label>
+                    <input
+                      className="input"
+                      type={field.type || 'text'}
+                      placeholder={field.placeholder}
+                      value={apiKeyValues[field.key] || ''}
+                      onChange={e => setApiKeyValues(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && !submittingApiKey && handleApiKeySubmit()}
+                      style={{ fontSize: '0.85rem', fontFamily: field.type === 'password' ? 'inherit' : 'monospace' }}
+                      autoComplete="off"
+                      disabled={submittingApiKey}
+                    />
+                  </div>
+                ))}
 
-            {/* Actions */}
-            <div className="row" style={{ gap: 'var(--space-sm)', justifyContent: 'flex-end', marginTop: 'var(--space-md)' }}>
-              <button className="btn btn-ghost" onClick={() => { setApiKeyModal(null); setApiKeyValues({}); }}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleApiKeySubmit} disabled={submittingApiKey}>
-                {submittingApiKey ? 'Saving...' : 'Save Credentials →'}
-              </button>
-            </div>
+                {/* Error */}
+                {apiKeyError && (
+                  <div style={{ padding: 'var(--space-sm) var(--space-md)', background: 'hsla(0,84%,60%,0.1)', borderRadius: 'var(--radius-sm)', border: '1px solid hsla(0,84%,60%,0.3)', fontSize: '0.8rem', color: 'hsl(0,84%,70%)', marginBottom: 'var(--space-md)' }}>
+                    ❌ {apiKeyError}
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="row" style={{ gap: 'var(--space-sm)', justifyContent: 'flex-end', marginTop: 'var(--space-md)' }}>
+                  <button className="btn btn-ghost" onClick={() => { setApiKeyModal(null); setApiKeyValues({}); setApiKeyError(null); }} disabled={submittingApiKey}>Cancel</button>
+                  <button className="btn btn-primary" onClick={handleApiKeySubmit} disabled={submittingApiKey}>
+                    {submittingApiKey ? 'Verifying…' : 'Verify & Save →'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

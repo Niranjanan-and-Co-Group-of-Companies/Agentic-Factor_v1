@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { inngest } from '@/lib/inngest/client';
 
 // ============================================================
 // POST /api/email/inbound — SendGrid Inbound Parse Webhook
@@ -14,15 +15,6 @@ import { createServiceClient } from '@/lib/supabase/server';
 // 4. If valid, create an event + trigger agent processing
 // 5. If invalid, silently ignore (prevent misuse/spam)
 // ============================================================
-
-interface InboundEmail {
-  from: string;
-  to: string;
-  subject: string;
-  text: string;
-  html: string;
-  envelope: string;
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -144,6 +136,21 @@ export async function POST(request: NextRequest) {
         console.error('[Inbound Email] Failed to trigger agent:', err);
       }
     }
+
+    // Send to Inngest to trigger agent processing
+    await inngest.send({
+      name: 'email.received',
+      data: {
+        missionId: mission.id,
+        tenantId: mission.tenant_id,
+        emailData: {
+          from: senderEmail,
+          subject,
+          body: text || stripHtml(html),
+          receivedAt: new Date().toISOString(),
+        },
+      },
+    });
 
     console.log(`[Inbound Email] ✅ Processed email from ${senderEmail} for mission ${mission.title}`);
     return NextResponse.json({ status: 'processed', missionId: mission.id });

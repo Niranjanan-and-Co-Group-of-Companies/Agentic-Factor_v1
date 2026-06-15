@@ -48,6 +48,13 @@ export async function POST(request: NextRequest) {
       .eq('tenant_id', tenantId)
       .single();
 
+    // Fetch connected providers — names only, never expose keys/tokens
+    const { data: connectorPerms } = await supabase
+      .from('tenant_permissions')
+      .select('provider')
+      .eq('tenant_id', tenantId);
+    const connectedProviderNames = connectorPerms?.map(p => p.provider) ?? [];
+
     const creditsRemaining = billingRow?.credits_remaining ?? 0;
     const creditsTopup = billingRow?.credits_topup ?? 0;
     const creditsTotal = billingRow?.credits_total ?? 1000;
@@ -109,6 +116,12 @@ CRITICAL BILLING RULES:
   📊 Total available: ${creditsRemaining + creditsTopup} credits
   📊 Plan: ${plan}
   📊 Total credits used this month: ${creditsUsedThisMonth} credits
+
+CONNECTED INTEGRATIONS (live from database — do NOT expose keys or tokens):
+${connectedProviderNames.length > 0
+  ? connectedProviderNames.map(p => `• ${p} ✅ connected`).join('\n')
+  : '• None connected yet'}
+When asked about connector status, use ONLY the above list. Never say "I don't know" if the answer is here.
 
 CURRENT LIVE MISSION STATUS: "${missionRow.status}"
 
