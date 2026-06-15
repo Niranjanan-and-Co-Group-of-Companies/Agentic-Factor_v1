@@ -431,8 +431,8 @@ export default function ConnectorsPage() {
           const isConnected = c.status === 'connected';
 
           return (
-            <div key={c.id} className={`card ${isConnected ? 'oauth-btn connected' : ''}`}
-              style={{ padding: 'var(--space-lg)', opacity: c.status === 'request_access' ? 0.75 : 1, transition: 'all 0.2s ease' }}>
+            <div key={c.id} className="card"
+              style={{ padding: 'var(--space-lg)', opacity: c.status === 'request_access' ? 0.75 : 1, transition: 'all 0.2s ease', ...(isConnected ? { borderColor: 'hsla(152,69%,50%,0.3)' } : {}) }}>
 
               <div className="row" style={{ justifyContent: 'space-between', marginBottom: 'var(--space-sm)' }}>
                 <div className="row" style={{ gap: 'var(--space-sm)' }}>
