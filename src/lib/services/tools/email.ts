@@ -1,5 +1,5 @@
 import { ToolExecutionContext, registerTool } from './index';
-import { sendOutreachEmail } from '../notifications';
+import { sendEmail } from '../notifications';
 import imaps from 'imap-simple';
 import { simpleParser } from 'mailparser';
 
@@ -12,8 +12,7 @@ async function sendEmailTool({ args }: ToolExecutionContext) {
     return { error: 'Missing required arguments: to, subject, body' };
   }
 
-  const fromName = args.fromName as string | undefined;
-  const result = await sendOutreachEmail({ to, subject, body, fromName });
+  const result = await sendEmail({ to, subject, body });
   if (result.success) {
     return { message: `Email sent successfully to ${to}` };
   } else {
