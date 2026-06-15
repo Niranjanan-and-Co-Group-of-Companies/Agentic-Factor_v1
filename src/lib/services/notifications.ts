@@ -1,14 +1,63 @@
+import nodemailer from 'nodemailer';
+
 interface EmailOptions {
   to: string;
   subject: string;
   body: string;
   from?: string;
-  htmlBody?: string;  // Optional explicit HTML body (overrides auto-generated)
+  fromName?: string;
+  htmlBody?: string;
   attachments?: { filename: string; content: string; type: string }[];
 }
 
 /**
- * Send an email via SMTP2GO API.
+ * Send an outreach/agent email via Zoho Mail SMTP.
+ * Used when a mission needs to send emails to external companies/contacts.
+ * Falls back to sendEmail (SMTP2GO) if Zoho SMTP is not configured.
+ */
+export async function sendOutreachEmail(options: EmailOptions): Promise<{ success: boolean; error?: string }> {
+  const zohoUser = process.env.ZOHO_SMTP_USER;
+  const zohoPass = process.env.ZOHO_SMTP_PASS;
+
+  if (!zohoUser || !zohoPass) {
+    return sendEmail(options);
+  }
+
+  const fromName = options.fromName || process.env.OUTREACH_FROM_NAME || 'Agentic Factor';
+  const fromAddress = options.from || zohoUser;
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host: process.env.ZOHO_SMTP_HOST || 'smtp.zoho.in',
+      port: parseInt(process.env.ZOHO_SMTP_PORT || '587', 10),
+      secure: false,
+      auth: { user: zohoUser, pass: zohoPass },
+    });
+
+    const htmlContent = options.htmlBody || `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; color: #333; line-height: 1.6;">
+        ${options.body.split('\n').map(line => `<p style="margin: 10px 0;">${line}</p>`).join('')}
+      </div>
+    `;
+
+    await transporter.sendMail({
+      from: `"${fromName}" <${fromAddress}>`,
+      to: options.to,
+      subject: options.subject,
+      text: options.body,
+      html: htmlContent,
+    });
+
+    console.log(`[outreach] ✅ Sent via Zoho SMTP to ${options.to}`);
+    return { success: true };
+  } catch (err) {
+    console.error('[outreach] Zoho SMTP failed, falling back to SMTP2GO:', (err as Error).message);
+    return sendEmail(options);
+  }
+}
+
+/**
+ * Send a system/notification email via SMTP2GO API.
  * Falls back to console.log if SMTP2GO_API_KEY is not set.
  */
 export async function sendEmail(options: EmailOptions): Promise<{ success: boolean; error?: string }> {

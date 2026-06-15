@@ -9,7 +9,7 @@ import ConnectorLogo from "@/components/ConnectorLogos";
 // ============================================================
 
 type ConnectorStatus = "connected" | "available" | "coming_soon" | "request_access";
-type ConnectorCategory = "communication" | "crm" | "payments" | "ecommerce" | "devtools" | "cloud" | "analytics" | "productivity" | "social" | "ai" | "storage" | "marketing" | "hr";
+type ConnectorCategory = "communication" | "crm" | "payments" | "ecommerce" | "devtools" | "cloud" | "analytics" | "productivity" | "social" | "ai" | "storage" | "marketing" | "hr" | "research";
 
 interface ApiKeyField {
   key: string;
@@ -47,6 +47,7 @@ const CATEGORIES: { key: ConnectorCategory | "all"; label: string; icon: string 
   { key: "storage", label: "Storage", icon: "💾" },
   { key: "marketing", label: "Marketing", icon: "📣" },
   { key: "hr", label: "HR", icon: "🏢" },
+  { key: "research", label: "Research", icon: "🔍" },
 ];
 
 const CONNECTORS: ConnectorDef[] = [
@@ -99,6 +100,7 @@ const CONNECTORS: ConnectorDef[] = [
   { id: "langsmith", label: "LangSmith", icon: "🔗", description: "LLM tracing, evaluation, and debugging for AI agent pipelines.", category: "ai", status: "available", provider: "langsmith", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "ls__..." }], apiKeyHelpText: "Find in LangSmith → Settings → API Keys" },
   { id: "shiprocket", label: "Shiprocket", icon: "🚀", description: "Shipping and logistics automation — orders, tracking, and fulfillment.", category: "ecommerce", status: "available", provider: "shiprocket", connectionType: "apikey", apiKeyFields: [{ key: "email", label: "Email", placeholder: "your@email.com" }, { key: "password", label: "Password", placeholder: "Your Shiprocket password", type: "password" }], apiKeyHelpText: "Use your Shiprocket account credentials" },
   { id: "razorpay", label: "Razorpay", icon: "💸", description: "Indian payment gateway — orders, subscriptions, and payouts.", category: "payments", status: "available", provider: "razorpay", connectionType: "apikey", apiKeyFields: [{ key: "keyId", label: "Key ID", placeholder: "rzp_live_..." }, { key: "keySecret", label: "Key Secret", placeholder: "Your Razorpay key secret" }], apiKeyHelpText: "Find in Razorpay Dashboard → Settings → API Keys" },
+  { id: "hunter", label: "Hunter.io", icon: "🎯", description: "Find verified professional email addresses by company domain — powers outreach and lead generation agents.", category: "research", status: "available", provider: "hunter", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "Your Hunter.io API key" }], apiKeyHelpText: "Find in Hunter.io → Dashboard → API (free plan: 25 searches/month)" },
 
   // ── Coming Soon ──
   { id: "shopify", label: "Shopify", icon: "🛍️", description: "Store management, product listings, order fulfillment, and inventory tracking.", category: "ecommerce", status: "coming_soon" },

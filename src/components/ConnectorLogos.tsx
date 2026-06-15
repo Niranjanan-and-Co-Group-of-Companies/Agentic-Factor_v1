@@ -243,6 +243,12 @@ const logos: Record<string, (size: number) => React.JSX.Element> = {
   shiprocket: (s) => (
     <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#E84D2A"/><path d="M12 4l2 5h5l-4 3.5 1.5 5L12 15l-4.5 2.5 1.5-5L5 9h5l2-5z" fill="white"/></svg>
   ),
+  hunter: (s) => (
+    <svg viewBox="0 0 24 24" width={s} height={s}>
+      <rect width="24" height="24" rx="4" fill="#F36A5A"/>
+      <path d="M12 4C8.7 4 6 6.7 6 10c0 2.4 1.4 4.5 3.4 5.5L8 20h8l-1.4-4.5C16.6 14.5 18 12.4 18 10c0-3.3-2.7-6-6-6zm0 9.5c-1.9 0-3.5-1.6-3.5-3.5S10.1 6.5 12 6.5s3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5z" fill="white"/>
+    </svg>
+  ),
   razorpay: (s) => (
     <svg viewBox="0 0 24 24" width={s} height={s}><rect width="24" height="24" rx="4" fill="#072654"/><path d="M7 19l4-9h3l-2 5h4L9 19H7z" fill="#3395FF"/><path d="M11 10l2-5h3l-2 5h-3z" fill="white"/></svg>
   ),
