@@ -1,22 +1,26 @@
 import { ToolExecutionContext, registerTool } from './index';
-import { sendEmail } from '../notifications';
+import { routeOutreachEmail } from '../email-router';
 import imaps from 'imap-simple';
 import { simpleParser } from 'mailparser';
 
-async function sendEmailTool({ args }: ToolExecutionContext) {
+async function sendEmailTool({ tenantId, args }: ToolExecutionContext) {
   const to = args.to as string;
   const subject = args.subject as string;
   const body = args.body as string;
+  // Optional: agent or customer specifies "gmail" | "sendgrid" in prompt
+  const provider = args.provider as string | undefined;
+  // Optional: override the from address
+  const from = args.from as string | undefined;
 
   if (!to || !subject || !body) {
     return { error: 'Missing required arguments: to, subject, body' };
   }
 
-  const result = await sendEmail({ to, subject, body });
+  const result = await routeOutreachEmail({ tenantId, to, subject, body, from, provider });
   if (result.success) {
-    return { message: `Email sent successfully to ${to}` };
+    return { message: `Email sent to ${to} via ${result.provider}` };
   } else {
-    return { error: `Failed to send email: ${result.error}` };
+    return { error: `Failed to send email via ${result.provider}: ${result.error}` };
   }
 }
 
