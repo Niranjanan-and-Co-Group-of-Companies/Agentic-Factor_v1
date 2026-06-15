@@ -162,11 +162,28 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
     'whatsapp': 'whatsapp', 'messenger': 'messenger',
   };
 
+  // Map api_key service names → DB provider keys in tenant_permissions
+  const API_KEY_ALIASES: Record<string, string> = {
+    'hunter': 'hunter', 'hunter.io': 'hunter', 'hunterio': 'hunter',
+    'sendgrid': 'sendgrid', 'send grid': 'sendgrid',
+    'stripe': 'stripe',
+    'twilio': 'twilio',
+    'openai': 'openai_api', 'open ai': 'openai_api',
+    'anthropic': 'anthropic_api', 'claude': 'anthropic_api',
+    'replicate': 'replicate',
+    'segment': 'segment',
+    'mixpanel': 'mixpanel',
+    'aws': 'aws', 'amazon web services': 'aws',
+    'firebase': 'firebase',
+    'heygen': 'heygen',
+    'razorpay': 'razorpay',
+    'shiprocket': 'shiprocket',
+  };
+
   const requiredProviders = new Set<string>();
   requiredPermissions.forEach((p: any) => {
     if (p.type === 'oauth_token') {
       const serviceLower = p.service.toLowerCase();
-      // Check aliases first
       for (const [alias, dbKey] of Object.entries(PROVIDER_ALIASES)) {
         if (serviceLower.includes(alias)) {
           console.log(`[VerifyPermissions] Mapped service "${p.service}" → DB key "${dbKey}" (via alias "${alias}")`);
@@ -174,8 +191,19 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
           return;
         }
       }
-      // Fallback: use the service name as-is
       console.log(`[VerifyPermissions] No alias for "${p.service}" — using as-is: "${serviceLower}"`);
+      requiredProviders.add(serviceLower);
+    } else if (p.type === 'api_key') {
+      const serviceLower = p.service.toLowerCase();
+      for (const [alias, dbKey] of Object.entries(API_KEY_ALIASES)) {
+        if (serviceLower.includes(alias)) {
+          console.log(`[VerifyPermissions] API key: mapped service "${p.service}" → DB key "${dbKey}"`);
+          requiredProviders.add(dbKey);
+          return;
+        }
+      }
+      // Fallback: use lower-cased service name
+      console.log(`[VerifyPermissions] API key: no alias for "${p.service}" — using as-is: "${serviceLower}"`);
       requiredProviders.add(serviceLower);
     }
   });

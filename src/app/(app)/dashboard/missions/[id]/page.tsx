@@ -75,7 +75,7 @@ export default function MissionDetailPage() {
   const [newSenderEmail, setNewSenderEmail] = useState("");
   const [emailSaving, setEmailSaving] = useState(false);
   
-  const { triggerAuth } = useAuthPopup();
+  const { triggerAuth, triggerApiKey } = useAuthPopup();
 
   // Schedule & Run History state
   const [showSchedulePicker, setShowSchedulePicker] = useState(false);
@@ -335,30 +335,42 @@ export default function MissionDetailPage() {
       
       if (res.status === 403 && data.error === 'missing_permission') {
         setIsStarting(false);
-        const providers = data.providers || [];
-        
-        // If it's an OAuth connector the user can connect themselves, trigger the popup
-        const oauthProviders = ['google', 'linkedin_oidc', 'slack', 'github', 'notion', 'discord', 'zoho', 'twitter', 'facebook', 'instagram'];
-        const connectableProviders = providers.filter((p: string) => oauthProviders.includes(p));
-        const nonConnectable = providers.filter((p: string) => !oauthProviders.includes(p));
-        
-        if (connectableProviders.length > 0) {
-          // User can connect these themselves via OAuth — show popup for the first one
-          triggerAuth(connectableProviders[0], handleStartMission);
-          
-          // If there are multiple missing, show a message about the rest
-          if (connectableProviders.length > 1) {
-            setChatMessages(prev => [...prev, { 
-              role: "assistant", 
-              text: `🔗 **Connect Your Accounts**\n\nThis mission needs the following connectors. Please connect them from the **Connectors** page:\n\n${connectableProviders.map((p: string) => `• **${p.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}**`).join('\n')}\n\nA popup will open for the first one. After connecting, click **Force Restart** to continue.`
+        const providers: string[] = data.providers || [];
+
+        // Classify each missing provider
+        const oauthProviders = ['google', 'linkedin_oidc', 'slack', 'github', 'notion', 'discord', 'zoho',
+          'twitter', 'facebook', 'instagram', 'hubspot', 'salesforce', 'mailchimp', 'atlassian',
+          'monday', 'asana', 'dropbox', 'box', 'intercom', 'paypal', 'square', 'reddit', 'microsoft', 'airtable'];
+        const apiKeyProviders = ['hunter', 'sendgrid', 'stripe', 'twilio', 'openai_api', 'anthropic_api',
+          'replicate', 'segment', 'mixpanel', 'aws', 'firebase', 'heygen', 'razorpay', 'shiprocket',
+          'vercel', 'supabase_ext', 'langsmith', 'bamboohr', 'make', 'woocommerce'];
+
+        const oauthMissing = providers.filter(p => oauthProviders.includes(p));
+        const apiKeyMissing = providers.filter(p => apiKeyProviders.includes(p));
+
+        if (oauthMissing.length > 0) {
+          // OAuth — open the redirect popup for the first missing one, then retry
+          triggerAuth(oauthMissing[0], handleStartMission);
+          if (oauthMissing.length > 1) {
+            setChatMessages(prev => [...prev, {
+              role: "assistant",
+              text: `🔗 **Connect Your Accounts**\n\nThis mission needs:\n\n${oauthMissing.map((p: string) => `• **${p.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}**`).join('\n')}\n\nA popup opened for the first one. After connecting each, click **Force Restart**.`,
             }]);
           }
-        } else if (nonConnectable.length > 0) {
-          // These are connectors the admin needs to set up (API keys, etc.)
-          // Show a friendly message — admin has been emailed
-          setChatMessages(prev => [...prev, { 
-            role: "assistant", 
-            text: `⚠️ **Connectors Pending Setup**\n\nThis mission requires connectors that aren't available on the platform yet:\n\n${nonConnectable.map((p: string) => `• **${p.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}**`).join('\n')}\n\nOur team has been notified and will set them up shortly. You'll receive an email once they're ready.\n\nOnce configured, click **Force Restart** to run the mission with full capabilities.`
+        } else if (apiKeyMissing.length > 0) {
+          // API key — show the self-serve key entry modal for the first missing one
+          triggerApiKey(apiKeyMissing[0], handleStartMission);
+          if (apiKeyMissing.length > 1) {
+            setChatMessages(prev => [...prev, {
+              role: "assistant",
+              text: `🔑 **API Keys Needed**\n\nAfter connecting **${apiKeyMissing[0]}**, you'll also need:\n\n${apiKeyMissing.slice(1).map((p: string) => `• **${p.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}**`).join('\n')}\n\nHead to the **Connectors** page to add them all, then click **Force Restart**.`,
+            }]);
+          }
+        } else if (providers.length > 0) {
+          // Unknown provider type — platform admin needs to set up
+          setChatMessages(prev => [...prev, {
+            role: "assistant",
+            text: `⚠️ **Connectors Pending**\n\nThis mission requires:\n\n${providers.map((p: string) => `• **${p.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}**`).join('\n')}\n\nPlease add them from the **Connectors** page, then click **Force Restart**.`,
           }]);
         }
         return;

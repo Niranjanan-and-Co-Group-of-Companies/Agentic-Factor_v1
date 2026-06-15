@@ -22,7 +22,7 @@ export async function executeTool(context: ToolExecutionContext): Promise<any> {
   if (!toolFn) {
     throw new Error(`Tool ${toolName} is not registered in the tool registry.`);
   }
-  
+
   try {
     return await toolFn(context);
   } catch (error) {
@@ -30,3 +30,8 @@ export async function executeTool(context: ToolExecutionContext): Promise<any> {
     return { error: (error as Error).message };
   }
 }
+
+// Side-effect imports — each file calls registerTool() on load
+import './email';
+import './search';
+import './hunter';

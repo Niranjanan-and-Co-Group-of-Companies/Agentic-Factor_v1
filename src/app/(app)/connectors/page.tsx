@@ -163,7 +163,7 @@ export default function ConnectorsPage() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [connectorDefs, setConnectorDefs] = useState<ConnectorDef[]>(CONNECTORS);
+  const [connectorDefs] = useState<ConnectorDef[]>(CONNECTORS);
   const [apiKeyModal, setApiKeyModal] = useState<ConnectorDef | null>(null);
   const [apiKeyValues, setApiKeyValues] = useState<Record<string, string>>({});
   const [submittingApiKey, setSubmittingApiKey] = useState(false);
@@ -174,25 +174,7 @@ export default function ConnectorsPage() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  useEffect(() => { loadConnectors(); checkConnectionStatus(); }, []);
-
-  const loadConnectors = async () => {
-    try {
-      const res = await fetch('/api/connectors/definitions');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.connectors?.length) {
-          setConnectorDefs(data.connectors.map((c: ConnectorDef) => ({
-            id: c.id, label: c.label, icon: c.icon || '', description: c.description || '',
-            category: c.category, status: c.status, provider: c.provider,
-            scopes: c.scopes, connectionType: c.connectionType,
-          })));
-        }
-      }
-    } catch {
-      // Fallback to hardcoded — already set as default
-    }
-  };
+  useEffect(() => { checkConnectionStatus(); }, []);
 
   const checkConnectionStatus = async () => {
     const supabase = getSupabase();
