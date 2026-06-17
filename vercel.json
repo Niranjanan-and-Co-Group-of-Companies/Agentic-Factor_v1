@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/health-check",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/mission-watchdog",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

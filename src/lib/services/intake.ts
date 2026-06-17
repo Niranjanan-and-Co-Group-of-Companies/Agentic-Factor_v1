@@ -155,11 +155,12 @@ You must decompose the user's intent into:
        - \`api.github_create_issue(owner, repo, title, body)\` — Create GitHub issue
        - \`api.notion_create_page(parent_id, title, content)\` — Create Notion page
      - \`from agenticfactor._core import ask_user, notify_user\` — Interactive signals
-7. **Orchestration Pattern**: Choose the optimal pattern:
-   - "sequential" — linear pipeline (A → B → C)
-   - "parallel" — fan-out/gather (A+B+C → D)
-   - "orchestrator_worker" — supervisor delegates to workers
-   - "hierarchical" — nested teams
+7. **Orchestration Pattern**: Choose the optimal pattern for reliability — each sequential hop multiplies failure probability:
+   - "sequential" — linear pipeline (A → B → C). Use ONLY when each agent's output is the required input of the next.
+   - "parallel" — fan-out/gather (A+B+C → D). PREFERRED for missions with 6+ agents where work streams are independent (e.g., processing multiple leads, scraping multiple sources, sending to multiple platforms, analyzing multiple datasets). A 15-agent sequential chain has (0.97)^15 = 63% success; splitting into 3 parallel branches of 5 agents each raises it to (0.97)^5 = 86% per branch.
+   - "orchestrator_worker" — supervisor delegates to workers. Best for open-ended tasks where sub-task count isn't known upfront.
+   - "hierarchical" — nested teams. Best for very large missions (15+ agents) with distinct phases.
+   RULE: If 6 or more agents are needed AND their tasks can be split into independent work streams, you MUST use "parallel" or "orchestrator_worker" — NEVER use "sequential" for missions that large.
 8. **timeoutSeconds**: How long agents can be idle before deadlock detection (default 300).
 9. **Validation Checklist**: 3-8 specific assertions to verify the mission output quality.
 10. **Permissions**: All credentials the agents will need. Each permission MUST have:

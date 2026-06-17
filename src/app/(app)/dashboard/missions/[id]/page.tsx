@@ -657,9 +657,6 @@ export default function MissionDetailPage() {
             <span className="card-title">❌ Mission Failed</span>
             <span className="badge badge-red">Error</span>
           </div>
-          <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginBottom: "var(--space-md)", lineHeight: 1.6 }}>
-            One or more agents encountered an error during execution. You can fix and re-run the mission — it will attempt to recover from the failed point.
-          </p>
           {agents.filter((a: any) => a.status === "failed" || a.status === "error").length > 0 && (
             <div style={{ marginBottom: "var(--space-md)" }}>
               <p style={{ fontSize: "0.8rem", fontWeight: 600, marginBottom: "var(--space-xs)" }}>Failed agents:</p>
@@ -668,9 +665,40 @@ export default function MissionDetailPage() {
               ))}
             </div>
           )}
-          <button className="btn btn-primary" onClick={handleStartMission} disabled={isStarting} style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)" }}>
-            {isStarting ? "Fixing..." : "🔄 Fix & Re-run Mission"}
-          </button>
+          <div style={{ display: "flex", gap: "var(--space-sm)", flexWrap: "wrap" }}>
+            <button
+              className="btn btn-primary"
+              onClick={async () => {
+                if (isStarting) return;
+                setIsStarting(true);
+                try {
+                  await fetch(`/api/missions/${missionId}/execute`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ mode: "resume" }),
+                  });
+                } catch (err) {
+                  console.error(err);
+                  setIsStarting(false);
+                }
+              }}
+              disabled={isStarting}
+              style={{ background: "linear-gradient(135deg, #10b981, #059669)" }}
+            >
+              {isStarting ? "Starting..." : "▶ Resume from Failed Agent"}
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={handleStartMission}
+              disabled={isStarting}
+              style={{ borderColor: "hsla(0,84%,60%,0.4)", color: "var(--text-secondary)" }}
+            >
+              ↻ Fresh Start (all agents)
+            </button>
+          </div>
+          <p style={{ fontSize: "0.78rem", color: "var(--text-tertiary)", marginTop: "var(--space-sm)" }}>
+            <strong>Resume</strong> skips already-completed agents and retries from the failed point. <strong>Fresh Start</strong> re-runs every agent from scratch.
+          </p>
         </div>
       )}
 

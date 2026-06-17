@@ -14,6 +14,14 @@ export async function POST(
   const { id: missionId } = await context.params;
 
   try {
+    // mode: "resume" skips clearing agent.completed events so execution picks up from last failed agent
+    // mode: "fresh" (default) clears agent.completed events and restarts all agents from scratch
+    let mode: 'resume' | 'fresh' = 'fresh';
+    try {
+      const body = await request.json();
+      if (body?.mode === 'resume') mode = 'resume';
+    } catch { /* body is optional */ }
+
     const { verifyMissionPermissions } = await import('@/lib/services/oauth-refresher');
     
     // Check if we have the required tokens
@@ -96,7 +104,9 @@ export async function POST(
       
     if (missionData && missionData.mission_json?.agents) {
       const agentIds = missionData.mission_json.agents.map((a: any) => a.id);
-      if (agentIds.length > 0) {
+      if (agentIds.length > 0 && mode === 'fresh') {
+        // Only clear completed-agent checkpoints on a fresh restart.
+        // In "resume" mode the executor skips already-completed agents automatically.
         await supabase
           .from('events')
           .delete()
@@ -111,15 +121,18 @@ export async function POST(
     // No more Vercel function timeouts!
     await inngest.send({
       name: 'mission.execute',
-      data: { missionId, tenantId },
+      data: { missionId, tenantId, mode },
     });
 
-    console.log(`[Execute] Mission ${missionId} sent to Inngest for background execution.`);
+    console.log(`[Execute] Mission ${missionId} sent to Inngest (mode=${mode}).`);
 
-    return NextResponse.json({ 
-      success: true, 
-      message: 'Mission execution started in background',
+    return NextResponse.json({
+      success: true,
+      message: mode === 'resume'
+        ? 'Mission resuming from last completed agent'
+        : 'Mission execution started fresh',
       engine: 'inngest',
+      mode,
     });
   } catch (error) {
     console.error(`[POST /api/missions/${missionId}/execute] Error:`, error);
