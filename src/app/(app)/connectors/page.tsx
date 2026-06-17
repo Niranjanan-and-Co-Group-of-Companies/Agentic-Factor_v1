@@ -8,7 +8,7 @@ import ConnectorLogo from "@/components/ConnectorLogos";
 // OAuth popup flow + API key modal flow, categorized.
 // ============================================================
 
-type ConnectorStatus = "connected" | "available" | "coming_soon" | "request_access";
+type ConnectorStatus = "connected" | "available" | "coming_soon" | "request_access" | "verification_pending";
 type ConnectorCategory = "communication" | "crm" | "payments" | "ecommerce" | "devtools" | "cloud" | "analytics" | "productivity" | "social" | "ai" | "storage" | "marketing" | "hr" | "research";
 
 interface ApiKeyField {
@@ -72,9 +72,9 @@ const CONNECTORS: ConnectorDef[] = [
   { id: "square", label: "Square", icon: "🟦", description: "POS payments, invoicing, and commerce solutions.", category: "payments", status: "available", provider: "square", connectionType: "oauth" },
   { id: "reddit", label: "Reddit", icon: "🤖", description: "Subreddit monitoring, comment analysis, and sentiment tracking.", category: "social", status: "available", provider: "reddit", connectionType: "oauth" },
   { id: "twitter", label: "X (Twitter)", icon: "🐦", description: "Post tweets, monitor mentions, analyze sentiment, and automate social presence.", category: "social", status: "available", provider: "twitter", connectionType: "oauth", scopes: ["tweet.read", "tweet.write", "users.read"] },
-  { id: "linkedin", label: "LinkedIn", icon: "💼", description: "Profile data, messaging, and social selling for recruitment and networking agents.", category: "social", status: "available", provider: "linkedin_oidc", connectionType: "oauth", scopes: ["openid", "profile", "email", "w_member_social"] },
-  { id: "facebook", label: "Facebook", icon: "📘", description: "Post to Pages, manage content, track engagement, and automate marketing.", category: "social", status: "available", provider: "facebook", connectionType: "oauth", scopes: ["pages_manage_posts", "pages_read_engagement"] },
-  { id: "instagram", label: "Instagram", icon: "📸", description: "Post scheduling, analytics, and content automation.", category: "social", status: "available", provider: "instagram", connectionType: "oauth", scopes: ["instagram_basic", "instagram_content_publish"] },
+  { id: "linkedin", label: "LinkedIn", icon: "💼", description: "Profile data, messaging, and social selling for recruitment and networking agents.", category: "social", status: "verification_pending", provider: "linkedin_oidc", connectionType: "oauth", scopes: ["openid", "profile", "email", "w_member_social"] },
+  { id: "facebook", label: "Facebook", icon: "📘", description: "Post to Pages, manage content, track engagement, and automate marketing.", category: "social", status: "verification_pending", provider: "facebook", connectionType: "oauth", scopes: ["pages_manage_posts", "pages_read_engagement"] },
+  { id: "instagram", label: "Instagram", icon: "📸", description: "Post scheduling, analytics, and content automation.", category: "social", status: "verification_pending", provider: "instagram", connectionType: "oauth", scopes: ["instagram_basic", "instagram_content_publish"] },
   // Atlassian OAuth covers Jira + Confluence + Trello with one app connection
   { id: "jira", label: "Jira", icon: "📋", description: "Issue tracking, sprint management, and Agile workflow automation.", category: "devtools", status: "available", provider: "atlassian", connectionType: "oauth" },
   { id: "confluence", label: "Confluence", icon: "📖", description: "Wiki pages, knowledge base, and team documentation management.", category: "productivity", status: "available", provider: "atlassian", connectionType: "oauth" },
@@ -146,6 +146,7 @@ const STATUS_BADGES: Record<ConnectorStatus, { label: string; class: string; ico
   available: { label: "Available", class: "badge-blue", icon: "→" },
   coming_soon: { label: "Coming Soon", class: "badge-amber", icon: "🔧" },
   request_access: { label: "Request Access", class: "badge-purple", icon: "✨" },
+  verification_pending: { label: "Verification Pending", class: "badge-amber", icon: "🔒" },
 };
 
 function getSupabase() {
@@ -215,7 +216,7 @@ export default function ConnectorsPage() {
         c.category.includes(q)
       );
     }
-    const order: Record<ConnectorStatus, number> = { connected: 0, available: 1, coming_soon: 2, request_access: 3 };
+    const order: Record<ConnectorStatus, number> = { connected: 0, available: 1, verification_pending: 2, coming_soon: 3, request_access: 4 };
     list.sort((a, b) => order[a.status] - order[b.status]);
     return list;
   }, [search, category, connectedProviders, connectorDefs]);
@@ -481,6 +482,11 @@ export default function ConnectorsPage() {
                     </span>
                   ) : c.connectionType === 'apikey' ? '🔑 Add API Key →' : 'Connect →'}
                 </button>
+              ) : c.status === 'verification_pending' ? (
+                <div style={{ padding: '8px 12px', background: 'hsla(38,92%,50%,0.08)', border: '1px solid hsla(38,92%,50%,0.25)', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem', color: 'var(--amber)', textAlign: 'center', lineHeight: 1.4 }}>
+                  🔒 Business verification required<br />
+                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Coming once approved by the platform</span>
+                </div>
               ) : c.status === 'coming_soon' ? (
                 <button className="btn btn-ghost btn-sm" style={{ width: '100%', color: 'var(--amber)' }} onClick={() => handleConnect(c)}>
                   🔧 Coming Soon
