@@ -50,6 +50,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // ── Allow admin panel routes (secured by their own bcrypt+OTP auth, not Supabase) ──
+  if (pathname.startsWith('/api/mgmt-x7k9/') || pathname.startsWith('/mgmt-x7k9')) {
+    return NextResponse.next();
+  }
+
   // ── Allow API calls with Bearer token (route handler validates these) ──
   const authHeader = request.headers.get('Authorization');
   if (pathname.startsWith('/api/') && authHeader?.startsWith('Bearer ')) {
