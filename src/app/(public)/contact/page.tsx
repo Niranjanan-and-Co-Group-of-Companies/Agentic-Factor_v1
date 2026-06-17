@@ -2,17 +2,39 @@
 import { useState } from "react";
 
 export default function ContactPage() {
-  const [form, setForm] = useState({ name: "", email: "", subject: "", message: "" });
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // React 19 form action — receives FormData, no synthetic event needed
+  const handleSubmit = async (formData: FormData) => {
     setSending(true);
-    // Simulate send — in production, wire to /api/contact or SMTP2GO
-    await new Promise(r => setTimeout(r, 1500));
-    setSent(true);
-    setSending(false);
+    setError("");
+
+    const name    = (formData.get("name")    as string)?.trim();
+    const email   = (formData.get("email")   as string)?.trim();
+    const subject = (formData.get("subject") as string)?.trim();
+    const message = (formData.get("message") as string)?.trim();
+
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, subject, message }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Something went wrong. Please try again.");
+        return;
+      }
+
+      setSent(true);
+    } catch {
+      setError("Network error. Please email us directly at hello@agenticfactor.io.");
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -51,28 +73,37 @@ export default function ContactPage() {
             <div style={{ textAlign: "center", padding: 32 }}>
               <div style={{ fontSize: "3rem", marginBottom: 12 }}>✅</div>
               <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: 8 }}>Message Sent!</h3>
-              <p style={{ color: "var(--text-secondary)", fontSize: "0.88rem" }}>We&apos;ll get back to you within 24 hours.</p>
+              <p style={{ color: "var(--text-secondary)", fontSize: "0.88rem", lineHeight: 1.6 }}>
+                We&apos;ll get back to you within 24 hours. Check your inbox — we&apos;ve sent you a confirmation email.
+              </p>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <form action={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <div>
                 <label className="input-label">Name</label>
-                <input className="input" placeholder="Your name" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required />
+                <input className="input" name="name" placeholder="Your name" required maxLength={120} />
               </div>
               <div>
                 <label className="input-label">Email</label>
-                <input className="input" type="email" placeholder="you@company.com" value={form.email} onChange={e => setForm({...form, email: e.target.value})} required />
+                <input className="input" name="email" type="email" placeholder="you@company.com" required maxLength={254} />
               </div>
               <div>
                 <label className="input-label">Subject</label>
-                <input className="input" placeholder="How can we help?" value={form.subject} onChange={e => setForm({...form, subject: e.target.value})} required />
+                <input className="input" name="subject" placeholder="How can we help?" required maxLength={200} />
               </div>
               <div>
                 <label className="input-label">Message</label>
-                <textarea className="textarea" placeholder="Tell us more..." value={form.message} onChange={e => setForm({...form, message: e.target.value})} required style={{ minHeight: 100 }} />
+                <textarea className="textarea" name="message" placeholder="Tell us more..." required maxLength={5000} style={{ minHeight: 100 }} />
               </div>
+
+              {error && (
+                <p style={{ fontSize: "0.82rem", color: "var(--ruby, #ef4444)", margin: 0, lineHeight: 1.5 }}>
+                  {error}
+                </p>
+              )}
+
               <button className="btn btn-primary" type="submit" disabled={sending} style={{ width: "100%" }}>
-                {sending ? "Sending..." : "Send Message"}
+                {sending ? "Sending…" : "Send Message"}
               </button>
             </form>
           )}
