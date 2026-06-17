@@ -771,22 +771,22 @@ function MissionCreatorInner() {
             <div className="card">
               <div className="card-header">
                 <span className="card-title">🔐 Required Permissions</span>
-                <span className="badge badge-amber">{blueprint.permissions.length}</span>
+                <span className="badge badge-amber">{blueprint.permissions.filter(p => p.confidentialityLevel !== "internal" && p.confidentialityLevel !== "public").length}</span>
               </div>
               <div className="stack" style={{ gap: "var(--space-xs)" }}>
-                {blueprint.permissions.map((perm, idx) => (
+                {blueprint.permissions.filter(p => p.confidentialityLevel !== "internal" && p.confidentialityLevel !== "public").map((perm, idx) => (
                   <div key={idx} className="row" style={{ padding: "var(--space-sm)", background: "var(--bg-glass)", borderRadius: "var(--radius-sm)", fontSize: "0.82rem" }}>
                     <span>🔑</span>
                     <div style={{ flex: 1 }}>
                       <span style={{ fontWeight: 500 }}>{perm.service}</span>
                       <span style={{ color: "var(--text-muted)" }}> · {perm.scope}</span>
                     </div>
-                    <span className={`badge ${perm.confidentialityLevel === "confidential" ? "badge-amber" : perm.confidentialityLevel === "restricted" ? "badge-red" : "badge-blue"}`} style={{ fontSize: "0.6rem" }}>
+                    <span className={`badge ${perm.confidentialityLevel === "confidential" ? "badge-amber" : "badge-red"}`} style={{ fontSize: "0.6rem" }}>
                       {perm.confidentialityLevel}
                     </span>
                   </div>
                 ))}
-                {blueprint.permissions.length === 0 && (
+                {blueprint.permissions.filter(p => p.confidentialityLevel !== "internal" && p.confidentialityLevel !== "public").length === 0 && (
                   <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", textAlign: "center", padding: "var(--space-md)" }}>No external credentials required</p>
                 )}
               </div>
