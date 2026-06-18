@@ -362,6 +362,35 @@ async function retrieveTenantMemory(tenantId: string): Promise<string> {
   }
 }
 
+// ── Post-processing: strip any PLACEHOLDER values the LLM snuck past the prompt ──
+function sanitizePlaceholders(obj: unknown): unknown {
+  if (typeof obj === 'string') {
+    return obj
+      // os.environ.get('KEY', 'PLACEHOLDER') → os.environ.get('KEY')
+      .replace(/os\.environ\.get\(([^,)]+),\s*['"](?:PLACEHOLDER|YOUR_[A-Z_0-9]+)['"]\s*\)/gi,
+        (_: string, key: string) => `os.environ.get(${key})`)
+      // Bare PLACEHOLDER word
+      .replace(/\bPLACEHOLDER\b/gi, '')
+      // YOUR_XXX patterns
+      .replace(/\bYOUR_[A-Z_0-9]{3,}\b/g, '')
+      // [INSERT...] patterns
+      .replace(/\[INSERT[^\]]*\]/gi, '')
+      // <your-...> angle-bracket patterns
+      .replace(/<(?:your|insert|add|specify|replace)[^>]{0,40}>/gi, '')
+      // example.com URLs
+      .replace(/https?:\/\/example\.com[^\s'"\\]*/gi, '')
+      // TODO markers
+      .replace(/\bTODO[:;]?\s*(?:implement|replace|add|insert)\b[^\n]*/gi, '');
+  }
+  if (Array.isArray(obj)) return obj.map(sanitizePlaceholders);
+  if (obj !== null && typeof obj === 'object') {
+    return Object.fromEntries(
+      Object.entries(obj as Record<string, unknown>).map(([k, v]) => [k, sanitizePlaceholders(v)])
+    );
+  }
+  return obj;
+}
+
 // ============================================================
 // Core: Generate Mission JSON from natural language
 // ============================================================
@@ -549,10 +578,13 @@ export async function generateMissionJSON(
     }
   }
 
-  // 3. Validate LLM output against schema
+  // 3. Strip any PLACEHOLDER values that slipped past the system prompt
+  rawJSON = sanitizePlaceholders(rawJSON) as Record<string, unknown>;
+
+  // 4. Validate LLM output against schema
   const llmOutput = LLMOutputSchema.parse(rawJSON);
 
-  // 3.5 Normalize permission service names (safety net for LLM hallucinations)
+  // 4.5 Normalize permission service names (safety net for LLM hallucinations)
   if (llmOutput.permissions?.length > 0) {
     llmOutput.permissions = normalizePermissions(llmOutput.permissions as any) as any;
   }
@@ -626,7 +658,7 @@ export async function editBlueprint(
   let rawJSON;
   let llmOutput;
   try {
-    rawJSON = robustJSONParse(llmResponse.content);
+    rawJSON = sanitizePlaceholders(robustJSONParse(llmResponse.content)) as Record<string, unknown>;
     llmOutput = LLMOutputSchema.parse(rawJSON);
   } catch (err: any) {
     console.log(`[intake] Edit blueprint failed parsing, attempting heal: ${err.message}`);
@@ -634,8 +666,8 @@ export async function editBlueprint(
       { role: 'system', content: 'You are a JSON recovery expert. The following output failed schema validation. Fix the JSON so it perfectly matches the requested schema. Return ONLY valid JSON.' },
       { role: 'user', content: `Bad Output: ${llmResponse.content}\n\nError: ${err.message}` }
     ], { jsonMode: true, temperature: 0.1, tier: 1 });
-    
-    rawJSON = robustJSONParse(healResponse.content);
+
+    rawJSON = sanitizePlaceholders(robustJSONParse(healResponse.content)) as Record<string, unknown>;
     llmOutput = LLMOutputSchema.parse(rawJSON);
   }
 

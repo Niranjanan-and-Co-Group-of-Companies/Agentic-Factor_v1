@@ -58,12 +58,6 @@ function MissionCreatorInner() {
   const [showAuthPopup, setShowAuthPopup] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<{name: string; content: string; size: number}[]>([]);
-  const [missingCredentials, setMissingCredentials] = useState<{service: string; label: string; scope: string}[]>([]);
-  const [apiKeyPopup, setApiKeyPopup] = useState<{service: string; label: string; icon: string; fields: {key: string; label: string; placeholder: string; type?: string}[]; helpText?: string} | null>(null);
-  const [apiKeyPopupValues, setApiKeyPopupValues] = useState<Record<string, string>>({});
-  const [apiKeyPopupSaving, setApiKeyPopupSaving] = useState(false);
-  const [apiKeyPopupError, setApiKeyPopupError] = useState("");
-  const [apiKeyPopupVerified, setApiKeyPopupVerified] = useState(false);
   const searchParams = useSearchParams();
 
   // ── Extract text content from File objects ──
@@ -109,9 +103,6 @@ function MissionCreatorInner() {
       setIsAuthenticated(!!user);
     });
   }, []);
-
-  // ── Check missing credentials whenever a blueprint loads ──
-  useEffect(() => { if (blueprint) checkMissingCredentials(blueprint); }, [blueprint]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Guest→User Blueprint Migration ──
   useEffect(() => {
@@ -369,50 +360,6 @@ function MissionCreatorInner() {
     finally { setLoading(false); }
   };
 
-  // ── API key connector definitions (for inline credential popup) ──
-  const API_KEY_DEFS: Record<string, {label: string; icon: string; fields: {key: string; label: string; placeholder: string; type?: string}[]; helpText?: string}> = {
-    hunter_io:     { label: "Hunter.io",    icon: "🎯", fields: [{key:"apiKey", label:"API Key", placeholder:"Your Hunter.io API key"}], helpText:"Find in Hunter.io → API → API key" },
-    apollo:        { label: "Apollo.io",    icon: "🚀", fields: [{key:"apiKey", label:"API Key", placeholder:"Your Apollo.io API key"}], helpText:"Find in Apollo.io → Settings → Integrations → API" },
-    stripe:        { label: "Stripe",       icon: "💳", fields: [{key:"apiKey", label:"Secret Key", placeholder:"sk_live_..."}], helpText:"Stripe Dashboard → Developers → API Keys" },
-    twilio:        { label: "Twilio",       icon: "📞", fields: [{key:"accountSid", label:"Account SID", placeholder:"AC..."},{key:"authToken", label:"Auth Token", placeholder:"Your auth token"}], helpText:"Twilio Console → Account Info" },
-    sendgrid:      { label: "SendGrid",     icon: "✉️", fields: [{key:"apiKey", label:"API Key", placeholder:"SG..."}], helpText:"SendGrid → Settings → API Keys" },
-    aws:           { label: "AWS",          icon: "🟧", fields: [{key:"accessKeyId", label:"Access Key ID", placeholder:"AKIA..."},{key:"secretAccessKey", label:"Secret Access Key", placeholder:"Your secret key", type:"password"}], helpText:"AWS Console → IAM → Security Credentials" },
-    openai_api:    { label: "OpenAI",       icon: "🤖", fields: [{key:"apiKey", label:"API Key", placeholder:"sk-..."}], helpText:"OpenAI Platform → API Keys" },
-    anthropic_api: { label: "Anthropic",    icon: "🧠", fields: [{key:"apiKey", label:"API Key", placeholder:"sk-ant-..."}], helpText:"Anthropic Console → API Keys" },
-    replicate:     { label: "Replicate",    icon: "🔬", fields: [{key:"apiKey", label:"API Token", placeholder:"r8_..."}], helpText:"Replicate → Account → API Tokens" },
-    segment:       { label: "Segment",      icon: "📡", fields: [{key:"apiKey", label:"Write Key", placeholder:"Your write key"}], helpText:"Segment → Sources → Settings" },
-    mixpanel:      { label: "Mixpanel",     icon: "📈", fields: [{key:"apiKey", label:"Project Token", placeholder:"Your project token"}], helpText:"Mixpanel → Project Settings → Access Keys" },
-    firebase:      { label: "Firebase",     icon: "🔥", fields: [{key:"apiKey", label:"Web API Key", placeholder:"AIzaSy..."}], helpText:"Firebase Console → Project Settings → General" },
-    heygen:        { label: "HeyGen",       icon: "🎬", fields: [{key:"apiKey", label:"API Key", placeholder:"Your HeyGen API key"}], helpText:"HeyGen → Settings → API" },
-    langsmith:     { label: "LangSmith",    icon: "🔗", fields: [{key:"apiKey", label:"API Key", placeholder:"ls__..."}], helpText:"LangSmith → Settings → API Keys" },
-    razorpay:      { label: "Razorpay",     icon: "💸", fields: [{key:"keyId", label:"Key ID", placeholder:"rzp_live_..."},{key:"keySecret", label:"Key Secret", placeholder:"Your key secret", type:"password"}], helpText:"Razorpay Dashboard → Settings → API Keys" },
-    shiprocket:    { label: "Shiprocket",   icon: "🚀", fields: [{key:"email", label:"Email", placeholder:"your@email.com"},{key:"password", label:"Password", placeholder:"Your password", type:"password"}], helpText:"Use your Shiprocket account credentials" },
-  };
-
-  // ── Check which blueprint-required credentials are missing ──
-  const checkMissingCredentials = async (bp: Blueprint) => {
-    const supabase = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data: perms } = await supabase
-      .from('tenant_permissions')
-      .select('provider')
-      .eq('tenant_id', user.id);
-    const connected = new Set(perms?.map((p: {provider: string}) => p.provider) || []);
-
-    const missing = bp.permissions
-      .filter(p => p.confidentialityLevel !== 'internal' && p.confidentialityLevel !== 'public')
-      .filter(p => p.type === 'api_key' && !connected.has(p.service))
-      .filter(p => API_KEY_DEFS[p.service])
-      .map(p => ({ service: p.service, label: API_KEY_DEFS[p.service].label, scope: p.scope }));
-
-    setMissingCredentials(missing);
-  };
-
   // Legacy alias for demo-user flow
   const handleConfirmAfterAuth = persistBlueprint;
 
@@ -591,80 +538,6 @@ function MissionCreatorInner() {
           </div>
         </div>
         {error && <div style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem" }}>❌ {error}</div>}
-
-        {/* Missing credentials warning */}
-        {missingCredentials.length > 0 && (
-          <div style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md) var(--space-lg)", background: "hsla(38,92%,50%,0.08)", border: "1px solid hsla(38,92%,50%,0.35)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", gap: "var(--space-md)", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "0.85rem", color: "var(--amber)", fontWeight: 600, flex: 1 }}>
-              ⚠️ Missing API credentials — this mission needs {missingCredentials.map(m => m.label).join(", ")} to run.
-            </span>
-            <div style={{ display: "flex", gap: "var(--space-sm)", flexWrap: "wrap" }}>
-              {missingCredentials.map((mc) => (
-                <button key={mc.service} className="btn btn-ghost btn-sm" style={{ color: "var(--amber)", borderColor: "hsla(38,92%,50%,0.4)", fontSize: "0.78rem" }}
-                  onClick={() => { setApiKeyPopup(API_KEY_DEFS[mc.service] ? { service: mc.service, ...API_KEY_DEFS[mc.service] } : null); setApiKeyPopupValues({}); setApiKeyPopupError(""); setApiKeyPopupVerified(false); }}>
-                  🔑 Add {mc.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Inline API key popup */}
-        {apiKeyPopup && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "1rem" }}
-            onClick={() => { setApiKeyPopup(null); setApiKeyPopupValues({}); setApiKeyPopupVerified(false); }}>
-            <div className="card" style={{ width: "100%", maxWidth: 460, padding: "var(--space-xl)" }} onClick={e => e.stopPropagation()}>
-              <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-lg)" }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>{apiKeyPopup.icon} Connect {apiKeyPopup.label}</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: 2 }}>🔑 API Key — credentials stored securely</div>
-                </div>
-                <button className="btn btn-ghost btn-sm" onClick={() => { setApiKeyPopup(null); setApiKeyPopupValues({}); setApiKeyPopupVerified(false); }}>✕</button>
-              </div>
-              {apiKeyPopup.helpText && (
-                <div style={{ padding: "var(--space-sm) var(--space-md)", background: "var(--bg-glass)", borderRadius: "var(--radius-sm)", fontSize: "0.78rem", color: "var(--text-secondary)", marginBottom: "var(--space-lg)", borderLeft: "3px solid var(--accent)" }}>
-                  ℹ️ {apiKeyPopup.helpText}
-                </div>
-              )}
-              {apiKeyPopupVerified ? (
-                <div style={{ textAlign: "center", padding: "var(--space-lg)" }}>
-                  <div style={{ fontSize: "2.5rem", marginBottom: "var(--space-sm)" }}>✅</div>
-                  <div style={{ fontWeight: 700, color: "var(--emerald)" }}>{apiKeyPopup.label} Connected!</div>
-                  <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 4 }}>Credentials saved. You can now run this mission.</div>
-                  <button className="btn btn-primary" style={{ marginTop: "var(--space-lg)", width: "100%" }} onClick={() => { setApiKeyPopup(null); checkMissingCredentials(blueprint!); }}>Done →</button>
-                </div>
-              ) : (
-                <div className="stack" style={{ gap: "var(--space-md)" }}>
-                  {apiKeyPopup.fields.map(field => (
-                    <div key={field.key}>
-                      <label style={{ fontSize: "0.78rem", fontWeight: 600, display: "block", marginBottom: 4 }}>{field.label}</label>
-                      <input className="input" type={field.type || "text"} placeholder={field.placeholder}
-                        value={apiKeyPopupValues[field.key] || ""}
-                        onChange={e => setApiKeyPopupValues(prev => ({ ...prev, [field.key]: e.target.value }))} />
-                    </div>
-                  ))}
-                  {apiKeyPopupError && (
-                    <p style={{ fontSize: "0.8rem", color: "var(--rose)", margin: 0 }}>{apiKeyPopupError}</p>
-                  )}
-                  <button className="btn btn-primary" style={{ width: "100%" }} disabled={apiKeyPopupSaving || apiKeyPopup.fields.some(f => !apiKeyPopupValues[f.key]?.trim())}
-                    onClick={async () => {
-                      setApiKeyPopupSaving(true); setApiKeyPopupError("");
-                      try {
-                        const verifyRes = await fetch('/api/connectors/apikey/verify', { method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify({ provider: apiKeyPopup.service, fields: apiKeyPopupValues }) });
-                        const verifyData = await verifyRes.json();
-                        if (!verifyData.verified) { setApiKeyPopupError(verifyData.error || 'Invalid credentials. Please check and try again.'); return; }
-                        await fetch('/api/connectors/apikey/save', { method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify({ provider: apiKeyPopup.service, fields: apiKeyPopupValues }) });
-                        setApiKeyPopupVerified(true);
-                      } catch { setApiKeyPopupError('Network error. Please try again.'); }
-                      finally { setApiKeyPopupSaving(false); }
-                    }}>
-                    {apiKeyPopupSaving ? "Verifying..." : "Verify & Save →"}
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Mission Header */}
         <div className="card" style={{ marginBottom: "var(--space-lg)" }}>
@@ -903,13 +776,13 @@ function MissionCreatorInner() {
               <div className="stack" style={{ gap: "var(--space-xs)" }}>
                 {blueprint.permissions.filter(p => p.confidentialityLevel !== "internal" && p.confidentialityLevel !== "public").map((perm, idx) => (
                   <div key={idx} className="row" style={{ padding: "var(--space-sm)", background: "var(--bg-glass)", borderRadius: "var(--radius-sm)", fontSize: "0.82rem" }}>
-                    <span>🔑</span>
+                    <span title={perm.type === "oauth_token" ? "OAuth" : "API Key"}>{perm.type === "oauth_token" ? "🔗" : "🔑"}</span>
                     <div style={{ flex: 1 }}>
                       <span style={{ fontWeight: 500 }}>{perm.service}</span>
                       <span style={{ color: "var(--text-muted)" }}> · {perm.scope}</span>
                     </div>
-                    <span className={`badge ${perm.confidentialityLevel === "confidential" ? "badge-amber" : "badge-red"}`} style={{ fontSize: "0.6rem" }}>
-                      {perm.confidentialityLevel}
+                    <span className="badge" style={{ fontSize: "0.6rem", background: "var(--bg-glass)", color: "var(--text-muted)" }}>
+                      {perm.type === "oauth_token" ? "OAuth" : "API Key"}
                     </span>
                   </div>
                 ))}
