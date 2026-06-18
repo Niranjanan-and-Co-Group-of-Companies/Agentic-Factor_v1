@@ -59,7 +59,7 @@ function MissionCreatorInner() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<{name: string; content: string; size: number}[]>([]);
   const [missingCredentials, setMissingCredentials] = useState<{service: string; label: string; scope: string}[]>([]);
-  const [apiKeyPopup, setApiKeyPopup] = useState<{service: string; label: string; fields: {key: string; label: string; placeholder: string; type?: string}[]; helpText?: string} | null>(null);
+  const [apiKeyPopup, setApiKeyPopup] = useState<{service: string; label: string; icon: string; fields: {key: string; label: string; placeholder: string; type?: string}[]; helpText?: string} | null>(null);
   const [apiKeyPopupValues, setApiKeyPopupValues] = useState<Record<string, string>>({});
   const [apiKeyPopupSaving, setApiKeyPopupSaving] = useState(false);
   const [apiKeyPopupError, setApiKeyPopupError] = useState("");
