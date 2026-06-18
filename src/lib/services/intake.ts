@@ -165,7 +165,7 @@ You must decompose the user's intent into:
 9. **Validation Checklist**: 3-8 specific assertions to verify the mission output quality.
 10. **Permissions**: All credentials the agents will need. Each permission MUST have:
    - "type": one of "api_key", "oauth_token", "database_credential", "file_access", "service_account", "webhook"
-   - "service": MUST be one of these EXACT provider keys (case-sensitive): "google", "twitter", "facebook", "instagram", "linkedin_oidc", "slack", "github", "notion", "discord", "zoho", "whatsapp", "messenger", "azure", "teams", "stripe", "shopify". Do NOT use full names like "Twitter/X OAuth 2.0 PKCE" or "Facebook Graph API" — use ONLY the short key.
+   - "service": MUST be one of these EXACT provider keys (case-sensitive). OAuth providers: "google", "twitter", "facebook", "instagram", "linkedin_oidc", "slack", "github", "notion", "discord", "zoho", "whatsapp", "messenger", "azure", "teams", "stripe", "shopify". API key providers: "hunter_io", "apollo", "twilio", "sendgrid", "aws", "openai_api", "anthropic_api", "replicate", "segment", "mixpanel", "heygen", "langsmith", "bamboohr", "woocommerce", "make", "firebase", "vercel", "supabase_ext", "shiprocket", "razorpay". Do NOT use full names like "Hunter.io" or "Apollo.io" — use ONLY the short key.
    - "scope": string (e.g., "tweet.write", "pages_manage_posts", "chat:write")
    - "confidentialityLevel": one of "public", "internal", "confidential", "restricted"
 11. **Discovery Questions**: Generate 3 or more highly specific "discoveryQuestions" to ask the user. These questions must gather missing context or exact preferences needed to refine the agents' system prompts before deployment.
@@ -180,6 +180,10 @@ IMPORTANT RULES:
 - Permission "service" values MUST be exact provider keys from the list above. Using full API names will break the system.
 - NEVER use sys.exit() in pythonScript — the sandbox crashes on it. Let scripts end naturally.
 - For social media tasks, ALWAYS use the agenticfactor.social module — NEVER write raw API calls.
+- NEVER OUTPUT PLACEHOLDER VALUES: Do NOT write "PLACEHOLDER", "YOUR_SHEET_ID", "YOUR_DOC_ID", "YOUR_FOLDER_ID", "PLACEHOLDER_URL", "INSERT_CHANNEL_NAME", "YOUR_CHANNEL", or any similar placeholder text anywhere in the JSON output — not in pythonScript, systemPrompt, handoffProtocol, title, description, or any other field. Blueprints containing placeholder strings are automatically rejected and cannot run.
+- GOOGLE RESOURCE CREATION: When a mission requires a Google Doc or Sheet that the user has NOT explicitly specified by ID or URL, agents MUST create new resources dynamically. Use api.call('google', 'POST', 'https://docs.googleapis.com/v1/documents', json_data={"title": "Report Title"}) to create a new Google Doc. Use api.call('google', 'POST', 'https://sheets.googleapis.com/v4/spreadsheets', json_data={"properties": {"title": "Sheet Title"}}) to create a new Google Sheet. Return the newly created document ID and URL in the agent output. NEVER hardcode a placeholder document ID.
+- SLACK CHANNEL: If the user specified a Slack channel name (e.g. "#general", "#alerts"), use that exact string. If no channel was specified, default to "#general". NEVER write "PLACEHOLDER" or "YOUR_CHANNEL" as the channel name.
+- HUNTER.IO / APOLLO: When a mission requires contact enrichment, include the appropriate API key permission ("hunter_io" or "apollo") and write pythonScript that calls api.call('hunter_io', 'GET', 'https://api.hunter.io/v2/email-finder', params={...}) with the domain and name parameters.
 
 OUTPUT SIZE CONSTRAINTS (CRITICAL):
 - Agent systemPrompt: MAX 150 words. Be dense and specific — no filler.
