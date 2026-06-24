@@ -353,6 +353,7 @@ List, create, update, delete events and find free slots.
 """
 
 import json
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 
@@ -435,6 +436,7 @@ def create_event(
     calendar_id: str = "primary",
     send_notifications: bool = True,
     timezone: str = "Asia/Kolkata",
+    add_meet_link: bool = False,
 ) -> Dict:
     """
     Create a calendar event.
@@ -448,6 +450,9 @@ def create_event(
         attendees: List of email addresses
         send_notifications: Send email invitations to attendees
         timezone: Timezone for the event
+        add_meet_link: If True, ask Google Calendar to generate a real
+            Google Meet link for this event. The returned "meetLink" field
+            is the actual link Google created — never invent one yourself.
     """
     token = _token()
 
@@ -462,10 +467,20 @@ def create_event(
         event_body["location"] = location
     if attendees:
         event_body["attendees"] = [{"email": e} for e in attendees]
+    if add_meet_link:
+        event_body["conferenceData"] = {
+            "createRequest": {
+                "requestId": uuid.uuid4().hex,
+                "conferenceSolutionKey": {"type": "hangoutsMeet"},
+            }
+        }
 
     params = {}
     if send_notifications:
         params["sendNotifications"] = "true"
+    if add_meet_link:
+        # Required by the Calendar API for conferenceData to actually be processed
+        params["conferenceDataVersion"] = "1"
 
     result = _request(
         "POST",
@@ -476,9 +491,17 @@ def create_event(
         provider="calendar",
     )
 
+    meet_link = result.get("hangoutLink")
+    if not meet_link:
+        for entry_point in result.get("conferenceData", {}).get("entryPoints", []):
+            if entry_point.get("entryPointType") == "video":
+                meet_link = entry_point.get("uri")
+                break
+
     return {
         "id": result.get("id"),
         "htmlLink": result.get("htmlLink"),
+        "meetLink": meet_link,
         "status": "confirmed",
         "summary": result.get("summary"),
     }
@@ -908,7 +931,15 @@ def call(
     if env_url:
         base_url = env_url
 
-    url = f"{base_url}{endpoint}" if base_url else endpoint
+    # endpoint may already be a full absolute URL (e.g. an LLM-generated call
+    # passing "https://gmail.googleapis.com/...") — prepending base_url in
+    # that case doubles the scheme/host into something like
+    # "https://www.googleapis.comhttps://gmail.googleapis.com/...", which
+    # fails DNS resolution entirely. Use it as-is when it's already absolute.
+    if endpoint.startswith("http://") or endpoint.startswith("https://"):
+        url = endpoint
+    else:
+        url = f"{base_url}{endpoint}" if base_url else endpoint
 
     if auth_type == "api_key":
         key_env = f"{provider.upper()}_API_KEY"

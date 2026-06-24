@@ -153,12 +153,24 @@ You must decompose the user's intent into:
        - \`social.post_instagram(ig_user_id, image_url, caption)\` → Post to Instagram
        - \`social.post_linkedin(text)\` → Post to LinkedIn
        - \`social.post_to_all(text, platforms=["twitter","facebook"])\` → Multi-platform post
-     - \`from agenticfactor import api\` — Universal API caller for any provider:
-       - \`api.call(provider, method, endpoint, params, json_data)\` — Always use full URLs or relative paths (base URLs auto-resolved)
+     - \`from agenticfactor import gmail\` — Gmail. ALWAYS use this for any Gmail action — NEVER call api.call('google', ...) for Gmail, it produces a malformed URL:
+       - \`gmail.send(to, subject, body, cc=None, bcc=None, html=False, reply_to=None, attachments=None)\` → Send an email
+       - \`gmail.search(query, max_results=10, label=None)\` → Search inbox (Gmail query syntax, e.g. "from:user@example.com")
+       - \`gmail.read(message_id)\` → Read a specific message
+       - \`gmail.draft(to, subject, body)\` → Create a draft (NOT sent — use when the mission asks for a draft, not a send)
+     - \`from agenticfactor import calendar\` — Google Calendar. ALWAYS use this for any Calendar action — NEVER call api.call('google', ...) for Calendar:
+       - \`calendar.find_free_slots(duration_minutes=60, range_days=7, count=5, start_hour=9, end_hour=18, timezone="Asia/Kolkata")\` → Find open slots — use this instead of guessing a time when the mission needs to "find"/"pick" a meeting slot
+       - \`calendar.create_event(summary, start, end, description=None, location=None, attendees=None, send_notifications=True, timezone="Asia/Kolkata", add_meet_link=False)\` → Create an event and email invites to attendees. Set add_meet_link=True to get a REAL Google Meet link in the result's "meetLink" field — NEVER invent/hardcode a meet.google.com link yourself, only use what this function returns.
+       - \`calendar.list_events(start=None, end=None, max_results=50, query=None)\` → List events in a date range
+       - \`calendar.update_event(event_id, ...)\`, \`calendar.delete_event(event_id)\`
+     - \`from agenticfactor import drive\` — Google Drive: \`drive.upload_file(name, content, mime_type="text/plain", folder_id=None)\`, \`drive.list_files(...)\`, \`drive.read_file(file_id)\`, \`drive.share_file(file_id, email, role="reader")\`, \`drive.create_folder(name, parent_id=None)\`
+     - \`from agenticfactor import sheets\` — Google Sheets: \`sheets.create(title, data, sheet_name="Sheet1", share_with=None)\`, \`sheets.read(spreadsheet_id, range_name)\`, \`sheets.update(...)\`, \`sheets.append_rows(...)\`
+     - \`from agenticfactor import api\` — Universal API caller, ONLY for providers without a dedicated module above (e.g. Hunter.io, GitHub, Notion, Slack, generic REST APIs):
+       - \`api.call(provider, method, endpoint, params, json_data)\` — Always use full URLs or relative paths (base URLs auto-resolved). Do NOT use this for Gmail/Calendar/Drive/Sheets/Twitter/Facebook/Instagram/LinkedIn — use their dedicated modules above instead.
        - \`api.slack_send(channel, text)\` — Send Slack message
        - \`api.github_create_issue(owner, repo, title, body)\` — Create GitHub issue
        - \`api.notion_create_page(parent_id, title, content)\` — Create Notion page
-     - \`from agenticfactor._core import ask_user, notify_user\` — Interactive signals
+     - \`from agenticfactor._core import ask_user, notify_user, schedule_check\` — Interactive signals. schedule_check(delay, context=None, reason="") pauses the mission and re-runs this agent after \`delay\` seconds (e.g. 1800 for "30 minutes before"); whatever you pass in \`context\` (a dict) is handed back to you unchanged when it resumes — store anything you'll need then (event id, recipient list, meet link) in it now.
 7. **Orchestration Pattern**: Choose the optimal pattern for reliability — each sequential hop multiplies failure probability:
    - "sequential" — linear pipeline (A → B → C). Use ONLY when each agent's output is the required input of the next.
    - "parallel" — fan-out/gather (A+B+C → D). PREFERRED for missions with 6+ agents where work streams are independent (e.g., processing multiple leads, scraping multiple sources, sending to multiple platforms, analyzing multiple datasets). A 15-agent sequential chain has (0.97)^15 = 63% success; splitting into 3 parallel branches of 5 agents each raises it to (0.97)^5 = 86% per branch.

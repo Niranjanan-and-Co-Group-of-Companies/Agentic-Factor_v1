@@ -228,19 +228,50 @@ const ACTION_PATTERNS: { pattern: string; risk: ActionRisk }[] = [
   { pattern: 'ask_user', risk: 'write_reversible' }, // a check-in question, not an external action
 ];
 
-// api.call(provider, method, ...) and the generic requests.post/_request("POST")
-// are method-agnostic helpers — risk depends on the HTTP verb actually used at
-// the call site, not the function name, so these are classified by inspection
-// rather than a flat substring match.
+// Providers whose write actions are almost always "send/post something to
+// someone" rather than "create a private resource you can delete" — for
+// these, default any non-GET generic api.call() to irreversible, since the
+// HTTP method alone (e.g. POST) doesn't distinguish "send an email" from
+// "create a doc" the way it might for a storage/productivity provider.
+const COMMUNICATION_PROVIDERS = new Set([
+  'gmail', 'slack', 'linkedin', 'twitter', 'facebook', 'instagram',
+  'sendgrid', 'whatsapp', 'messenger', 'discord', 'telegram',
+]);
+
+// Endpoint-path keywords that indicate a send/publish regardless of provider
+// or HTTP verb — this is the backstop for providers like "google" that cover
+// many different APIs (Gmail send vs. Docs create) under one provider name,
+// so a provider-only default would either over- or under-trigger.
+const SEND_PATH_KEYWORDS = ['send', 'publish', 'notifications', 'broadcast'];
+
+// api.call(provider, method, endpoint, ...) and the generic requests.post/
+// _request("POST") are method-agnostic helpers — risk depends on what's
+// actually being called, not just the function name, so these are
+// classified by inspecting the provider and endpoint at the call site
+// rather than a flat substring match on the wrapper name.
 function classifyGenericCalls(code: string): ActionRisk[] {
   const risks: ActionRisk[] = [];
-  const apiCallRegex = /api\.call\(\s*['"][^'"]+['"]\s*,\s*['"](GET|POST|PUT|PATCH|DELETE)['"]/gi;
+  const apiCallRegex = /api\.call\(\s*['"]([^'"]+)['"]\s*,\s*['"](GET|POST|PUT|PATCH|DELETE)['"](?:\s*,\s*['"]([^'"]*)['"])?/gi;
   let m: RegExpExecArray | null;
   while ((m = apiCallRegex.exec(code)) !== null) {
-    const method = m[1].toUpperCase();
-    if (method === 'GET') risks.push('read');
-    else if (method === 'DELETE') risks.push('write_irreversible');
-    else risks.push('write_reversible'); // POST/PUT/PATCH via the generic helper
+    const provider = m[1].toLowerCase();
+    const method = m[2].toUpperCase();
+    const endpoint = (m[3] || '').toLowerCase();
+
+    if (method === 'GET') {
+      risks.push('read');
+      continue;
+    }
+    if (method === 'DELETE') {
+      risks.push('write_irreversible');
+      continue;
+    }
+    const looksLikeSend = SEND_PATH_KEYWORDS.some(kw => endpoint.includes(kw));
+    if (looksLikeSend || COMMUNICATION_PROVIDERS.has(provider)) {
+      risks.push('write_irreversible');
+    } else {
+      risks.push('write_reversible'); // POST/PUT/PATCH that creates/updates a private resource
+    }
   }
   if (code.includes('requests.post') || code.includes('_request("POST"')) {
     risks.push('write_reversible');
