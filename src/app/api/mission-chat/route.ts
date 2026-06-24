@@ -4,8 +4,15 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { callLLM } from '@/lib/services/llm-router';
 import { editBlueprint } from '@/lib/services/intake';
 import { safeJSONParse } from '@/lib/utils/json-parser';
+import { processApprovalDecision } from '@/lib/services/approvals';
 
 export const maxDuration = 120;
+
+// Sent by the mission page on load (not typed by the user) to let the Chief
+// of Staff proactively check in when there's a pending approval, instead of
+// waiting for the user to ask. Never shown as a user chat bubble — the
+// frontend only renders the resulting assistant reply, if any.
+const SYSTEM_CHECKIN_TOKEN = '__SYSTEM_CHECKIN__';
 
 export async function POST(request: NextRequest) {
   const authResult = await extractTenantContext(request);
@@ -18,6 +25,7 @@ export async function POST(request: NextRequest) {
     if (!missionId || !message) {
       return NextResponse.json({ error: 'Missing missionId or message' }, { status: 400 });
     }
+    const isSilentCheckin = message === SYSTEM_CHECKIN_TOKEN;
 
     const supabase = createServiceClient();
 
@@ -54,6 +62,28 @@ export async function POST(request: NextRequest) {
       .select('provider')
       .eq('tenant_id', tenantId);
     const connectedProviderNames = connectorPerms?.map(p => p.provider) ?? [];
+
+    // ── Fetch the most recent pending approval for this mission, if any ──
+    // The Chief of Staff surfaces this conversationally instead of leaving
+    // it to a separate Approve/Reject button screen — only the most recent
+    // one is handled per turn; approving it lets the next one (if any)
+    // surface on the following message.
+    const { data: pendingActions } = await supabase
+      .from('proposed_actions')
+      .select('id, agent_role, description, explanation, target, risk_level, reversible, payload')
+      .eq('mission_id', missionId)
+      .eq('tenant_id', tenantId)
+      .eq('status', 'pending')
+      .order('submitted_at', { ascending: false })
+      .limit(1);
+    const pendingAction = pendingActions?.[0] || null;
+
+    // A silent check-in with nothing pending has nothing to say — skip the
+    // LLM call entirely rather than returning a generic "all good" message
+    // the user never asked for.
+    if (isSilentCheckin && !pendingAction) {
+      return NextResponse.json({ reply: null });
+    }
 
     const creditsRemaining = billingRow?.credits_remaining ?? 0;
     const creditsTopup = billingRow?.credits_topup ?? 0;
@@ -130,19 +160,39 @@ ${JSON.stringify(missionRow.mission_json, null, 2)}
 
 RECENT EVENTS:
 ${JSON.stringify(eventRows || [], null, 2)}
+${pendingAction ? `
+PENDING APPROVAL — AN AGENT IS WAITING ON YOUR DECISION:
+Agent "${pendingAction.agent_role}" wants to perform an action and is paused until you decide.
+- What it wants to do: ${pendingAction.description}
+- Why it's asking: ${pendingAction.explanation || 'No additional explanation provided.'}
+- Target service: ${pendingAction.target}
+- Risk: ${pendingAction.risk_level}${pendingAction.reversible ? '' : ' — IRREVERSIBLE, cannot be undone once it runs'}
+- Preview of what it would actually do/send:
+${JSON.stringify(pendingAction.payload?.output ?? {}, null, 2).slice(0, 800)}
 
+YOUR JOB ABOUT THIS PENDING APPROVAL:
+- If you have not already told the user about this in this conversation, mention it clearly in your reply and show them the actual preview content above — don't just say "there's something pending," show them what it says.
+- If the user's message is an unambiguous approval of THIS pending action ("yes", "go ahead", "send it", "approve", "looks good", "do it"), set "approval_decision" to "approved".
+- If the user's message is an unambiguous rejection ("no", "don't", "reject", "cancel that", "skip it"), set "approval_decision" to "rejected".
+- If their message is about something unrelated, answer that normally, but still briefly remind them this is still pending at the end of your reply.
+- Do NOT set "approval_decision" unless their intent is clear — when in doubt, ask them to confirm instead of guessing.
+` : ''}
 You MUST respond in valid JSON format matching this schema:
 {
   "reply": "Your response to the user, including any requested CSV or Markdown tables/diagrams.",
-  "mutation_instruction": "A clear, concise instruction for the AI Architect to modify the blueprint (e.g., 'Add a Twitter agent'). Only include this if the user EXPLICITLY asks to change the mission. Otherwise, omit this field or set it to null."
+  "mutation_instruction": "A clear, concise instruction for the AI Architect to modify the blueprint (e.g., 'Add a Twitter agent'). Only include this if the user EXPLICITLY asks to change the mission. Otherwise, omit this field or set it to null.",
+  "approval_decision": "Set to 'approved' or 'rejected' ONLY if there is a pending approval above AND the user just gave a clear, unambiguous decision on it this message. Omit or set to null otherwise."
 }`;
 
     // Chat uses callLLM without budgetContext so the circuit breaker (designed for
     // agent execution loops) never blocks a user conversation mid-session.
     // callLLM cascades internally: Claude → Gemini → OpenAI on any 429/rate-limit.
+    const userTurnContent = isSilentCheckin
+      ? 'The user just opened this mission. Proactively introduce the pending approval described above — do not say anything else.'
+      : message;
     const response = await callLLM([
       { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: message }
+      { role: 'user', content: userTurnContent }
     ], { jsonMode: true, temperature: 0.2, tier: 2 });
 
     let parsedResponse: any;
@@ -165,6 +215,24 @@ You MUST respond in valid JSON format matching this schema:
         .eq('tenant_id', tenantId);
         
       parsedResponse.reply += '\n\n*(Mission architecture has been dynamically updated based on your request!)*';
+    }
+
+    // If the user just gave a clear decision on the pending approval, act on it
+    // through the same shared logic the Approve/Reject buttons use.
+    if (pendingAction && (parsedResponse.approval_decision === 'approved' || parsedResponse.approval_decision === 'rejected')) {
+      const result = await processApprovalDecision(tenantId, pendingAction.id, parsedResponse.approval_decision, missionId);
+
+      if (result.ok) {
+        parsedResponse.reply += result.decision === 'approved'
+          ? `\n\n✅ Done — approved, and the mission is continuing.`
+          : `\n\n❌ Got it — rejected. The mission will not perform that action.`;
+      } else if (result.reason === 'missing_permission') {
+        parsedResponse.reply += `\n\n⚠️ I tried to approve that, but you're missing a required connection: ${result.providers.join(', ')}. Connect it on the Connectors page, then let me know and I'll try again.`;
+      } else if (result.reason === 'circuit_breaker') {
+        parsedResponse.reply += `\n\n⚠️ I couldn't process that right now — the system is temporarily rate-limited. Try again shortly.`;
+      } else {
+        parsedResponse.reply += `\n\n⚠️ Something went wrong processing that: ${result.message}`;
+      }
     }
 
     return NextResponse.json({ reply: parsedResponse.reply });

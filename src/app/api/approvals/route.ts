@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { circuitBreaker } from '@/lib/services/circuit-breaker';
-import { createServiceClient } from '@/lib/supabase/server';
+import { processApprovalDecision } from '@/lib/services/approvals';
 import { z } from 'zod';
 
 // ============================================================
 // POST /api/approvals — Process approval decisions
-// Connects the Approve/Reject buttons to the orchestrator
+// Connects the Approve/Reject buttons to the orchestrator.
+// Decision logic lives in lib/services/approvals.ts, shared with
+// the conversational Chief of Staff approval flow.
 // ============================================================
 
 const DecisionSchema = z.object({
@@ -24,99 +26,29 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { actionId, decision, missionId } = DecisionSchema.parse(body);
 
-    // ── Circuit breaker check ──
-    if (decision === 'approved') {
-      const cbCheck = circuitBreaker.recordUsage(
-        missionId || actionId,
-        100, // estimated tokens for this action
-        0.001 // estimated cost
-      );
-      if (!cbCheck.allowed) {
-        return NextResponse.json({
-          error: 'Circuit breaker OPEN',
-          reason: cbCheck.reason,
-          circuitState: circuitBreaker.getState(),
-        }, { status: 429 });
-      }
-    }
+    const result = await processApprovalDecision(tenantId, actionId, decision, missionId);
 
-    const supabase = createServiceClient();
-
-    // Find the mission_id first since the frontend might pass the title.
-    // Also grab the fields needed to compute this action's pattern key.
-    const { data: actionData } = await supabase
-      .from('proposed_actions')
-      .select('mission_id, agent_id, agent_role, target, action_type')
-      .eq('id', actionId)
-      .single();
-
-    const actualMissionId = actionData?.mission_id;
-
-    // If approving, check if we have the required tokens BEFORE updating the DB
-    if (decision === 'approved' && actualMissionId) {
-      const { verifyMissionPermissions } = await import('@/lib/services/oauth-refresher');
-      const missingProviders = await verifyMissionPermissions(actualMissionId, tenantId);
-      
-      if (missingProviders.length > 0) {
+    if (!result.ok) {
+      if (result.reason === 'circuit_breaker') {
         return NextResponse.json(
-          { 
-            error: 'missing_permission', 
-            providers: missingProviders,
-            message: `Missing permissions for: ${missingProviders.join(', ')}`
-          }, 
+          { error: 'Circuit breaker OPEN', reason: result.message, circuitState: result.circuitState },
+          { status: 429 }
+        );
+      }
+      if (result.reason === 'missing_permission') {
+        return NextResponse.json(
+          { error: 'missing_permission', providers: result.providers, message: result.message },
           { status: 403 }
         );
       }
-    }
-
-    // Update the proposed_action status in the DB
-    const { error } = await supabase
-      .from('proposed_actions')
-      .update({
-        status: decision,
-        decided_by: tenantId,
-        decided_at: new Date().toISOString(),
-      })
-      .eq('id', actionId)
-      .eq('tenant_id', tenantId);
-
-    if (error) {
-      console.warn('[approvals] DB update skipped:', error.message);
-    } else {
-      // Log this decision against its action-pattern — the data foundation
-      // for eventually letting an agent graduate to autonomous for a
-      // specific, consistently-approved kind of action. A pattern key is
-      // tenant + agent role + target service, since agents aren't yet
-      // reusable templates with a stable identity of their own.
-      const patternKey = `${tenantId}:${(actionData?.agent_role || 'unknown').toLowerCase()}:${(actionData?.target || 'unknown').toLowerCase()}`;
-      const { error: historyErr } = await supabase.from('approval_history').insert({
-        tenant_id: tenantId,
-        proposed_action_id: actionId,
-        agent_id: actionData?.agent_id,
-        mission_id: actualMissionId,
-        pattern_key: patternKey,
-        agent_role: actionData?.agent_role,
-        action_type: actionData?.action_type,
-        decision,
-      });
-      if (historyErr) console.warn('[approvals] approval_history insert skipped:', historyErr.message);
-    }
-
-    // If approved, signal the orchestrator to continue the agent
-    if (decision === 'approved' && actualMissionId) {
-      console.log(`[approvals] Action ${actionId} approved for mission ${actualMissionId}. Resuming execution...`);
-      // Resume the paused agent via the orchestrator's execution loop asynchronously
-      const { executeMission } = await import('@/lib/services/runtime/executor');
-      executeMission(actualMissionId, tenantId).catch(err => {
-        console.error(`[approvals] Failed to resume mission ${actualMissionId}:`, err);
-      });
+      return NextResponse.json({ error: result.message }, { status: 500 });
     }
 
     return NextResponse.json({
       success: true,
-      actionId,
-      decision,
-      circuitState: circuitBreaker.getState(),
+      actionId: result.actionId,
+      decision: result.decision,
+      circuitState: result.circuitState,
       usage: circuitBreaker.getUsage(),
     });
   } catch (error) {

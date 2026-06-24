@@ -57,6 +57,34 @@ export default function MissionDetailPage() {
   const [answeredIds, setAnsweredIds] = useState<Set<string>>(new Set());
   const [isStarting, setIsStarting] = useState(false);
   const [pendingActions, setPendingActions] = useState<any[]>([]);
+  const greetedActionIds = useRef<Set<string>>(new Set());
+
+  // ── Chief of Staff proactive check-in ──
+  // When a new action is pending approval, have the Chief of Staff bring it
+  // up in the chat itself, instead of only relying on the static Allow/Deny
+  // card below — this is what makes approval feel like an employee checking
+  // in rather than a permission form. Each action only triggers this once.
+  useEffect(() => {
+    const latest = pendingActions[0];
+    if (!latest || greetedActionIds.current.has(latest.id)) return;
+    greetedActionIds.current.add(latest.id);
+
+    (async () => {
+      try {
+        const res = await fetch("/api/mission-chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ missionId, message: "__SYSTEM_CHECKIN__" }),
+        });
+        const data = await res.json();
+        if (res.ok && data.reply) {
+          setChatMessages(prev => [...prev, { role: "assistant", text: data.reply }]);
+        }
+      } catch {
+        // Silent — the Allow/Deny card is still visible even if the chat check-in fails
+      }
+    })();
+  }, [pendingActions, missionId]);
   const [feedback, setFeedback] = useState("");
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
