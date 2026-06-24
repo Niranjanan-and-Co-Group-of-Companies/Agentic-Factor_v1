@@ -34,9 +34,9 @@ const SIMILAR_MISSIONS: SimilarMission[] = [
 ];
 
 const TRUST_LABELS: Record<TrustLevel, { label: string; icon: string; desc: string }> = {
-  manual: { label: "Manual", icon: "🛑", desc: "Every action requires HITL approval" },
-  conditional: { label: "Conditional", icon: "💬", desc: "Agent asks before boundary decisions" },
-  autonomous: { label: "Full Auto", icon: "⚡", desc: "Agent executes autonomously" },
+  manual: { label: "Manual", icon: "🛑", desc: "Pauses for your approval before any write action (sending, posting, deleting) — pure research/lookup steps never pause" },
+  conditional: { label: "Conditional", icon: "💬", desc: "Only pauses for irreversible actions (sending, posting, deleting) — reversible writes and read-only steps run automatically" },
+  autonomous: { label: "Full Auto", icon: "⚡", desc: "Never pauses — every action runs immediately, including irreversible ones" },
 };
 
 // ============================================================

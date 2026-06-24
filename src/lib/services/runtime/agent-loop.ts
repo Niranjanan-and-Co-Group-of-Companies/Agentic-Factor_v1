@@ -184,6 +184,200 @@ function isTransientError(errorMsg: string): boolean {
   );
 }
 
+// ── ACTION RISK CLASSIFIER ──────────────────────────────────────────────
+// Explicit, maintained map of SDK call patterns → risk tier. Replaces a
+// flat "is this a write op" boolean with three tiers so callers can tell
+// apart agents that never need a human in the loop (read), agents whose
+// output can be undone if wrong (write_reversible), and agents whose
+// action can't be meaningfully undone once it fires (write_irreversible).
+export type ActionRisk = 'read' | 'write_reversible' | 'write_irreversible';
+
+const ACTION_PATTERNS: { pattern: string; risk: ActionRisk }[] = [
+  // Irreversible — communications & public actions (someone outside the
+  // system sees or receives the result; can't be unsent/unposted)
+  { pattern: 'gmail.send', risk: 'write_irreversible' },
+  { pattern: 'api.slack_send', risk: 'write_irreversible' },
+  { pattern: 'social.post_linkedin', risk: 'write_irreversible' },
+  { pattern: 'api.linkedin_post', risk: 'write_irreversible' },
+  { pattern: 'social.post_tweet', risk: 'write_irreversible' },
+  { pattern: 'social.post_facebook', risk: 'write_irreversible' },
+  { pattern: 'social.post_instagram', risk: 'write_irreversible' },
+  { pattern: 'social.post_to_all', risk: 'write_irreversible' },
+  { pattern: 'calendar.create', risk: 'write_irreversible' },
+  { pattern: 'notify_user', risk: 'write_irreversible' },
+
+  // Irreversible — destructive or financial
+  { pattern: 'social.delete_tweet', risk: 'write_irreversible' },
+  { pattern: 'social.delete_linkedin_post', risk: 'write_irreversible' },
+  { pattern: 'social.delete_facebook_post', risk: 'write_irreversible' },
+  { pattern: '_request("DELETE"', risk: 'write_irreversible' },
+  { pattern: 'requests.delete', risk: 'write_irreversible' },
+
+  // Reversible — creates/updates a private resource the user can edit or delete
+  { pattern: 'sheets.create', risk: 'write_reversible' },
+  { pattern: 'sheets.update', risk: 'write_reversible' },
+  { pattern: 'sheets.append', risk: 'write_reversible' },
+  { pattern: 'drive.upload', risk: 'write_reversible' },
+  { pattern: 'gmail.draft', risk: 'write_reversible' }, // draft only, not sent
+  { pattern: 'api.github_create_issue', risk: 'write_reversible' },
+  { pattern: 'api.notion_create_page', risk: 'write_reversible' },
+  { pattern: '_request("PUT"', risk: 'write_reversible' },
+  { pattern: '_request("PATCH"', risk: 'write_reversible' },
+  { pattern: 'requests.put', risk: 'write_reversible' },
+  { pattern: 'requests.patch', risk: 'write_reversible' },
+  { pattern: 'ask_user', risk: 'write_reversible' }, // a check-in question, not an external action
+];
+
+// api.call(provider, method, ...) and the generic requests.post/_request("POST")
+// are method-agnostic helpers — risk depends on the HTTP verb actually used at
+// the call site, not the function name, so these are classified by inspection
+// rather than a flat substring match.
+function classifyGenericCalls(code: string): ActionRisk[] {
+  const risks: ActionRisk[] = [];
+  const apiCallRegex = /api\.call\(\s*['"][^'"]+['"]\s*,\s*['"](GET|POST|PUT|PATCH|DELETE)['"]/gi;
+  let m: RegExpExecArray | null;
+  while ((m = apiCallRegex.exec(code)) !== null) {
+    const method = m[1].toUpperCase();
+    if (method === 'GET') risks.push('read');
+    else if (method === 'DELETE') risks.push('write_irreversible');
+    else risks.push('write_reversible'); // POST/PUT/PATCH via the generic helper
+  }
+  if (code.includes('requests.post') || code.includes('_request("POST"')) {
+    risks.push('write_reversible');
+  }
+  return risks;
+}
+
+export function classifyAgentActions(code: string): { hasWriteOps: boolean; writeRisk: ActionRisk } {
+  const matchedRisks: ActionRisk[] = ACTION_PATTERNS
+    .filter(({ pattern }) => code.includes(pattern))
+    .map(({ risk }) => risk);
+  matchedRisks.push(...classifyGenericCalls(code));
+
+  const writeRisk: ActionRisk = matchedRisks.includes('write_irreversible')
+    ? 'write_irreversible'
+    : matchedRisks.includes('write_reversible')
+      ? 'write_reversible'
+      : 'read';
+
+  return { hasWriteOps: writeRisk !== 'read', writeRisk };
+}
+
+// ── PHASE 2: REAL SIDE EFFECTS ──────────────────────────────────────────
+// Executes the validated pythonCode for real (no AF_DRY_RUN), merging Phase 1
+// artifacts into the result. Falls back to the dry-run output unchanged if
+// the real run fails to create/execute — Phase 1 already validated the data,
+// so a Phase 2 infra failure shouldn't fail the whole agent.
+// Extracted into its own function so the resume-after-approval path can
+// invoke real execution for the first time at resume — previously the
+// stored payload was already the result of a real run that happened BEFORE
+// the human ever saw it, which defeats the point of asking for approval.
+async function runRealSideEffects(
+  pythonCode: string,
+  sandboxEnvs: Record<string, string>,
+  dryRunOutputJSON: string,
+  agentId: string
+): Promise<string> {
+  let finalOutputJSON = dryRunOutputJSON;
+  console.log(`[Agent ${agentId}] Phase 2: Executing real side effects...`);
+  try {
+    const finalEnvs = { ...sandboxEnvs };
+    delete finalEnvs['AF_DRY_RUN'];
+
+    const finalSandbox = await Sandbox.create({
+      apiKey: process.env.E2B_API_KEY,
+      timeoutMs: 120_000,
+    });
+
+    try {
+      const phase2Pkgs = getRequiredPackages(pythonCode);
+      const phase2PipCmd = `import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "--prefer-binary", "--no-cache-dir", "--disable-pip-version-check"] + ${JSON.stringify(phase2Pkgs)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)`;
+      await finalSandbox.runCode(phase2PipCmd, { envs: finalEnvs });
+
+      const { getSDKFiles } = await import('@/lib/sandbox/sdk-loader');
+      const sdkFiles2 = getSDKFiles();
+      for (const [filename, content] of Object.entries(sdkFiles2)) {
+        try {
+          await finalSandbox.files.write(`/home/user/agenticfactor/${filename}`, content);
+        } catch {
+          // non-fatal
+        }
+      }
+      await finalSandbox.runCode('import sys; sys.path.insert(0, "/home/user")', { envs: finalEnvs });
+
+      const finalWrapped = `import os, sys, json, base64
+try:
+    _b64 = os.environ.get('INPUT_CONTEXT_B64', '')
+    _input = base64.b64decode(_b64).decode('utf-8') if _b64 else '{}'
+    try:
+        _input_data = json.loads(_input, strict=False)
+    except:
+        cleaned = ''.join(c if ord(c) > 31 or c in '\\n\\r\\t' else ' ' for c in _input)
+        try:
+            _input_data = json.loads(cleaned)
+        except:
+            _input_data = {}
+except:
+    _input = '{}'
+    _input_data = {}
+
+import matplotlib
+matplotlib.use('Agg')
+
+${pythonCode}`.replace(/\x00/g, '');
+
+      const finalExec = await finalSandbox.runCode(finalWrapped, { envs: finalEnvs });
+      const finalStdout = finalExec.logs.stdout.join('\n').trim();
+
+      if (finalExec.error) {
+        console.error(`[Agent ${agentId}] Phase 2 (side effects) failed: ${finalExec.error.value}`);
+        // Don't fail the mission — data was already validated in Phase 1
+      } else {
+        console.log(`[Agent ${agentId}] Phase 2: Side effects executed successfully.`);
+        const cleanFinalStdout = finalStdout.split('\n').filter(line => !line.startsWith('__SIGNAL__:')).join('\n').trim();
+        if (cleanFinalStdout) {
+          try {
+            const parsed2 = robustJSONParse(cleanFinalStdout);
+            const parsed1 = JSON.parse(dryRunOutputJSON);
+            if (parsed1._artifacts) {
+              parsed2._artifacts = parsed1._artifacts;
+            }
+            finalOutputJSON = JSON.stringify(parsed2);
+            console.log(`[Agent ${agentId}] Phase 2 output replaced dry-run output with real data.`);
+          } catch {
+            console.warn(`[Agent ${agentId}] Phase 2 output not JSON, keeping Phase 1 output.`);
+          }
+        }
+      }
+    } finally {
+      await finalSandbox.kill().catch(() => {});
+    }
+  } catch (phase2Err: any) {
+    console.error(`[Agent ${agentId}] Phase 2 sandbox creation failed (non-fatal):`, phase2Err.message);
+  }
+  return finalOutputJSON;
+}
+
+// Short label of which external service an action targets — used by the
+// /approvals page to pick a display icon/description for the review queue.
+function inferActionTarget(code: string, agentRole: string): string {
+  const c = code.toLowerCase();
+  if (c.includes('gmail')) return 'gmail';
+  if (c.includes('sheet')) return 'sheets';
+  if (c.includes('calendar')) return 'calendar';
+  if (c.includes('drive.upload') || c.includes("'drive'")) return 'drive';
+  if (c.includes('linkedin')) return 'linkedin';
+  if (c.includes('twitter') || c.includes('post_tweet')) return 'twitter';
+  if (c.includes('slack')) return 'slack';
+  if (c.includes('github')) return 'github';
+  if (c.includes('notion')) return 'notion';
+  if (c.includes('facebook')) return 'facebook';
+  if (c.includes('instagram')) return 'instagram';
+  if (c.includes('discord')) return 'discord';
+  if (c.includes('whatsapp')) return 'whatsapp';
+  return agentRole.toLowerCase();
+}
+
 // Maps Python import names → the pip package(s) they require.
 // Used to install only what the script actually needs instead of the full set every time.
 function getRequiredPackages(code: string): string[] {
@@ -248,7 +442,7 @@ export async function executeAgent(
   expectedOutputFormat?: string
 ): Promise<AgentResult> {
   const supabase = createServiceClient();
-  
+
   // Log start
   await supabase.from('events').insert({
     tenant_id: tenantId,
@@ -257,6 +451,19 @@ export async function executeAgent(
     entity_id: agent.id,
     payload: { missionId, role: agent.role, inputContext },
   });
+
+  // Resolve the mission title once up front — used to give the /approvals
+  // queue real context (which mission this pending action belongs to)
+  // instead of relying on a join the page never did.
+  let missionTitle = 'Mission';
+  try {
+    const { data: missionRow } = await supabase
+      .from('missions')
+      .select('mission_json')
+      .eq('id', missionId)
+      .single();
+    if (missionRow?.mission_json?.title) missionTitle = missionRow.mission_json.title;
+  } catch { /* non-fatal — falls back to 'Mission' */ }
 
   // Build environment variables from tokens
   const envVars = tokens.reduce((acc, t) => {
@@ -291,8 +498,34 @@ export async function executeAgent(
       throw new Error('Action rejected by human.');
     }
     if (existingAction.status === 'approved' && existingAction.payload && existingAction.payload.output !== undefined) {
+      const approvedCode = existingAction.payload.pythonCode || agent.pythonScript || '';
+      const { hasWriteOps: approvedHasWriteOps } = classifyAgentActions(approvedCode);
+
+      if (approvedHasWriteOps) {
+        // The stored payload is the Phase 1 PREVIEW the human approved — the
+        // real side effect has not happened yet. Run it for real now, for
+        // the first time, instead of returning a result that was never seen
+        // before approval.
+        console.log(`[Agent ${agent.id}] Approved — executing the real action for the first time now.`);
+        const resumeEnvs: Record<string, string> = {};
+        if (inputContext) {
+          resumeEnvs['INPUT_CONTEXT_B64'] = Buffer.from(inputContext, 'utf-8').toString('base64');
+        }
+        for (const token of tokens) {
+          resumeEnvs[`${token.provider.toUpperCase()}_ACCESS_TOKEN`] = token.access_token;
+        }
+        if (process.env.TAVILY_API_KEY) resumeEnvs['TAVILY_API_KEY'] = process.env.TAVILY_API_KEY;
+        if (process.env.SERPAPI_KEY) resumeEnvs['SERPAPI_KEY'] = process.env.SERPAPI_KEY;
+        if (process.env.SENDGRID_API_KEY) resumeEnvs['SENDGRID_API_KEY'] = process.env.SENDGRID_API_KEY;
+        if (process.env.TWITTER_BEARER_TOKEN) resumeEnvs['TWITTER_BEARER_TOKEN'] = process.env.TWITTER_BEARER_TOKEN;
+        if (process.env.FACEBOOK_APP_ID) resumeEnvs['FACEBOOK_APP_ID'] = process.env.FACEBOOK_APP_ID;
+
+        const realOutput = await runRealSideEffects(approvedCode, resumeEnvs, existingAction.payload.output, agent.id);
+        return { output: realOutput, finalCode: approvedCode };
+      }
+
       console.log(`[Agent ${agent.id}] Resuming execution with approved payload.`);
-      return { output: existingAction.payload.output, finalCode: agent.pythonScript || '' };
+      return { output: existingAction.payload.output, finalCode: approvedCode };
     }
   }
 
@@ -592,22 +825,9 @@ CRITICAL FIX RULES (follow these EXACTLY):
     // ── SMART EXECUTION MODE: detect write ops before any sandbox is allocated ──
     // Write agents:    Phase 1 (dry run, AF_DRY_RUN=1) validates safety → Phase 2 executes real side effects.
     // Read-only agents: bypass dry run entirely — one sandbox, direct execution. ~50% fewer sandbox launches.
-    const hasWriteOps =
-      pythonCode.includes('gmail.send') || pythonCode.includes('sheets.create') ||
-      pythonCode.includes('calendar.create') || pythonCode.includes('drive.upload') ||
-      pythonCode.includes('gmail.draft') || pythonCode.includes('api.call') ||
-      pythonCode.includes('api.slack_send') || pythonCode.includes('api.linkedin_post') ||
-      pythonCode.includes('sheets.update') || pythonCode.includes('sheets.append') ||
-      pythonCode.includes('social.post_linkedin') || pythonCode.includes('social.post_tweet') ||
-      pythonCode.includes('social.post_facebook') || pythonCode.includes('social.post_instagram') ||
-      pythonCode.includes('social.post_to_all') || pythonCode.includes('social.delete_tweet') ||
-      pythonCode.includes('social.delete_linkedin_post') || pythonCode.includes('social.delete_facebook_post') ||
-      pythonCode.includes('api.github_create_issue') || pythonCode.includes('api.notion_create_page') ||
-      pythonCode.includes('_request("POST"') || pythonCode.includes('_request("PUT"') ||
-      pythonCode.includes('_request("PATCH"') || pythonCode.includes('_request("DELETE"') ||
-      pythonCode.includes('requests.post') || pythonCode.includes('requests.put') ||
-      pythonCode.includes('requests.patch') || pythonCode.includes('requests.delete') ||
-      pythonCode.includes('notify_user') || pythonCode.includes('ask_user');
+    // hasWriteOps drives the dry-run/real-run split below; writeRisk is the
+    // finer-grained signal (reversible vs irreversible) used by the approval gate.
+    const { hasWriteOps, writeRisk } = classifyAgentActions(pythonCode);
 
     try {
       console.log(`[Agent ${agent.id}] Sandbox attempt ${attempts} — ${hasWriteOps ? 'write-ops: dry-run → real-run (2 sandboxes)' : 'read-only: direct single-run (1 sandbox)'}...`);
@@ -961,176 +1181,89 @@ Respond: {"valid": boolean, "reason": "string if invalid"}
           console.log(`[Agent ${agent.id}] Validation passed!`);
         }
 
-        // ═══ PHASE 2: REAL SIDE EFFECTS ═══
-        // hasWriteOps is already computed above before sandbox creation.
-        // Only write-op agents reach here with hasWriteOps=true.
-        if (hasWriteOps) {
-          console.log(`[Agent ${agent.id}] Phase 2: Executing real side effects (write-ops confirmed)...`);
-          try {
-            // Remove the dry-run flag for the final execution
-            const finalEnvs = { ...sandboxEnvs };
-            delete finalEnvs['AF_DRY_RUN'];
-
-            const finalSandbox = await Sandbox.create({
-              apiKey: process.env.E2B_API_KEY,
-              timeoutMs: 120_000,
-            });
-
-            try {
-              // Install only the packages this script actually imports (same set as Phase 1)
-              const phase2Pkgs = getRequiredPackages(pythonCode);
-              const phase2PipCmd = `import subprocess, sys; subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "--prefer-binary", "--no-cache-dir", "--disable-pip-version-check"] + ${JSON.stringify(phase2Pkgs)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)`;
-              await finalSandbox.runCode(phase2PipCmd, { envs: finalEnvs });
-
-              // Install SDK
-              const { getSDKFiles } = await import('@/lib/sandbox/sdk-loader');
-              const sdkFiles2 = getSDKFiles();
-              for (const [filename, content] of Object.entries(sdkFiles2)) {
-                try {
-                  await finalSandbox.files.write(`/home/user/agenticfactor/${filename}`, content);
-                } catch (e) {
-                  // non-fatal
-                }
-              }
-              await finalSandbox.runCode('import sys; sys.path.insert(0, "/home/user")', { envs: finalEnvs });
-
-              // Build the same wrapped code
-              const finalWrapped = `import os, sys, json, base64
-try:
-    _b64 = os.environ.get('INPUT_CONTEXT_B64', '')
-    _input = base64.b64decode(_b64).decode('utf-8') if _b64 else '{}'
-    try:
-        _input_data = json.loads(_input, strict=False)
-    except:
-        cleaned = ''.join(c if ord(c) > 31 or c in '\\n\\r\\t' else ' ' for c in _input)
-        try:
-            _input_data = json.loads(cleaned)
-        except:
-            _input_data = {}
-except:
-    _input = '{}'
-    _input_data = {}
-
-import matplotlib
-matplotlib.use('Agg')
-
-${pythonCode}`.replace(/\x00/g, '');
-
-              const finalExec = await finalSandbox.runCode(finalWrapped, { envs: finalEnvs });
-
-              const finalStdout = finalExec.logs.stdout.join('\n').trim();
-              const finalStderr = finalExec.logs.stderr.join('\n').trim();
-
-              if (finalExec.error) {
-                console.error(`[Agent ${agent.id}] Phase 2 (side effects) failed: ${finalExec.error.value}`);
-                // Don't fail the mission — data was already validated
-                // Just log the error and continue with the dry-run output
-              } else {
-                console.log(`[Agent ${agent.id}] Phase 2: Side effects executed successfully.`);
-                // Use the Phase 2 output (which has real email IDs, sheet URLs, etc.)
-                let cleanFinalStdout = finalStdout.split('\n').filter(line => !line.startsWith('__SIGNAL__:')).join('\n').trim();
-                if (cleanFinalStdout) {
-                  try {
-                    const parsed2 = robustJSONParse(cleanFinalStdout);
-                    // Merge artifacts from Phase 1 into Phase 2 output
-                    const parsed1 = JSON.parse(finalOutputJSON);
-                    if (parsed1._artifacts) {
-                      parsed2._artifacts = parsed1._artifacts;
-                    }
-                    finalOutputJSON = JSON.stringify(parsed2);
-                    console.log(`[Agent ${agent.id}] Phase 2 output replaced dry-run output with real data.`);
-                  } catch {
-                    console.warn(`[Agent ${agent.id}] Phase 2 output not JSON, keeping Phase 1 output.`);
-                  }
-                }
-              }
-            } finally {
-              await finalSandbox.kill().catch(() => {});
-            }
-          } catch (phase2Err: any) {
-            // Phase 2 failure is non-fatal — we already have validated data
-            console.error(`[Agent ${agent.id}] Phase 2 sandbox creation failed (non-fatal):`, phase2Err.message);
-          }
-        } else {
-          console.log(`[Agent ${agent.id}] No write operations detected — skipping Phase 2.`);
+        // ═══ MOCK OUTPUT DETECTION ═══
+        // Check if the Phase 1 output contains known mock/fake patterns that
+        // indicate the script fabricated results instead of making real API
+        // calls. Runs on the dry-run/preview output, before any approval
+        // gate or real execution — no point asking a human to review, or
+        // actually sending, something that was never real to begin with.
+        // This is a hard failure (not a warning) — it triggers the normal
+        // retry path so the LLM regenerates code with this error as context.
+        const outputStr = finalOutputJSON.toLowerCase();
+        const mockPatterns = [
+          'urn:li:activity:pending',
+          'urn:li:share:pending',
+          '"pending"',
+          '"placeholder"',
+          '"simulated"',
+          '"mock"',
+          '"attempted"',
+          '"example.com"',
+          '"fake_',
+          '"test_id"',
+          '"sample_id"',
+          '"dummy"',
+          'todo: implement',
+        ];
+        const detectedMocks = mockPatterns.filter(p => outputStr.includes(p));
+        if (detectedMocks.length > 0) {
+          console.warn(`[Agent ${agent.id}] ⚠️ MOCK OUTPUT DETECTED: ${detectedMocks.join(', ')}`);
+          throw new Error(
+            `Output contains fabricated/placeholder data instead of real API results. ` +
+            `Detected patterns: ${detectedMocks.join(', ')}. ` +
+            `You MUST call the actual SDK function and use its real returned values — never invent IDs, statuses, or placeholder text.`
+          );
         }
 
-        // ═══ MOCK OUTPUT DETECTION ═══
-        // Check if the output contains known mock/fake patterns that indicate
-        // the script fabricated results instead of making real API calls
-        try {
-          const outputStr = finalOutputJSON.toLowerCase();
-          const mockPatterns = [
-            'urn:li:activity:pending',
-            'urn:li:share:pending',
-            '"pending"',
-            '"placeholder"',
-            '"simulated"',
-            '"mock"',
-            '"attempted"',
-            '"example.com"',
-            '"fake_',
-            '"test_id"',
-            '"sample_id"',
-            '"dummy"',
-            'todo: implement',
-          ];
-          const detectedMocks = mockPatterns.filter(p => outputStr.includes(p));
-          if (detectedMocks.length > 0) {
-            console.warn(`[Agent ${agent.id}] ⚠️ MOCK OUTPUT DETECTED: ${detectedMocks.join(', ')}`);
-            console.warn(`[Agent ${agent.id}] This agent may have fabricated results instead of making real API calls.`);
-            // Don't fail the mission, but add a warning to the output
-            try {
-              const outputObj = JSON.parse(finalOutputJSON);
-              outputObj._mock_warning = `Potential mock output detected. Patterns: ${detectedMocks.join(', ')}. Verify this agent actually called the API.`;
-              finalOutputJSON = JSON.stringify(outputObj);
-            } catch { /* ignore if not valid JSON */ }
-          }
-        } catch { /* non-fatal */ }
+        // Short label of which external service this action targets, used
+        // by the /approvals page to pick an icon/description for the queue.
+        const actionTarget = inferActionTarget(pythonCode, agent.role);
 
-        // True Payload Approval: Pause AFTER execution if manual
-        if (agent.trustLevel === 'manual') {
-          console.log(`[Agent ${agent.id}] Trust level is manual. Pausing for human payload approval...`);
-          
+        // ═══ APPROVAL GATE — fires BEFORE Phase 2, using the Phase 1 preview ═══
+        // Read-only agents (hasWriteOps=false) never reach this gate at all —
+        // there is no real-world action to approve, only output to read.
+        // Manual trust always asks for write actions; conditional trust only
+        // asks when the action is irreversible. If neither applies, Phase 2
+        // runs immediately below with no pause.
+        const needsApproval = hasWriteOps && (
+          agent.trustLevel === 'manual' ||
+          (agent.trustLevel === 'conditional' && writeRisk === 'write_irreversible')
+        );
+
+        if (needsApproval) {
+          console.log(`[Agent ${agent.id}] Pausing for approval BEFORE the real action runs (trust: ${agent.trustLevel}, risk: ${writeRisk}).`);
+
           await supabase.from('proposed_actions').insert({
             tenant_id: tenantId,
             mission_id: missionId,
             agent_id: agent.id,
-            action_type: 'handoff_approval',
-            description: `Review output payload for agent ${agent.role} before handoff to next agent.`,
-            payload: { output: finalOutputJSON, pythonCode },
+            agent_role: agent.role,
+            mission_title: missionTitle,
+            action_type: agent.trustLevel === 'manual' ? 'handoff_approval' : 'conditional_risk_review',
+            description: agent.trustLevel === 'manual'
+              ? `Review the proposed action for agent ${agent.role} before it runs.`
+              : `⚠️ Irreversible action detected in agent "${agent.role}". Please review before it runs.`,
+            explanation: agent.trustLevel === 'manual'
+              ? `This agent's trust level is set to Manual, so every action it takes is reviewed before it runs — regardless of risk.`
+              : `This action can't be meaningfully undone once it runs (e.g. sending, posting, or deleting something external) — irreversible actions always require your review, even on agents you otherwise trust.`,
+            target: actionTarget,
+            risk_level: writeRisk === 'write_irreversible' ? 'high' : writeRisk === 'write_reversible' ? 'medium' : 'low',
+            reversible: writeRisk !== 'write_irreversible',
+            // This payload is the Phase 1 PREVIEW — nothing real has happened yet.
+            payload: { output: finalOutputJSON, pythonCode, writeRisk },
             status: 'pending'
           });
-          
+
           throw new Error('PausedForApproval');
         }
 
-        // Conditional trust: pause only for high-risk actions
-        if (agent.trustLevel === 'conditional') {
-          const outputLower = (finalOutputJSON + ' ' + pythonCode).toLowerCase();
-          const HIGH_RISK_PATTERNS = [
-            'calendar', 'create_event', 'schedule', 'send_email', 'send_message',
-            'delete_file', 'remove', 'payment', 'invoice', 'push', 'deploy',
-            'publish', 'offer_letter', 'git push', 'create_repo', 'transfer',
-          ];
-          const isHighRisk = HIGH_RISK_PATTERNS.some(p => outputLower.includes(p));
-          
-          if (isHighRisk) {
-            console.log(`[Agent ${agent.id}] Conditional trust: HIGH RISK detected. Pausing for approval.`);
-            
-            await supabase.from('proposed_actions').insert({
-              tenant_id: tenantId,
-              mission_id: missionId,
-              agent_id: agent.id,
-              action_type: 'conditional_risk_review',
-              description: `⚠️ High-risk action detected in agent "${agent.role}". Please review before continuing.`,
-              payload: { output: finalOutputJSON, pythonCode, riskPatterns: HIGH_RISK_PATTERNS.filter(p => outputLower.includes(p)) },
-              status: 'pending'
-            });
-            
-            throw new Error('PausedForApproval');
-          }
-          console.log(`[Agent ${agent.id}] Conditional trust: low risk, auto-approved.`);
+        // No approval needed — proceed to Phase 2 if this agent has write ops
+        // (read-only agents and reversible-write agents under conditional
+        // trust, plus any agent under autonomous trust, land here directly).
+        if (hasWriteOps) {
+          finalOutputJSON = await runRealSideEffects(pythonCode, sandboxEnvs, finalOutputJSON, agent.id);
+        } else {
+          console.log(`[Agent ${agent.id}] No write operations detected — skipping Phase 2.`);
         }
 
         await supabase.from('events').insert({

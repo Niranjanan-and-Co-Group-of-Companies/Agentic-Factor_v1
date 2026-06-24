@@ -42,10 +42,11 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServiceClient();
 
-    // Find the mission_id first since the frontend might pass the title
+    // Find the mission_id first since the frontend might pass the title.
+    // Also grab the fields needed to compute this action's pattern key.
     const { data: actionData } = await supabase
       .from('proposed_actions')
-      .select('mission_id')
+      .select('mission_id, agent_id, agent_role, target, action_type')
       .eq('id', actionId)
       .single();
 
@@ -81,6 +82,24 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.warn('[approvals] DB update skipped:', error.message);
+    } else {
+      // Log this decision against its action-pattern — the data foundation
+      // for eventually letting an agent graduate to autonomous for a
+      // specific, consistently-approved kind of action. A pattern key is
+      // tenant + agent role + target service, since agents aren't yet
+      // reusable templates with a stable identity of their own.
+      const patternKey = `${tenantId}:${(actionData?.agent_role || 'unknown').toLowerCase()}:${(actionData?.target || 'unknown').toLowerCase()}`;
+      const { error: historyErr } = await supabase.from('approval_history').insert({
+        tenant_id: tenantId,
+        proposed_action_id: actionId,
+        agent_id: actionData?.agent_id,
+        mission_id: actualMissionId,
+        pattern_key: patternKey,
+        agent_role: actionData?.agent_role,
+        action_type: actionData?.action_type,
+        decision,
+      });
+      if (historyErr) console.warn('[approvals] approval_history insert skipped:', historyErr.message);
     }
 
     // If approved, signal the orchestrator to continue the agent

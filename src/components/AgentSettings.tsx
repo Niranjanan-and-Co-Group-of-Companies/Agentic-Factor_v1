@@ -18,9 +18,9 @@ interface AgentSettingsProps {
 }
 
 const TRUST_CONFIG: Record<TrustLevel, { label: string; icon: string; desc: string; color: string }> = {
-  manual: { label: "Manual (HITL)", icon: "🛑", desc: "Every action requires human approval", color: "var(--amber)" },
-  conditional: { label: "Conditional", icon: "💬", desc: "Ask before boundary decisions", color: "var(--accent)" },
-  autonomous: { label: "Full Auto", icon: "⚡", desc: "Agent executes autonomously", color: "var(--emerald)" },
+  manual: { label: "Manual (HITL)", icon: "🛑", desc: "Pauses for approval before write actions; research/lookup steps never pause", color: "var(--amber)" },
+  conditional: { label: "Conditional", icon: "💬", desc: "Only pauses for irreversible actions (send, post, delete)", color: "var(--accent)" },
+  autonomous: { label: "Full Auto", icon: "⚡", desc: "Never pauses, including for irreversible actions", color: "var(--emerald)" },
 };
 
 export default function AgentSettings({ agentRole, currentTrust, onTrustChange, successScore, status }: AgentSettingsProps) {
