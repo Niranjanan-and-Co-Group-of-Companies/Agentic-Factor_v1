@@ -746,7 +746,8 @@ export async function editBlueprint(
 // ============================================================
 export async function persistMission(
   mission: Mission,
-  tenantId: string
+  tenantId: string,
+  trainingMode: boolean = true
 ): Promise<Mission> {
   const supabase = createServiceClient();
 
@@ -759,6 +760,7 @@ export async function persistMission(
     status: 'active',
     mission_json: mission, // Will update this after agent IDs are generated
     heartbeat_at: new Date().toISOString(),
+    training_enabled: trainingMode,
   }).select('id').single();
 
   if (missionError || !missionData) {

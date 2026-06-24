@@ -288,10 +288,10 @@ function MissionCreatorInner() {
 
   // ── Phase 2: Confirm Blueprint ──
   // If logged in → save directly. If guest → show auth popup.
-  const handleConfirmClick = () => {
+  const handleConfirmClick = (trainingMode: boolean = true) => {
     if (isAuthenticated) {
       // Already logged in — skip popup, save directly
-      persistBlueprint();
+      persistBlueprint(trainingMode);
     } else {
       // Guest — store blueprint and show auth popup
       if (blueprint) {
@@ -310,7 +310,7 @@ function MissionCreatorInner() {
   };
 
   // Save blueprint to DB (called by both logged-in and post-auth flows)
-  const persistBlueprint = async () => {
+  const persistBlueprint = async (trainingMode: boolean = true) => {
     if (!blueprint) return;
     setLoading(true); setError("");
     try {
@@ -339,7 +339,7 @@ function MissionCreatorInner() {
       const res = await fetch("/api/missions?action=confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mission: payloadMission }),
+        body: JSON.stringify({ mission: payloadMission, trainingMode }),
         credentials: "include", // Send Supabase session cookies for real user ID
       });
       let data: any;
@@ -529,13 +529,19 @@ function MissionCreatorInner() {
               <h1 className="page-title">📐 Blueprint Review</h1>
               <p className="page-subtitle">Review the strategy. Edit agents, set trust levels, and attach reference files.</p>
             </div>
-            <div className="row">
+            <div className="row" style={{ alignItems: "center" }}>
               <button className="btn btn-ghost" onClick={() => setPhase("input")}>← Back</button>
-              <button className="btn btn-primary btn-lg" onClick={handleConfirmClick} disabled={loading}>
-                {loading ? "🔒 Provisioning..." : "✓ Confirm Blueprint"}
+              <button className="btn btn-ghost btn-sm" onClick={() => handleConfirmClick(false)} disabled={loading} title="Go live immediately, no rehearsal runs">
+                Skip — Go Live Immediately
+              </button>
+              <button className="btn btn-primary btn-lg" onClick={() => handleConfirmClick(true)} disabled={loading}>
+                {loading ? "🔒 Provisioning..." : "🎓 Start in Training Mode"}
               </button>
             </div>
           </div>
+          <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "var(--space-sm)", textAlign: "right" }}>
+            Training Mode rehearses up to 5 runs — every action is previewed for your review, nothing actually sends or fires until you graduate to live.
+          </p>
         </div>
         {error && <div style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem" }}>❌ {error}</div>}
 

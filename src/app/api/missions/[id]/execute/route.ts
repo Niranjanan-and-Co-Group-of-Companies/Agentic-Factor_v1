@@ -113,6 +113,18 @@ export async function POST(
           .eq('tenant_id', tenantId)
           .eq('event_type', 'agent.completed')
           .in('entity_id', agentIds);
+
+        // Also clear any stale proposed_actions from the previous run — without
+        // this, executeAgent() finds the old row before doing anything else and
+        // short-circuits on it (re-pausing on 'pending', hard-failing on
+        // 'rejected', or worst of all, re-running the real side effect again
+        // on 'approved' — e.g. re-sending the same email). "Fresh start" must
+        // mean no leftover decision carries over, not just no leftover output.
+        await supabase
+          .from('proposed_actions')
+          .delete()
+          .eq('tenant_id', tenantId)
+          .eq('mission_id', missionId);
       }
     }
 

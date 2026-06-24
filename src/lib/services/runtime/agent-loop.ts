@@ -483,18 +483,23 @@ export async function executeAgent(
     payload: { missionId, role: agent.role, inputContext },
   });
 
-  // Resolve the mission title once up front — used to give the /approvals
-  // queue real context (which mission this pending action belongs to)
-  // instead of relying on a join the page never did.
+  // Resolve the mission title and training-mode status once up front — title
+  // gives the /approvals queue real context, training status decides whether
+  // every write action must be reviewed regardless of trust level (and never
+  // actually executed) for this run.
   let missionTitle = 'Mission';
+  let isTrainingMode = false;
+  let trainingRunNumber = 0;
   try {
     const { data: missionRow } = await supabase
       .from('missions')
-      .select('mission_json')
+      .select('mission_json, training_enabled, training_runs_completed')
       .eq('id', missionId)
       .single();
     if (missionRow?.mission_json?.title) missionTitle = missionRow.mission_json.title;
-  } catch { /* non-fatal — falls back to 'Mission' */ }
+    isTrainingMode = missionRow?.training_enabled === true;
+    trainingRunNumber = (missionRow?.training_runs_completed ?? 0) + 1;
+  } catch { /* non-fatal — falls back to 'Mission', training mode off */ }
 
   // Build environment variables from tokens
   const envVars = tokens.reduce((acc, t) => {
@@ -512,7 +517,7 @@ export async function executeAgent(
   // Check if we are resuming an approved manual action
   const { data: existingAction } = await supabase
     .from('proposed_actions')
-    .select('status, payload')
+    .select('status, payload, action_type')
     .eq('tenant_id', tenantId)
     .eq('mission_id', missionId)
     .eq('agent_id', agent.id)
@@ -531,6 +536,14 @@ export async function executeAgent(
     if (existingAction.status === 'approved' && existingAction.payload && existingAction.payload.output !== undefined) {
       const approvedCode = existingAction.payload.pythonCode || agent.pythonScript || '';
       const { hasWriteOps: approvedHasWriteOps } = classifyAgentActions(approvedCode);
+
+      if (existingAction.action_type === 'training_review') {
+        // Training approval means "this preview looks correct" — it is NOT
+        // permission to actually fire the action. Continue the rehearsal
+        // with the dry-run output exactly as it was reviewed.
+        console.log(`[Agent ${agent.id}] Training review approved — continuing with preview output, no real action taken.`);
+        return { output: existingAction.payload.output, finalCode: approvedCode };
+      }
 
       if (approvedHasWriteOps) {
         // The stored payload is the Phase 1 PREVIEW the human approved — the
@@ -1253,16 +1266,24 @@ Respond: {"valid": boolean, "reason": "string if invalid"}
         // ═══ APPROVAL GATE — fires BEFORE Phase 2, using the Phase 1 preview ═══
         // Read-only agents (hasWriteOps=false) never reach this gate at all —
         // there is no real-world action to approve, only output to read.
-        // Manual trust always asks for write actions; conditional trust only
-        // asks when the action is irreversible. If neither applies, Phase 2
-        // runs immediately below with no pause.
+        // Training mode overrides trust level entirely: every write action is
+        // reviewed regardless of manual/conditional/autonomous, since the
+        // whole point is a safe rehearsal. Outside training, manual trust
+        // always asks for write actions; conditional trust only asks when
+        // the action is irreversible. If none of these apply, Phase 2 runs
+        // immediately below with no pause.
         const needsApproval = hasWriteOps && (
+          isTrainingMode ||
           agent.trustLevel === 'manual' ||
           (agent.trustLevel === 'conditional' && writeRisk === 'write_irreversible')
         );
 
         if (needsApproval) {
-          console.log(`[Agent ${agent.id}] Pausing for approval BEFORE the real action runs (trust: ${agent.trustLevel}, risk: ${writeRisk}).`);
+          console.log(`[Agent ${agent.id}] Pausing for approval BEFORE the real action runs (training: ${isTrainingMode}, trust: ${agent.trustLevel}, risk: ${writeRisk}).`);
+
+          const actionType = isTrainingMode
+            ? 'training_review'
+            : agent.trustLevel === 'manual' ? 'handoff_approval' : 'conditional_risk_review';
 
           await supabase.from('proposed_actions').insert({
             tenant_id: tenantId,
@@ -1270,18 +1291,22 @@ Respond: {"valid": boolean, "reason": "string if invalid"}
             agent_id: agent.id,
             agent_role: agent.role,
             mission_title: missionTitle,
-            action_type: agent.trustLevel === 'manual' ? 'handoff_approval' : 'conditional_risk_review',
-            description: agent.trustLevel === 'manual'
-              ? `Review the proposed action for agent ${agent.role} before it runs.`
-              : `⚠️ Irreversible action detected in agent "${agent.role}". Please review before it runs.`,
-            explanation: agent.trustLevel === 'manual'
-              ? `This agent's trust level is set to Manual, so every action it takes is reviewed before it runs — regardless of risk.`
-              : `This action can't be meaningfully undone once it runs (e.g. sending, posting, or deleting something external) — irreversible actions always require your review, even on agents you otherwise trust.`,
+            action_type: actionType,
+            description: isTrainingMode
+              ? `🎓 Training run ${trainingRunNumber} — review what agent "${agent.role}" would do.`
+              : agent.trustLevel === 'manual'
+                ? `Review the proposed action for agent ${agent.role} before it runs.`
+                : `⚠️ Irreversible action detected in agent "${agent.role}". Please review before it runs.`,
+            explanation: isTrainingMode
+              ? `This mission is in Training Mode — nothing actually sends or fires yet. This is a preview only; approving it just confirms the result looks right and continues the rehearsal.`
+              : agent.trustLevel === 'manual'
+                ? `This agent's trust level is set to Manual, so every action it takes is reviewed before it runs — regardless of risk.`
+                : `This action can't be meaningfully undone once it runs (e.g. sending, posting, or deleting something external) — irreversible actions always require your review, even on agents you otherwise trust.`,
             target: actionTarget,
             risk_level: writeRisk === 'write_irreversible' ? 'high' : writeRisk === 'write_reversible' ? 'medium' : 'low',
             reversible: writeRisk !== 'write_irreversible',
             // This payload is the Phase 1 PREVIEW — nothing real has happened yet.
-            payload: { output: finalOutputJSON, pythonCode, writeRisk },
+            payload: { output: finalOutputJSON, pythonCode, writeRisk, runNumber: isTrainingMode ? trainingRunNumber : undefined },
             status: 'pending'
           });
 

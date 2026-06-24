@@ -28,6 +28,103 @@ function getSupabase() {
   );
 }
 
+// Human-friendly labels for common field names found in agent output, so the
+// approval card reads like "Subject: ..." / "Message: ..." instead of raw JSON.
+const PREVIEW_FIELD_LABELS: Record<string, string> = {
+  to: "To", recipient: "To", recipients: "To", cc: "Cc", bcc: "Bcc",
+  subject: "Subject", title: "Title", summary: "Summary",
+  body: "Message", message: "Message", content: "Content", text: "Text",
+  html_body: "Message", caption: "Caption", url: "Link", link: "Link",
+  image_url: "Image", meetlink: "Meet Link", location: "Location",
+  start: "Start", end: "End", attendees: "Attendees",
+};
+
+function prettyFieldLabel(key: string): string {
+  return PREVIEW_FIELD_LABELS[key.toLowerCase()] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Renders whatever an agent's proposed action actually contains — an email,
+// a document, an image, a table, or a plain object — directly in the
+// approval card, instead of leaving the customer to guess from a generic
+// "Send emails on your behalf" label. Shapes vary per agent/mission since
+// they're LLM-generated, so this renders generically rather than assuming
+// one fixed schema.
+function ActionPreview({ action }: { action: any }) {
+  let parsed: any = null;
+  try {
+    const raw = action.payload?.output;
+    parsed = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : null;
+  } catch {
+    parsed = null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+
+  // Surface failures clearly — reviewing "what would this send" matters
+  // most when the agent itself reported something went wrong.
+  if (parsed.error) {
+    return (
+      <div style={{ padding: "var(--space-md)", background: "hsla(0,84%,60%,0.08)", border: "1px solid hsla(0,84%,60%,0.3)", borderRadius: "var(--radius-sm)", marginBottom: "var(--space-md)" }}>
+        <div style={{ fontWeight: 600, fontSize: "0.8rem", color: "var(--rose)", marginBottom: 4 }}>⚠️ This action hit an error and may not complete correctly:</div>
+        <div style={{ fontSize: "0.78rem", color: "var(--text-secondary)", fontFamily: "monospace", whiteSpace: "pre-wrap" }}>{String(parsed.error)}</div>
+      </div>
+    );
+  }
+
+  // An array (or a field containing one) of records — render as a table
+  const arrayEntry = Object.entries(parsed).find(([, v]) => Array.isArray(v) && v.length > 0 && typeof v[0] === "object");
+  const rows: any[] | null = Array.isArray(parsed) ? parsed : arrayEntry ? (arrayEntry[1] as any[]) : null;
+  if (rows && rows.length > 0) {
+    const columns = Object.keys(rows[0] || {}).slice(0, 5);
+    return (
+      <div style={{ padding: "var(--space-md)", background: "var(--bg-glass)", borderRadius: "var(--radius-sm)", marginBottom: "var(--space-md)", overflowX: "auto" }}>
+        <table style={{ width: "100%", fontSize: "0.78rem", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>{columns.map((c) => <th key={c} style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid var(--border)", color: "var(--text-muted)" }}>{prettyFieldLabel(c)}</th>)}</tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 8).map((row, i) => (
+              <tr key={i}>{columns.map((c) => <td key={c} style={{ padding: "4px 8px", borderBottom: "1px solid var(--border)" }}>{String(row[c] ?? "")}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.length > 8 && <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 4 }}>+ {rows.length - 8} more rows</div>}
+      </div>
+    );
+  }
+
+  // Flat object — render each field as a labeled row; images get a real
+  // thumbnail, links get a real <a>, long text gets a highlighted block.
+  const entries = Object.entries(parsed).filter(([k, v]) => !k.startsWith("_") && v !== null && v !== undefined && v !== "");
+  if (entries.length === 0) return null;
+
+  return (
+    <div style={{ padding: "var(--space-md)", background: "var(--bg-glass)", borderRadius: "var(--radius-sm)", marginBottom: "var(--space-md)" }}>
+      {entries.map(([key, value]) => {
+        const label = prettyFieldLabel(key);
+        const strValue = Array.isArray(value) ? value.join(", ") : typeof value === "object" ? JSON.stringify(value) : String(value);
+        const isImage = /image|photo|picture|thumbnail/i.test(key) || /\.(png|jpe?g|gif|webp)(\?|$)/i.test(strValue);
+        const isLink = !isImage && typeof value === "string" && /^https?:\/\//.test(value);
+        const isLong = strValue.length > 80;
+
+        return (
+          <div key={key} style={{ marginBottom: "var(--space-sm)" }}>
+            <div style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>{label}</div>
+            {isImage ? (
+              <img src={strValue} alt={label} style={{ maxWidth: "100%", maxHeight: 200, borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }} />
+            ) : isLink ? (
+              <a href={strValue} target="_blank" rel="noopener noreferrer" style={{ fontSize: "0.85rem", color: "var(--accent)" }}>{strValue}</a>
+            ) : isLong ? (
+              <div style={{ fontSize: "0.85rem", padding: "var(--space-sm)", background: "var(--bg-secondary)", borderRadius: "var(--radius-sm)", borderLeft: "3px solid var(--accent)", whiteSpace: "pre-wrap" }}>{strValue}</div>
+            ) : (
+              <div style={{ fontSize: "0.85rem" }}>{strValue}</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // RenderNode and renderFinalOutput replaced by RichOutputViewer component
 
 
@@ -515,6 +612,27 @@ export default function MissionDetailPage() {
           </div>
           <div className="row">
             <span className="badge badge-purple" style={{ textTransform: "capitalize" }}>{mission.status}</span>
+            {mission.training_enabled && (
+              <>
+                <span className="badge badge-amber" title="Every write action is reviewed and nothing actually fires until this mission graduates to live">
+                  🎓 Training Run {(mission.training_runs_completed ?? 0) + 1} of {mission.training_runs_max ?? 5}
+                </span>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={async () => {
+                    if (!window.confirm("Skip the remaining training runs and go live now? Future actions will run normally based on each agent's trust level instead of always pausing for review.")) return;
+                    try {
+                      await fetch(`/api/missions/${missionId}/graduate`, { method: "POST" });
+                      setRefreshTrigger(t => t + 1);
+                    } catch {
+                      alert("Failed to graduate mission. Please try again.");
+                    }
+                  }}
+                >
+                  Skip Remaining & Go Live
+                </button>
+              </>
+            )}
             {mission.status === "draft" ? (
               <button className="btn btn-primary" onClick={handleStartMission} disabled={isStarting}>
                 {isStarting ? "Starting..." : "▶ Start Mission"}
@@ -940,20 +1058,74 @@ export default function MissionDetailPage() {
               else if (target.includes('tavily') || target.includes('search') || target.includes('web')) { icon = '🔍'; label = 'Search the web'; }
               else if (target.includes('twitter')) { icon = '🐦'; label = 'Post to Twitter/X'; }
               else if (target.includes('slack')) { icon = '💬'; label = 'Send Slack messages'; }
+
+              const isTraining = action.action_type === 'training_review';
+
+              // "Needs Correction" rejects the action (same mechanism as Deny)
+              // and, if a note is given, forwards it to the Chief of Staff so
+              // the existing blueprint-mutation capability can apply a fix
+              // before the next training run — no separate correction
+              // pipeline needed, this reuses what Phase 2 already built.
+              const handleTrainingCorrection = async () => {
+                const note = window.prompt("What's wrong with this, and what should happen instead?");
+                await handleAction(action.id, "rejected");
+                if (note && note.trim()) {
+                  try {
+                    const res = await fetch("/api/mission-chat", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        missionId,
+                        message: `During training run ${action.payload?.runNumber ?? ''}, agent "${action.agent_role}" proposed an action that needs correction: ${note.trim()}`,
+                      }),
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.reply) {
+                      setChatMessages(prev => [...prev, { role: "assistant", text: data.reply }]);
+                    }
+                  } catch {
+                    // Non-fatal — the rejection already went through regardless
+                  }
+                }
+              };
+
               return (
                 <div key={action.id} className="card animate-slide-in">
                   <div style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", padding: "var(--space-md)", marginBottom: "var(--space-sm)" }}>
                     <span style={{ fontSize: "2rem" }}>{icon}</span>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: "1rem", marginBottom: 2 }}>{label}</div>
+                    <div style={{ flex: 1 }}>
+                      <div className="row" style={{ justifyContent: "space-between" }}>
+                        <div style={{ fontWeight: 600, fontSize: "1rem", marginBottom: 2 }}>{label}</div>
+                        {isTraining ? (
+                          <span className="badge badge-amber" style={{ fontSize: "0.62rem" }}>🎓 Training Run {action.payload?.runNumber ?? '?'}</span>
+                        ) : action.reversible === false ? (
+                          <span className="badge badge-red" style={{ fontSize: "0.62rem" }}>⚠ Irreversible</span>
+                        ) : null}
+                      </div>
                       <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
                         {action.description || "This agent needs permission to proceed."}
                       </div>
+                      {action.explanation && (
+                        <div style={{ fontSize: "0.76rem", color: "var(--text-muted)", marginTop: 4 }}>{action.explanation}</div>
+                      )}
                     </div>
                   </div>
+
+                  {/* Actual reviewable content — email, doc, image, table, or raw output */}
+                  <ActionPreview action={action} />
+
                   <div className="row">
-                    <button className="btn btn-danger" onClick={() => handleAction(action.id, "rejected")}>❌ Deny</button>
-                    <button className="btn btn-primary" onClick={() => handleAction(action.id, "approved")}>✅ Allow</button>
+                    {isTraining ? (
+                      <>
+                        <button className="btn btn-danger" onClick={handleTrainingCorrection}>✏️ Needs Correction</button>
+                        <button className="btn btn-primary" onClick={() => handleAction(action.id, "approved")}>✅ Looks Good</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="btn btn-danger" onClick={() => handleAction(action.id, "rejected")}>❌ Deny</button>
+                        <button className="btn btn-primary" onClick={() => handleAction(action.id, "approved")}>✅ Allow</button>
+                      </>
+                    )}
                   </div>
                 </div>
               );

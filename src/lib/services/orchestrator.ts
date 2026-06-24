@@ -102,6 +102,40 @@ export async function transitionMissionStatus(
     throw new Error(`Failed to transition mission ${missionId} to ${newStatus}: ${error.message}`);
   }
 
+  // 1.5 Training Mode: a completed run counts toward the rehearsal total, and
+  // the mission auto-graduates to live once it hits the configured max.
+  // Non-fatal — a failure here must never block the real status transition.
+  if (newStatus === 'completed') {
+    try {
+      const { data: trainingRow } = await supabase
+        .from('missions')
+        .select('training_enabled, training_runs_completed, training_runs_max')
+        .eq('id', missionId)
+        .single();
+
+      if (trainingRow?.training_enabled) {
+        const newRunCount = (trainingRow.training_runs_completed ?? 0) + 1;
+        const maxRuns = trainingRow.training_runs_max ?? 5;
+        const graduated = newRunCount >= maxRuns;
+
+        await supabase
+          .from('missions')
+          .update({
+            training_runs_completed: newRunCount,
+            ...(graduated ? { training_enabled: false, training_graduated_at: new Date().toISOString() } : {}),
+          })
+          .eq('id', missionId)
+          .eq('tenant_id', tenantId);
+
+        if (graduated) {
+          console.log(`[orchestrator] Mission ${missionId} completed its ${newRunCount}th training run and auto-graduated to live.`);
+        }
+      }
+    } catch (trainingErr) {
+      console.warn(`[orchestrator] Training-run tracking failed for mission ${missionId} (non-fatal):`, trainingErr);
+    }
+  }
+
   // 2. Touch heartbeat (redundant with above, but ensures the function is exercised)
   await touchHeartbeat(missionId);
 

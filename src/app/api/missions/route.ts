@@ -20,6 +20,7 @@ const GenerateBlueprintRequest = z.object({
 
 const ConfirmBlueprintRequest = z.object({
   mission: z.record(z.string(), z.unknown()),
+  trainingMode: z.boolean().optional(),
 });
 
 const EditBlueprintRequest = z.object({
@@ -96,7 +97,7 @@ export async function POST(request: NextRequest) {
 
     // ── Phase 2: Confirm Blueprint (persist + provision) ──
     if (action === 'confirm') {
-      const { mission: rawMission } = ConfirmBlueprintRequest.parse(body);
+      const { mission: rawMission, trainingMode } = ConfirmBlueprintRequest.parse(body);
       const llmOutput = LLMOutputSchema.parse(rawMission);
 
       // ── Billing enforcement: credit-based checks ──
@@ -178,7 +179,7 @@ export async function POST(request: NextRequest) {
 
       // Persist blueprint — mission created in 'draft' status.
       // Agent provisioning (buildTeam) happens when the user clicks "Start Mission".
-      const persistedMission = await persistMission(mission, tenantId);
+      const persistedMission = await persistMission(mission, tenantId, trainingMode ?? true);
 
       return NextResponse.json({
         success: true,
