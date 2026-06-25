@@ -1,4 +1,4 @@
-import { callLLM } from '../llm-router';
+import { callLLM, generateEmbedding } from '../llm-router';
 import { executeTool } from '../tools';
 import { createServiceClient } from '@/lib/supabase/server';
 import { Sandbox } from '@e2b/code-interpreter';
@@ -1248,6 +1248,26 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
           const criticResult = await callLLM([{ role: 'user', content: criticPrompt }], { temperature: 0, jsonMode: true, tier: 3 });
           const criticParsed = robustJSONParse(criticResult.content);
           if (!criticParsed.valid) {
+            // Capture this as a feedback example before retrying — an
+            // AI-self-detected mistake is a lower-confidence signal than a
+            // human correction, but it's still real data on what commonly
+            // goes wrong for this kind of task. Non-fatal: a failure here
+            // must never block the retry this throw is about to trigger.
+            try {
+              const embedding = await generateEmbedding(`${agent.role}: ${criticParsed.reason}`);
+              if (embedding) {
+                await supabase.from('tenant_feedback_examples').insert({
+                  tenant_id: tenantId,
+                  source_mission_id: missionId,
+                  source: 'critic',
+                  agent_role: agent.role,
+                  problem_summary: criticParsed.reason,
+                  embedding,
+                });
+              }
+            } catch (feedbackErr) {
+              console.warn(`[Agent ${agent.id}] Feedback example capture failed (non-fatal):`, feedbackErr);
+            }
             throw new Error(`Output failed critic review. Reason: ${criticParsed.reason}`);
           }
           console.log(`[Agent ${agent.id}] Critic pass passed.`);

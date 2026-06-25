@@ -207,14 +207,42 @@ You MUST respond in valid JSON format matching this schema:
     if (parsedResponse.mutation_instruction) {
       console.log(`[Chief of Staff] Triggering blueprint mutation: ${parsedResponse.mutation_instruction}`);
       const updatedBlueprint = await editBlueprint(missionRow.mission_json, parsedResponse.mutation_instruction);
-      
+
       await supabase
         .from('missions')
         .update({ mission_json: updatedBlueprint })
         .eq('id', missionId)
         .eq('tenant_id', tenantId);
-        
+
       parsedResponse.reply += '\n\n*(Mission architecture has been dynamically updated based on your request!)*';
+
+      // Capture this as a feedback example — a human asking the Chief of
+      // Staff to change something is the highest-quality "this was wrong"
+      // signal available, better than an AI-self-detected one. Future
+      // blueprint generation searches this so similar requests don't repeat
+      // the same mistake. Awaited deliberately, not fire-and-forget — a
+      // detached promise here could be killed mid-flight the moment this
+      // serverless function returns its response, silently losing the data
+      // Phase 6 exists to capture. A try/catch keeps a failure here from
+      // affecting the chat reply itself.
+      try {
+        const { generateEmbedding } = await import('@/lib/services/llm-router');
+        const summaryText = `${pendingAction?.agent_role ? `Agent "${pendingAction.agent_role}": ` : ''}${message}`;
+        const embedding = await generateEmbedding(summaryText);
+        if (embedding) {
+          await supabase.from('tenant_feedback_examples').insert({
+            tenant_id: tenantId,
+            source_mission_id: missionId,
+            source: 'human_correction',
+            agent_role: pendingAction?.agent_role || null,
+            problem_summary: message,
+            correction_note: parsedResponse.mutation_instruction,
+            embedding,
+          });
+        }
+      } catch (feedbackErr) {
+        console.warn('[Chief of Staff] Feedback example capture failed (non-fatal):', feedbackErr);
+      }
     }
 
     // If the user just gave a clear decision on the pending approval, act on it

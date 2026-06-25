@@ -380,6 +380,49 @@ async function searchAgentTemplates(
 }
 
 // ============================================================
+// Feedback Dataset: Search for past corrections to avoid repeating
+// ============================================================
+// Captured from two sources (see agent-loop.ts and mission-chat/route.ts):
+// a human correcting the Chief of Staff (high confidence), or the Phase 5
+// critic pass catching a wrong-but-plausible output (lower confidence, but
+// still real signal). This is "learning without training" — the actual
+// record of what went wrong before, fed back as prompt context instead of
+// just hoping the same mistake doesn't recur by chance.
+async function searchFeedbackExamples(
+  intent: string,
+  tenantId: string
+): Promise<string> {
+  try {
+    const embedding = await generateEmbedding(intent);
+    if (!embedding) return '';
+    const supabase = createServiceClient();
+
+    const { data: examples, error } = await supabase.rpc('match_feedback_examples', {
+      query_embedding: embedding,
+      match_tenant_id: tenantId,
+      match_threshold: 0.75,
+      match_count: 3,
+    });
+
+    if (error || !examples?.length) {
+      return '';
+    }
+
+    const context = examples
+      .map(
+        (e: { source: string; agent_role: string | null; problem_summary: string; correction_note: string | null }) =>
+          `- [${e.source === 'human_correction' ? 'customer correction' : 'self-detected issue'}]${e.agent_role ? ` Agent "${e.agent_role}"` : ''}: ${e.problem_summary}${e.correction_note ? ` → Fix applied: ${e.correction_note}` : ''}`
+      )
+      .join('\n');
+
+    return `\n\nKNOWN ISSUES from this tenant's past missions — avoid repeating these specific mistakes for similar requests:\n${context}`;
+  } catch {
+    // Feedback dataset is optional — gracefully degrade
+    return '';
+  }
+}
+
+// ============================================================
 // Phase 2.1: Global Tenant Memory (Extract and Retrieve)
 // ============================================================
 async function extractAndSaveTenantMemory(intent: string, tenantId: string): Promise<void> {
@@ -488,9 +531,10 @@ export async function generateMissionJSON(
   const { getPlanConfig } = await import('@/lib/middleware/billing');
   
   // Run ALL pre-checks in parallel instead of sequentially
-  const [memoryContext, agentTemplateContext, globalMemory, planConfig] = await Promise.all([
+  const [memoryContext, agentTemplateContext, feedbackContext, globalMemory, planConfig] = await Promise.all([
     searchSimilarMissions(intent, tenantId),
     searchAgentTemplates(intent, tenantId),
+    searchFeedbackExamples(intent, tenantId),
     retrieveTenantMemory(tenantId),
     getPlanConfig(tenantId),
   ]);
@@ -551,7 +595,7 @@ export async function generateMissionJSON(
 
   messages.push({
     role: 'user',
-    content: `Generate a Mission JSON for the following intent:\n\n"${intent}"${fileContext}${memoryContext}${agentTemplateContext}${globalMemory}`,
+    content: `Generate a Mission JSON for the following intent:\n\n"${intent}"${fileContext}${memoryContext}${agentTemplateContext}${feedbackContext}${globalMemory}`,
   });
 
   const llmResponse = await callLLM(
