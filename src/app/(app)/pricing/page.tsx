@@ -331,7 +331,7 @@ export default function PricingPage() {
               <div style={{ marginBottom: "var(--space-md)", padding: "var(--space-md)", background: "var(--bg-glass)", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }}>
                 <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.7 }}>
                   <p style={{ marginBottom: 8 }}>📧 <a href="mailto:enterprise@agenticfactor.io" style={{ color: "var(--accent)" }}>enterprise@agenticfactor.io</a></p>
-                  <p style={{ marginBottom: 8 }}>📞 +91-XXXX-XXXXXX</p>
+                  <p style={{ marginBottom: 8 }}>📞 <a href="tel:+919446415489" style={{ color: "var(--accent)" }}>+91 94464 15489</a></p>
                   <p style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Custom pricing, SLA, dedicated support, SSO/SAML, on-premise options.</p>
                 </div>
               </div>

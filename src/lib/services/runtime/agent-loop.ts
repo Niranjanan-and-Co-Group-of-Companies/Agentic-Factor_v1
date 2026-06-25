@@ -579,6 +579,16 @@ export async function executeAgent(
 
       console.log(`[Agent ${agent.id}] Resuming execution with approved payload.`);
       return { output: existingAction.payload.output, finalCode: approvedCode };
+    } else if (existingAction.status === 'approved') {
+      // Approved, but payload/output is missing — a malformed or
+      // manually-edited row. This used to silently fall through into the
+      // attempt loop below as if no existingAction existed at all, treating
+      // a real data-integrity problem as a no-op. Log it loudly and clear
+      // the row so it doesn't keep silently mismatching on every future
+      // call — the agent still gets a fresh attempt below, but the gap
+      // itself is now visible instead of hidden.
+      console.error(`[Agent ${agent.id}] Approved action row ${existingAction.id} is missing usable payload.output — data integrity issue. Clearing it and starting a fresh attempt.`);
+      await supabase.from('proposed_actions').delete().eq('id', existingAction.id);
     }
   }
 

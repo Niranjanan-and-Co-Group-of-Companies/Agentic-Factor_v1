@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { sendEmail, ADMIN_EMAIL } from '@/lib/services/email-notifications';
 
 export const maxDuration = 60;
 
@@ -33,6 +34,11 @@ export async function GET(request: NextRequest) {
   let healthy = 0;
   let down = 0;
   const results: { model: string; provider: string; status: string }[] = [];
+  // Only the models that just crossed INTO 'down' this run — not ones that
+  // were already down last check. Without this, an alert would fire on
+  // every single cron tick (every 30 minutes) for as long as a provider
+  // stays down, instead of once when it actually breaks.
+  const newlyDown: { model: string; provider: string }[] = [];
 
   for (const [, model] of unique) {
     try {
@@ -52,27 +58,47 @@ export async function GET(request: NextRequest) {
     } catch (err) {
       const newFailCount = (model.failure_count || 0) + 1;
       const newStatus = newFailCount >= 3 ? 'down' : 'degraded';
-      
+
       await supabase
         .from('llm_models')
         .update({ health_status: newStatus, failure_count: newFailCount, last_health_check: new Date().toISOString() })
         .eq('provider', model.provider)
         .eq('model_name', model.model_name);
-      
+
       down++;
       results.push({ model: model.model_name, provider: model.provider, status: newStatus });
       console.warn(`[HealthCheck] ${model.provider}/${model.model_name} failed: ${(err as Error).message}`);
+
+      if (newStatus === 'down' && model.health_status !== 'down') {
+        newlyDown.push({ model: model.model_name, provider: model.provider });
+      }
     }
   }
 
-  // Alert if any tier has ALL models down
-  // (Check later — for now just log)
-  if (down > 0) {
-    console.error(`[HealthCheck] ${down} model(s) are degraded/down!`);
-    // TODO: Send admin email alert
+  if (newlyDown.length > 0) {
+    console.error(`[HealthCheck] ${newlyDown.length} model(s) just went down: ${newlyDown.map(m => `${m.provider}/${m.model}`).join(', ')}`);
+    try {
+      const listHtml = newlyDown.map(m => `<li><strong>${m.provider}/${m.model}</strong></li>`).join('');
+      const listText = newlyDown.map(m => `- ${m.provider}/${m.model}`).join('\n');
+      await sendEmail({
+        to: ADMIN_EMAIL,
+        subject: `🔴 LLM Provider Down: ${newlyDown.map(m => m.provider).join(', ')}`,
+        htmlBody: `
+          <div style="font-family: Inter, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #ef4444;">🔴 LLM Provider Health Alert</h2>
+            <p>The following model(s) failed 3 consecutive health checks and are now marked <strong>down</strong>:</p>
+            <ul>${listHtml}</ul>
+            <p style="margin-top: 24px; color: #64748b;">callLLM() should still cascade to the remaining healthy providers automatically, but missions relying exclusively on a down provider/tier may fail until it recovers.</p>
+          </div>
+        `,
+        textBody: `LLM Provider Health Alert\n\nThe following model(s) failed 3 consecutive health checks and are now marked down:\n${listText}\n\ncallLLM() should still cascade to the remaining healthy providers automatically, but missions relying exclusively on a down provider/tier may fail until it recovers.`,
+      });
+    } catch (emailErr) {
+      console.error('[HealthCheck] Failed to send admin alert email (non-fatal):', emailErr);
+    }
   }
 
-  return NextResponse.json({ checked: unique.size, healthy, down, results });
+  return NextResponse.json({ checked: unique.size, healthy, down, newlyDown: newlyDown.length, results });
 }
 
 async function pingModel(provider: string, modelName: string): Promise<boolean> {

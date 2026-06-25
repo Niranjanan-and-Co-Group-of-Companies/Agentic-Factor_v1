@@ -125,6 +125,50 @@ function ActionPreview({ action }: { action: any }) {
   );
 }
 
+// Matches the exact preset list the scheduler cron understands (see
+// matchesSchedule() in /api/cron/scheduler/route.ts) — kept here only for
+// display, the picker itself already constrains selection to these values.
+const SCHEDULE_PRESET_LABELS: Record<string, string> = {
+  every_minute: "Every minute",
+  every_5_minutes: "Every 5 minutes",
+  every_hour: "Every hour",
+  daily_9am: "Daily at 9:00 AM",
+  daily_6pm: "Daily at 6:00 PM",
+  weekly_monday: "Every Monday at 9:00 AM",
+  weekly_friday: "Every Friday at 5:00 PM",
+};
+
+// Turns a stored scheduleConfig (preset string or custom {type:'custom', ...}
+// object) into a human-readable label — e.g. "Every Friday at 5:00 PM • 10
+// runs total" — instead of just a generic "Scheduled" badge with no detail
+// on what's actually configured.
+function formatScheduleConfig(config: unknown): string {
+  if (typeof config === "string") {
+    return SCHEDULE_PRESET_LABELS[config] || config;
+  }
+  if (config && typeof config === "object") {
+    const c = config as { type?: string; dayOfWeek?: string; time?: string; maxRuns?: number; endDate?: string };
+    if (c.type !== "custom") return "Custom schedule";
+    const dayLabel = !c.dayOfWeek || c.dayOfWeek === "everyday"
+      ? "Every day"
+      : `Every ${c.dayOfWeek.charAt(0).toUpperCase()}${c.dayOfWeek.slice(1)}`;
+    let timeLabel = "";
+    if (c.time) {
+      const [h, m] = c.time.split(":").map(Number);
+      const period = h >= 12 ? "PM" : "AM";
+      const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+      timeLabel = ` at ${h12}:${String(m).padStart(2, "0")} ${period}`;
+    }
+    const endLabel = c.maxRuns
+      ? ` • ${c.maxRuns} runs total`
+      : c.endDate
+        ? ` • until ${new Date(c.endDate).toLocaleDateString()}`
+        : "";
+    return `${dayLabel}${timeLabel}${endLabel}`;
+  }
+  return "Custom schedule";
+}
+
 // RenderNode and renderFinalOutput replaced by RichOutputViewer component
 
 
@@ -856,7 +900,15 @@ export default function MissionDetailPage() {
             {isScheduled && <span className="badge" style={{ background: "hsla(270,100%,70%,0.15)", color: "hsl(270,100%,70%)" }}>Scheduled</span>}
           </div>
           <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "var(--space-md)" }}>
-            {isScheduled ? "This mission is set to run on a recurring schedule. The cron system will automatically execute it at the configured time." : "Set this mission to run automatically on a recurring schedule."}
+            {isScheduled
+              ? (() => {
+                  const scheduledEvent = runHistory.find((r) => r.event_type === "mission.scheduled");
+                  const label = scheduledEvent?.payload?.scheduleConfig ? formatScheduleConfig(scheduledEvent.payload.scheduleConfig) : null;
+                  return label
+                    ? `This mission runs ${label}. The cron system will automatically execute it at the configured time.`
+                    : "This mission is set to run on a recurring schedule. The cron system will automatically execute it at the configured time.";
+                })()
+              : "Set this mission to run automatically on a recurring schedule."}
           </p>
           {!showSchedulePicker && !isScheduled && (
             <button className="btn btn-ghost" onClick={() => setShowSchedulePicker(true)}>📅 Set Schedule</button>
