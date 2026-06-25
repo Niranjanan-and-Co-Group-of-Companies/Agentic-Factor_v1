@@ -1204,34 +1204,53 @@ ${pythonCode}`;
           console.warn(`[Agent ${agent.id}] Artifact extraction failed (non-fatal):`, artifactErr.message);
         }
 
-        // --- PHASE 3: STRUCTURAL VALIDATION (Lenient) ---
-        if (isFinalAgent && expectedOutputFormat) {
-          console.log(`[Agent ${agent.id}] Validating final output against expected format...`);
-          const validationPrompt = `
-You are a LENIENT data validation agent.
-The user expected the output to roughly follow this schema:
-${expectedOutputFormat}
+        // --- PHASE 3: CRITIC PASS (every agent, not just the final one) ---
+        // This used to only run for the final agent and only check structural
+        // shape against expectedOutputFormat — every other agent's output was
+        // trusted with zero verification, so a wrong-but-plausible result
+        // (not fabricated, just incorrect) sailed straight through to the
+        // next agent. This runs for every agent and checks whether the
+        // output actually accomplishes that agent's own stated task, not
+        // just whether the JSON is shaped right. Still deliberately lenient
+        // on format — this is a correctness check, not a style check.
+        {
+          console.log(`[Agent ${agent.id}] Running critic pass on output...`);
+          const criticPrompt = `You are a strict but fair Critic reviewing an AI agent's work — not just whether its output is shaped correctly, but whether it actually accomplishes the task.
 
-The agent generated this JSON output:
+AGENT'S ROLE AND TASK:
+${agent.systemPrompt || agent.role}
+
+INPUT THE AGENT RECEIVED:
+${(inputContext || '').slice(0, 1500)}
+
+OUTPUT THE AGENT PRODUCED:
 ${finalOutputJSON}
+${isFinalAgent && expectedOutputFormat ? `
 
-VALIDATION RULES (be lenient):
-1. PASS if the core required fields from the schema are present (even if extra fields exist)
-2. PASS if the data types are correct for the core fields
-3. Extra keys are ALWAYS OK — agents often add useful metadata like "answer", "html_report", "summary", etc.
-4. Status values like "no_email", "failed:...", "skipped" are all valid — don't reject for status wording
-5. FAIL ONLY if REQUIRED core fields are completely missing or have wrong data types
-6. An empty array [] is valid for "results" if the search found nothing
-7. Do NOT reject for having MORE data than expected
+EXPECTED FINAL OUTPUT FORMAT:
+${expectedOutputFormat}` : ''}
 
-Respond: {"valid": boolean, "reason": "string if invalid"}
-          `;
-          const validationResult = await callLLM([{ role: 'user', content: validationPrompt }], { temperature: 0, jsonMode: true, tier: 3 });
-          const validationParsed = JSON.parse(validationResult.content);
-          if (!validationParsed.valid) {
-            throw new Error(`Output failed structural validation against the expected format. Reason: ${validationParsed.reason}`);
+FAIL if:
+- The output doesn't address what the agent was supposed to do at all
+- The output contradicts or ignores the input it was given
+- The content is generic or placeholder-like instead of reflecting the specific task${isFinalAgent && expectedOutputFormat ? `
+- Required core fields from the expected format are completely missing or have the wrong type` : ''}
+
+PASS if:
+- The output reasonably accomplishes the stated task, even if imperfect, sparse, or in an unexpected (but valid) format
+- An empty result is valid if the task is a search/lookup that legitimately found nothing
+- Extra fields, metadata, or differently-named-but-equivalent keys are always fine
+- Status values like "no_email", "failed:...", "skipped" are valid outcomes, not failures
+
+Be a real critic, not a rubber stamp — but don't be pedantic about minor formatting choices.
+
+Respond: {"valid": boolean, "reason": "string if invalid"}`;
+          const criticResult = await callLLM([{ role: 'user', content: criticPrompt }], { temperature: 0, jsonMode: true, tier: 3 });
+          const criticParsed = robustJSONParse(criticResult.content);
+          if (!criticParsed.valid) {
+            throw new Error(`Output failed critic review. Reason: ${criticParsed.reason}`);
           }
-          console.log(`[Agent ${agent.id}] Validation passed!`);
+          console.log(`[Agent ${agent.id}] Critic pass passed.`);
         }
 
         // ═══ MOCK OUTPUT DETECTION ═══
