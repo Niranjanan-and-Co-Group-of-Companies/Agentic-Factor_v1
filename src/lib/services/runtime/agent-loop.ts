@@ -517,7 +517,7 @@ export async function executeAgent(
   // Check if we are resuming an approved manual action
   const { data: existingAction } = await supabase
     .from('proposed_actions')
-    .select('status, payload, action_type')
+    .select('id, status, payload, action_type')
     .eq('tenant_id', tenantId)
     .eq('mission_id', missionId)
     .eq('agent_id', agent.id)
@@ -531,9 +531,18 @@ export async function executeAgent(
       throw new Error('PausedForApproval');
     }
     if (existingAction.status === 'rejected') {
-      throw new Error('Action rejected by human.');
-    }
-    if (existingAction.status === 'approved' && existingAction.payload && existingAction.payload.output !== undefined) {
+      // A rejection used to hard-fail this agent permanently — even after the
+      // human fixed the underlying issue (e.g. via a Chief of Staff
+      // correction), clicking Resume would just hit this same stale row and
+      // fail again forever, with Fresh Start (which restarts EVERY agent)
+      // as the only way out. Instead: clear the stale rejection and retry
+      // this agent fresh, using whatever the blueprint says now. This does
+      // not bypass any safety check — if the action is still a write action
+      // requiring approval, the normal approval gate fires again below and
+      // the human reviews it again before anything happens.
+      console.log(`[Agent ${agent.id}] Previous attempt was rejected — clearing it and retrying with the current blueprint.`);
+      await supabase.from('proposed_actions').delete().eq('id', existingAction.id);
+    } else if (existingAction.status === 'approved' && existingAction.payload && existingAction.payload.output !== undefined) {
       const approvedCode = existingAction.payload.pythonCode || agent.pythonScript || '';
       const { hasWriteOps: approvedHasWriteOps } = classifyAgentActions(approvedCode);
 

@@ -5,10 +5,101 @@ export interface TokenContext {
   access_token: string;
 }
 
+interface RefreshedToken {
+  access_token: string;
+  refresh_token?: string;
+  expires_in: number;
+}
+
+// Providers that issue a refresh_token and support the standard OAuth 2.0
+// "grant_type=refresh_token" flow. Twitter requires HTTP Basic Auth instead
+// of client_id/client_secret in the body — everything else uses body params.
+interface StandardRefreshConfig {
+  tokenUrl: string;
+  clientIdEnv: string;
+  clientSecretEnv: string;
+  useBasicAuth?: boolean;
+}
+
+const STANDARD_REFRESH_CONFIGS: Record<string, StandardRefreshConfig> = {
+  google: { tokenUrl: 'https://oauth2.googleapis.com/token', clientIdEnv: 'GOOGLE_CLIENT_ID', clientSecretEnv: 'GOOGLE_CLIENT_SECRET' },
+  slack: { tokenUrl: 'https://slack.com/api/oauth.v2.access', clientIdEnv: 'SLACK_CLIENT_ID', clientSecretEnv: 'SLACK_CLIENT_SECRET' },
+  linkedin_oidc: { tokenUrl: 'https://www.linkedin.com/oauth/v2/accessToken', clientIdEnv: 'LINKEDIN_CLIENT_ID', clientSecretEnv: 'LINKEDIN_CLIENT_SECRET' },
+  twitter: { tokenUrl: 'https://api.twitter.com/2/oauth2/token', clientIdEnv: 'TWITTER_CLIENT_ID', clientSecretEnv: 'TWITTER_CLIENT_SECRET', useBasicAuth: true },
+  discord: { tokenUrl: 'https://discord.com/api/oauth2/token', clientIdEnv: 'DISCORD_CLIENT_ID', clientSecretEnv: 'DISCORD_CLIENT_SECRET' },
+  zoho: { tokenUrl: 'https://accounts.zoho.com/oauth/v2/token', clientIdEnv: 'ZOHO_CLIENT_ID', clientSecretEnv: 'ZOHO_CLIENT_SECRET' },
+};
+
+async function refreshStandardOAuthToken(provider: string, refreshToken: string): Promise<RefreshedToken | null> {
+  const config = STANDARD_REFRESH_CONFIGS[provider];
+  if (!config) return null;
+
+  const clientId = process.env[config.clientIdEnv];
+  const clientSecret = process.env[config.clientSecretEnv];
+  if (!clientId || !clientSecret) {
+    console.error(`[OAuth Refresher] Missing ${config.clientIdEnv}/${config.clientSecretEnv} for ${provider}`);
+    return null;
+  }
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded' };
+  const body: Record<string, string> = { grant_type: 'refresh_token', refresh_token: refreshToken };
+
+  if (config.useBasicAuth) {
+    headers['Authorization'] = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`;
+  } else {
+    body.client_id = clientId;
+    body.client_secret = clientSecret;
+  }
+
+  const res = await fetch(config.tokenUrl, { method: 'POST', headers, body: new URLSearchParams(body) });
+  const data = await res.json();
+
+  // Slack returns HTTP 200 with `ok: false` on logical failure instead of an HTTP error status
+  if (!res.ok || data.ok === false || !data.access_token) {
+    console.error(`[OAuth Refresher] Failed to refresh ${provider} token: ${data.error_description || data.error || JSON.stringify(data)}`);
+    return null;
+  }
+
+  return {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token, // some providers omit this on refresh — caller keeps the old one
+    expires_in: data.expires_in ?? 3600,
+  };
+}
+
+// Facebook/Instagram (Graph API) don't use refresh_token at all — a still-valid
+// long-lived access token is re-exchanged for a new long-lived one via a
+// dedicated endpoint. Must be called before the current token actually expires.
+async function refreshFacebookLongLivedToken(currentAccessToken: string): Promise<RefreshedToken | null> {
+  const appId = process.env.FACEBOOK_APP_ID;
+  const appSecret = process.env.FACEBOOK_APP_SECRET;
+  if (!appId || !appSecret) {
+    console.error(`[OAuth Refresher] Missing FACEBOOK_APP_ID/FACEBOOK_APP_SECRET`);
+    return null;
+  }
+
+  const url = new URL('https://graph.facebook.com/v19.0/oauth/access_token');
+  url.searchParams.set('grant_type', 'fb_exchange_token');
+  url.searchParams.set('client_id', appId);
+  url.searchParams.set('client_secret', appSecret);
+  url.searchParams.set('fb_exchange_token', currentAccessToken);
+
+  const res = await fetch(url.toString());
+  const data = await res.json();
+
+  if (!res.ok || !data.access_token) {
+    console.error(`[OAuth Refresher] Failed to re-exchange Facebook/Instagram token: ${JSON.stringify(data.error || data)}`);
+    return null;
+  }
+
+  return { access_token: data.access_token, expires_in: data.expires_in ?? 5_184_000 }; // ~60 days default
+}
+
 /**
  * Validates and returns an active OAuth token for the tenant and provider.
- * If the token is expired but has a refresh_token, it silently refreshes it.
- * If the token is missing, fully expired, or revoked, it returns null.
+ * If the token is expired but can be refreshed, it silently refreshes it.
+ * If the token is missing, fully expired with no way to refresh, or revoked,
+ * it returns null.
  */
 export async function getValidTokens(tenantId: string, provider: string): Promise<TokenContext | null> {
   const supabase = createServiceClient();
@@ -31,64 +122,41 @@ export async function getValidTokens(tenantId: string, provider: string): Promis
     return { provider, access_token };
   }
 
-  // Token is expired. Do we have a refresh token?
-  if (!refresh_token) {
-    console.warn(`[OAuth Refresher] Token for ${provider} expired and no refresh token available.`);
-    return null;
-  }
-
   console.log(`[OAuth Refresher] Token for ${provider} expired. Attempting refresh...`);
 
   try {
-    let clientId = '';
-    let clientSecret = '';
+    let refreshed: RefreshedToken | null = null;
 
-    if (provider === 'google') {
-      clientId = process.env.GOOGLE_CLIENT_ID!;
-      clientSecret = process.env.GOOGLE_CLIENT_SECRET!;
+    if (provider === 'facebook' || provider === 'instagram') {
+      // Re-exchange needs the current access token, not a refresh_token, and
+      // only works if it hasn't fully expired yet (the 5-minute headroom above
+      // gives this a real chance to succeed before that happens).
+      refreshed = await refreshFacebookLongLivedToken(access_token);
+    } else if (STANDARD_REFRESH_CONFIGS[provider]) {
+      if (!refresh_token) {
+        console.warn(`[OAuth Refresher] Token for ${provider} expired and no refresh token available.`);
+        return null;
+      }
+      refreshed = await refreshStandardOAuthToken(provider, refresh_token);
     } else {
-      // Add other providers here (slack, etc.)
       console.error(`[OAuth Refresher] Unsupported provider for refresh: ${provider}`);
       return null;
     }
 
-    if (!clientId || !clientSecret) {
-      console.error(`[OAuth Refresher] Missing OAuth environment variables for ${provider}`);
+    if (!refreshed) {
       return null;
     }
 
-    // Attempt to refresh
-    const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refresh_token,
-        grant_type: 'refresh_token',
-      }),
-    });
-
-    const refreshData = await refreshRes.json();
-
-    if (!refreshRes.ok) {
-      console.error(`[OAuth Refresher] Failed to refresh token: ${refreshData.error_description || refreshData.error}`);
-      return null;
-    }
-
-    // Success! Update database
-    const newAccessToken = refreshData.access_token;
-    // Note: Google sometimes doesn't send a new refresh_token, keep the old one if so
-    const newRefreshToken = refreshData.refresh_token || refresh_token; 
-    const newExpiresAt = new Date(Date.now() + refreshData.expires_in * 1000).toISOString();
+    const newRefreshToken = refreshed.refresh_token || refresh_token;
+    const newExpiresAt = new Date(Date.now() + refreshed.expires_in * 1000).toISOString();
 
     const { error: updateError } = await supabase
       .from('tenant_permissions')
       .update({
-        access_token: newAccessToken,
+        access_token: refreshed.access_token,
         refresh_token: newRefreshToken,
         expires_at: newExpiresAt,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
       .eq('tenant_id', tenantId)
       .eq('provider', provider);
@@ -99,7 +167,7 @@ export async function getValidTokens(tenantId: string, provider: string): Promis
     }
 
     console.log(`[OAuth Refresher] Successfully refreshed token for ${provider}!`);
-    return { provider, access_token: newAccessToken };
+    return { provider, access_token: refreshed.access_token };
 
   } catch (err) {
     console.error(`[OAuth Refresher] Exception during token refresh:`, err);
@@ -115,9 +183,9 @@ export async function getValidTokens(tenantId: string, provider: string): Promis
  */
 export async function verifyMissionPermissions(missionId: string, tenantId: string): Promise<string[]> {
   const supabase = createServiceClient();
-  
+
   console.log(`[VerifyPermissions] Checking mission=${missionId}, tenant=${tenantId}`);
-  
+
   // 1. Fetch the mission
   const { data: missionData, error: missionError } = await supabase
     .from('missions')
@@ -132,9 +200,9 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
 
   const mission = missionData.mission_json;
   const requiredPermissions = mission.permissions || [];
-  
+
   console.log(`[VerifyPermissions] Required permissions:`, JSON.stringify(requiredPermissions));
-  
+
   if (requiredPermissions.length === 0) {
     console.log(`[VerifyPermissions] No permissions required — all clear`);
     return []; // No permissions required
@@ -215,7 +283,7 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
     .from('tenant_permissions')
     .select('provider, access_token, expires_at')
     .eq('tenant_id', tenantId);
-  
+
   if (permsError) {
     console.error(`[VerifyPermissions] ❌ Failed to query tenant_permissions: ${permsError.message}`);
   } else {
@@ -224,7 +292,7 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
 
   // 3. Verify each provider
   const missingProviders: string[] = [];
-  
+
   for (const provider of requiredProviders) {
     const token = await getValidTokens(tenantId, provider);
     if (!token) {
