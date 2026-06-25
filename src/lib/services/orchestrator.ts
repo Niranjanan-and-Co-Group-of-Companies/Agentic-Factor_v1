@@ -74,6 +74,79 @@ export interface BuildTeamResult {
 }
 
 // ============================================================
+// Agent Template Library — promotion on training graduation
+// ============================================================
+
+/**
+ * Promotes every agent in a mission that just graduated from Training Mode
+ * into the reusable agent_templates library. Finds a near-identical existing
+ * template for this tenant by embedding similarity (not just exact role-name
+ * match) and refreshes it if found, or creates a new one otherwise. Never
+ * throws — a failure here must not affect the graduation that already
+ * happened; the caller wraps this in its own non-fatal try/catch too.
+ */
+async function promoteAgentsToTemplateLibrary(
+  missionId: string,
+  tenantId: string,
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<void> {
+  const { data: missionRow } = await supabase
+    .from('missions')
+    .select('mission_json')
+    .eq('id', missionId)
+    .single();
+
+  const agents: AgentDefinition[] = missionRow?.mission_json?.agents || [];
+  if (agents.length === 0) return;
+
+  const { generateEmbedding } = await import('./llm-router');
+
+  for (const agent of agents) {
+    if (!agent.role || !agent.pythonScript) continue;
+
+    const embedding = await generateEmbedding(`${agent.role}: ${(agent.systemPrompt || '').slice(0, 200)}`);
+    if (!embedding) continue; // No embedding provider available — skip this agent, don't fail graduation
+
+    const { data: similar } = await supabase.rpc('match_agent_templates', {
+      query_embedding: embedding,
+      match_tenant_id: tenantId,
+      match_threshold: 0.92, // much stricter than retrieval — this is "is it basically the same agent"
+      match_count: 1,
+    });
+
+    if (similar && similar.length > 0) {
+      const existing = similar[0];
+      await supabase
+        .from('agent_templates')
+        .update({
+          system_prompt: agent.systemPrompt || '',
+          python_script: agent.pythonScript,
+          tools: agent.tools || [],
+          capabilities: agent.capabilities || [],
+          trust_level: agent.trustLevel || 'conditional',
+          success_count: (existing.success_count ?? 1) + 1,
+          last_used_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id);
+      console.log(`[orchestrator] Refreshed agent template for "${agent.role}" (now used ${(existing.success_count ?? 1) + 1} times).`);
+    } else {
+      await supabase.from('agent_templates').insert({
+        tenant_id: tenantId,
+        source_mission_id: missionId,
+        role: agent.role,
+        system_prompt: agent.systemPrompt || '',
+        python_script: agent.pythonScript,
+        tools: agent.tools || [],
+        capabilities: agent.capabilities || [],
+        trust_level: agent.trustLevel || 'conditional',
+        embedding,
+      });
+      console.log(`[orchestrator] Promoted new agent template for "${agent.role}".`);
+    }
+  }
+}
+
+// ============================================================
 // State Transition — with snapshot + heartbeat
 // ============================================================
 
@@ -129,6 +202,7 @@ export async function transitionMissionStatus(
 
         if (graduated) {
           console.log(`[orchestrator] Mission ${missionId} completed its ${newRunCount}th training run and auto-graduated to live.`);
+          await promoteAgentsToTemplateLibrary(missionId, tenantId, supabase);
         }
       }
     } catch (trainingErr) {

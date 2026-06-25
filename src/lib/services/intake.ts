@@ -338,6 +338,48 @@ async function searchSimilarMissions(
 }
 
 // ============================================================
+// Agent Template Library: Search for proven, reusable agents
+// ============================================================
+// Templates are promoted from agents that survived Training Mode (see
+// orchestrator.ts). Unlike searchSimilarMissions, which only returns
+// metadata as inspiration text, this returns the FULL agent definition —
+// the LLM is told it can copy a template's pythonScript/systemPrompt
+// near-verbatim instead of writing one from scratch.
+async function searchAgentTemplates(
+  intent: string,
+  tenantId: string
+): Promise<string> {
+  try {
+    const embedding = await generateEmbedding(intent);
+    if (!embedding) return '';
+    const supabase = createServiceClient();
+
+    const { data: templates, error } = await supabase.rpc('match_agent_templates', {
+      query_embedding: embedding,
+      match_tenant_id: tenantId,
+      match_threshold: 0.75,
+      match_count: 3,
+    });
+
+    if (error || !templates?.length) {
+      return '';
+    }
+
+    const context = templates
+      .map(
+        (t: { role: string; system_prompt: string; python_script: string; trust_level: string; success_count: number }) =>
+          `- Role: "${t.role}" (proven ${t.success_count}x, trust: ${t.trust_level})\n  systemPrompt: ${t.system_prompt}\n  pythonScript:\n${t.python_script}`
+      )
+      .join('\n\n');
+
+    return `\n\nPROVEN AGENT TEMPLATES from this tenant's training history — if one of these matches a role this mission needs, reuse its pythonScript and systemPrompt near-verbatim (adapting only specific values like names/IDs from this intent) instead of writing a new agent from scratch:\n${context}`;
+  } catch {
+    // Template library is optional — gracefully degrade
+    return '';
+  }
+}
+
+// ============================================================
 // Phase 2.1: Global Tenant Memory (Extract and Retrieve)
 // ============================================================
 async function extractAndSaveTenantMemory(intent: string, tenantId: string): Promise<void> {
@@ -446,8 +488,9 @@ export async function generateMissionJSON(
   const { getPlanConfig } = await import('@/lib/middleware/billing');
   
   // Run ALL pre-checks in parallel instead of sequentially
-  const [memoryContext, globalMemory, planConfig] = await Promise.all([
+  const [memoryContext, agentTemplateContext, globalMemory, planConfig] = await Promise.all([
     searchSimilarMissions(intent, tenantId),
+    searchAgentTemplates(intent, tenantId),
     retrieveTenantMemory(tenantId),
     getPlanConfig(tenantId),
   ]);
@@ -508,7 +551,7 @@ export async function generateMissionJSON(
 
   messages.push({
     role: 'user',
-    content: `Generate a Mission JSON for the following intent:\n\n"${intent}"${fileContext}${memoryContext}${globalMemory}`,
+    content: `Generate a Mission JSON for the following intent:\n\n"${intent}"${fileContext}${memoryContext}${agentTemplateContext}${globalMemory}`,
   });
 
   const llmResponse = await callLLM(
