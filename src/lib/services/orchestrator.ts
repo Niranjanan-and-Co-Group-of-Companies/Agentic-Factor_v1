@@ -1,6 +1,6 @@
 import { createServiceClient } from '../supabase/server';
 import { captureSnapshot } from './snapshots';
-import { touchHeartbeat, startDeadlockDetector } from './deadlock-detector';
+import { touchHeartbeat } from './deadlock-detector';
 import { executeDryRun, type DryRunReport } from '../middleware/dry-run';
 import type { Mission, AgentDefinition } from '../schemas/mission';
 
@@ -450,9 +450,15 @@ export async function buildTeam(
     };
   }
 
-  // ── Step 7: Start heartbeat monitor ──
-  // The deadlock detector is a global singleton — ensure it's running
-  startDeadlockDetector();
+  // ── Step 7: Heartbeat monitoring ──
+  // startDeadlockDetector() used to be called here, running an in-process
+  // setInterval as a "supervisor loop." That works in a long-lived local dev
+  // server, but Vercel's serverless functions don't keep a process alive for
+  // a timer to keep firing — so in production this never reliably ran. The
+  // mission-watchdog cron (/api/cron/mission-watchdog) is the actual
+  // serverless-safe mechanism that catches stuck missions; see its comments
+  // for the consolidated cleanup logic that used to live only in
+  // terminateDeadlockedMission().
 
   // ── Step 8: Transition to 'active' ──
   const { snapshotVersion } = await transitionMissionStatus(

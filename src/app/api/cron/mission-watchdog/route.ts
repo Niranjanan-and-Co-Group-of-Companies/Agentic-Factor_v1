@@ -4,8 +4,13 @@ import { createServiceClient } from '@/lib/supabase/server';
 // ============================================================
 // GET /api/cron/mission-watchdog
 //
-// Finds missions stuck in "active" status beyond the maximum
-// allowed runtime and marks them as failed.
+// Finds missions stuck in "active" status beyond their allowed runtime
+// and marks them — and their stuck agents and pending actions — as
+// failed/expired, so nothing is left in a stale "running"/"pending" state
+// forever. This is the serverless-safe replacement for the old
+// setInterval-based deadlock detector, which never reliably ran in
+// production (Vercel function instances don't stay alive for a timer to
+// keep firing — that pattern only worked in a long-lived local dev server).
 //
 // Schedule this in vercel.json:
 //   { "path": "/api/cron/mission-watchdog", "schedule": "*/10 * * * *" }
@@ -15,7 +20,8 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 export const maxDuration = 30;
 
-const MAX_RUNTIME_MINUTES = 25;
+// Used when a mission doesn't specify its own orchestration.timeoutSeconds
+const DEFAULT_MAX_RUNTIME_SECONDS = 25 * 60;
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -26,21 +32,27 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = createServiceClient();
-  const cutoff = new Date(Date.now() - MAX_RUNTIME_MINUTES * 60 * 1000).toISOString();
 
-  // Find missions that have been "active" for longer than MAX_RUNTIME_MINUTES
-  const { data: stuckMissions, error } = await supabase
+  // Fetch all active missions — per-mission timeout means we can't filter
+  // by a single cutoff in the query itself, so this is evaluated in code.
+  const { data: activeMissions, error } = await supabase
     .from('missions')
-    .select('id, tenant_id, title, updated_at')
-    .eq('status', 'active')
-    .lt('updated_at', cutoff);
+    .select('id, tenant_id, title, updated_at, mission_json')
+    .eq('status', 'active');
 
   if (error) {
-    console.error('[Watchdog] Failed to query stuck missions:', error);
+    console.error('[Watchdog] Failed to query active missions:', error);
     return NextResponse.json({ error: 'DB query failed' }, { status: 500 });
   }
 
-  if (!stuckMissions || stuckMissions.length === 0) {
+  const now = Date.now();
+  const stuckMissions = (activeMissions || []).filter((mission) => {
+    const timeoutSeconds = mission.mission_json?.orchestration?.timeoutSeconds || DEFAULT_MAX_RUNTIME_SECONDS;
+    const idleMs = now - new Date(mission.updated_at).getTime();
+    return idleMs > timeoutSeconds * 1000;
+  });
+
+  if (stuckMissions.length === 0) {
     return NextResponse.json({ checked: true, stuck: 0 });
   }
 
@@ -50,10 +62,11 @@ export async function GET(request: NextRequest) {
 
   for (const mission of stuckMissions) {
     try {
+      const timeoutSeconds = mission.mission_json?.orchestration?.timeoutSeconds || DEFAULT_MAX_RUNTIME_SECONDS;
       const report = {
         failedAt: 'Watchdog',
         errorType: 'timeout',
-        error: `Mission exceeded maximum runtime of ${MAX_RUNTIME_MINUTES} minutes. The execution environment may have crashed or been interrupted.`,
+        error: `Mission exceeded its maximum runtime of ${Math.round(timeoutSeconds / 60)} minutes. The execution environment may have crashed or been interrupted.`,
         actionStep: 'Click "Resume from Failed Agent" to retry from where it stopped, or "Fresh Start" to re-run all agents.',
         detectedAt: new Date().toISOString(),
         lastUpdated: mission.updated_at,
@@ -69,6 +82,25 @@ export async function GET(request: NextRequest) {
         .eq('id', mission.id)
         .eq('tenant_id', mission.tenant_id);
 
+      // Stuck agents previously stayed at "running"/"spawning"/"paused"
+      // forever once their mission was marked failed — nothing ever closed
+      // them out. Close them out here, alongside the mission.
+      await supabase
+        .from('agents')
+        .update({ status: 'failed' })
+        .eq('mission_id', mission.id)
+        .eq('tenant_id', mission.tenant_id)
+        .in('status', ['running', 'spawning', 'paused']);
+
+      // Any approval still waiting on a human is moot now — the mission
+      // that would have resumed from it is dead.
+      await supabase
+        .from('proposed_actions')
+        .update({ status: 'expired', decided_at: new Date().toISOString() })
+        .eq('mission_id', mission.id)
+        .eq('tenant_id', mission.tenant_id)
+        .eq('status', 'pending');
+
       await supabase.from('events').insert({
         tenant_id: mission.tenant_id,
         event_type: 'mission.failed',
@@ -78,7 +110,7 @@ export async function GET(request: NextRequest) {
       });
 
       results.push({ id: mission.id, title: mission.title, action: 'marked_failed' });
-      console.log(`[Watchdog] Marked mission ${mission.id} ("${mission.title}") as failed — exceeded ${MAX_RUNTIME_MINUTES}min runtime`);
+      console.log(`[Watchdog] Marked mission ${mission.id} ("${mission.title}") as failed — exceeded ${Math.round(timeoutSeconds / 60)}min runtime`);
     } catch (err) {
       console.error(`[Watchdog] Failed to update mission ${mission.id}:`, err);
       results.push({ id: mission.id, title: mission.title, action: 'error' });

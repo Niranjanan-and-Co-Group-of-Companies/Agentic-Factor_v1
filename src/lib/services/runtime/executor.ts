@@ -1,6 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { executeAgent } from './agent-loop';
-import { transitionMissionStatus } from '../orchestrator';
+import { transitionMissionStatus, transitionAgentStatus } from '../orchestrator';
 import { runPreflightCheck } from '../preflight-validator';
 
 function isEmptyOutput(output: string): boolean {
@@ -334,6 +334,16 @@ export async function executeMission(missionId: string, tenantId: string) {
         );
       }
 
+      // Agent's output is now final and passed the empty-data guard above —
+      // not paused, not awaiting input, not a sleep/schedule wait, not an
+      // empty-data abort. Mark it completed. Without this, agents.status
+      // never advances past its initial 'running' value even after the
+      // mission that owns it finishes successfully — confirmed in production
+      // data (the vast majority of agent rows stuck on "running" forever).
+      await transitionAgentStatus(agent.id, missionId, tenantId, 'completed').catch((err) =>
+        console.warn(`[Executor] Failed to mark agent ${agent.id} completed (non-fatal):`, err)
+      );
+
       // ═══ ORCHESTRATION PATTERNS ═══
       if (orchestration.pattern === 'supervisor' || orchestration.pattern === 'orchestrator_worker') {
         // Supervisor/Orchestrator pattern: LLM decides next agent dynamically
@@ -370,6 +380,9 @@ export async function executeMission(missionId: string, tenantId: string) {
               const pOutEdges = orchestration.edges?.filter((e: any) => e.from === parallelAgent.id) || [];
               const pIsFinalAgent = pOutEdges.length === 0;
               const result = await executeAgent(tenantId, missionId, parallelAgent, output, tokens, pIsFinalAgent, mission.expectedOutputFormat);
+              await transitionAgentStatus(parallelAgent.id, missionId, tenantId, 'completed').catch((err) =>
+                console.warn(`[Executor] [Parallel] Failed to mark agent ${parallelAgent.id} completed (non-fatal):`, err)
+              );
               return { agentId: edge.to, role: parallelAgent.role, output: result.output };
             })
           );
