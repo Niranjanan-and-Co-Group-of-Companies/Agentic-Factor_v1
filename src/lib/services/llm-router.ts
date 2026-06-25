@@ -565,13 +565,15 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
         }
       );
       if (res.ok) {
-        const data = await res.json();
-        const values: number[] | null = data.embedding?.values || null;
-        if (values) {
-          // Gemini text-embedding-004 outputs 768 dims; pad to 1536 to match our pgvector column
-          while (values.length < 1536) values.push(0);
-          return values.slice(0, 1536);
-        }
+        // Gemini's text-embedding-004 outputs 768 dims, not 1536. This used
+        // to zero-pad to fit the pgvector column, but a zero-padded vector is
+        // NOT mathematically comparable via cosine similarity to a real
+        // 1536-dim OpenAI embedding already stored in the same column —
+        // mixing the two silently corrupts every similarity search that
+        // touches both. Returning null is strictly safer: every caller
+        // already treats "no embedding" as a no-op graceful degradation, so
+        // this just means memory/template features are skipped for this
+        // call instead of returning wrong results.
         return null;
       }
     } catch {
