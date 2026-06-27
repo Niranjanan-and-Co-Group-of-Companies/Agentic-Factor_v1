@@ -105,12 +105,14 @@ export default function AdminPage() {
   };
 
   const handleMarkConfigured = async (eventId: string, connectorId: string) => {
-    await fetch("/api/mgmt-x7k9/data", {
+    const res = await fetch("/api/mgmt-x7k9/data", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "mark_connector_configured", eventId, connectorId }),
     });
-    setToast("✅ Connector marked as configured. User notified.");
+    const data = await res.json().catch(() => ({ notified: 0 }));
+    const n = data.notified ?? 0;
+    setToast(`✅ Connector marked as configured. ${n} customer${n === 1 ? "" : "s"} notified.`);
     fetchData();
     setTimeout(() => setToast(null), 4000);
   };

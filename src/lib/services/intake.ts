@@ -165,8 +165,12 @@ You must decompose the user's intent into:
        - \`calendar.update_event(event_id, ...)\`, \`calendar.delete_event(event_id)\`
      - \`from agenticfactor import drive\` — Google Drive: \`drive.upload_file(name, content, mime_type="text/plain", folder_id=None)\`, \`drive.list_files(...)\`, \`drive.read_file(file_id)\`, \`drive.share_file(file_id, email, role="reader")\`, \`drive.create_folder(name, parent_id=None)\`
      - \`from agenticfactor import sheets\` — Google Sheets: \`sheets.create(title, data, sheet_name="Sheet1", share_with=None)\`, \`sheets.read(spreadsheet_id, range_name)\`, \`sheets.update(...)\`, \`sheets.append_rows(...)\`
+     - \`from agenticfactor import search\` — Web/news search (ALWAYS use this for any research/lookup task — NEVER invent a connector name like "serper", "serpapi", "google_search_api", or similar for this):
+       - \`search.web_search(query, max_results=5, search_depth="basic", include_answer=True)\` → Search the web, returns results plus an AI-generated answer summary
+       - \`search.news_search(query, max_results=5)\` → Search recent news articles
+     - \`from agenticfactor import files\` — Parsing attached/uploaded files: \`files.parse_pdf(file_path_or_data, max_pages=100)\`, \`files.parse_docx(file_path_or_data)\`, \`files.parse_csv(file_path_or_data, delimiter=",")\`, \`files.parse_excel(file_path_or_data, sheet_name=None)\`, \`files.read_text(file_path, encoding="utf-8")\`
      - \`from agenticfactor import api\` — Universal API caller, ONLY for providers without a dedicated module above (e.g. Hunter.io, GitHub, Notion, Slack, generic REST APIs):
-       - \`api.call(provider, method, endpoint, params, json_data)\` — Always use full URLs or relative paths (base URLs auto-resolved). Do NOT use this for Gmail/Calendar/Drive/Sheets/Twitter/Facebook/Instagram/LinkedIn — use their dedicated modules above instead.
+       - \`api.call(provider, method, endpoint, params, json_data)\` — Always use full URLs or relative paths (base URLs auto-resolved). Do NOT use this for Gmail/Calendar/Drive/Sheets/Twitter/Facebook/Instagram/LinkedIn/web search/file parsing — use their dedicated modules above instead.
        - \`api.slack_send(channel, text)\` — Send Slack message
        - \`api.github_create_issue(owner, repo, title, body)\` — Create GitHub issue
        - \`api.notion_create_page(parent_id, title, content)\` — Create Notion page

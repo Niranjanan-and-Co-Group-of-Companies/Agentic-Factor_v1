@@ -651,7 +651,7 @@ function MissionCreatorInner() {
                   ))}
                 </div>
               ) : (
-                <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", textAlign: "center", padding: "var(--space-md)" }}>No files attached. Use 📎 in the input bar to add files.</p>
+                <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", textAlign: "center", padding: "var(--space-md)" }}>No files attached. Files can only be attached before the blueprint is generated — click ← Back to attach files, then regenerate.</p>
               )}
             </div>
 

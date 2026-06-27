@@ -135,25 +135,47 @@ export async function POST(request: NextRequest) {
 
   switch (action) {
     case 'mark_connector_configured': {
-      // Update event payload to mark as configured
-      const { eventId, connectorId } = params;
-      await supabase
-        .from('events')
-        .update({ payload: { ...params, status: 'configured', configuredAt: new Date().toISOString() } })
-        .eq('id', eventId);
+      const { connectorId } = params;
 
-      // Notify requesting user
-      const { data: event } = await supabase.from('events').select('payload').eq('id', eventId).single();
-      if (event?.payload?.userEmail) {
-        const { sendEmail } = await import('@/lib/services/notifications');
-        await sendEmail({
-          to: event.payload.userEmail,
-          subject: `✅ ${connectorId} connector is now available!`,
-          body: `Great news! The ${connectorId} connector you requested is now ready.\n\nConnect it from your dashboard: https://agenticfactor.io/connectors`,
-        });
+      // Find EVERY pending request for this connector — not just the one
+      // row that was clicked — so marking it configured notifies everyone
+      // who's been waiting for it. Matches on entity_id, which is what
+      // /api/request-connector stores the connectorId under.
+      const { data: allRequests } = await supabase
+        .from('events')
+        .select('id, payload')
+        .eq('event_type', 'connector.requested')
+        .eq('entity_id', connectorId);
+
+      const requestsToNotify = (allRequests || []).filter((r) => r.payload?.status !== 'configured');
+
+      // Mark every one of them configured, preserving each row's own
+      // original payload (connectorLabel/userEmail/requestedAt). The
+      // previous version of this handler replaced the whole payload with
+      // just {eventId, connectorId}, which silently destroyed userEmail —
+      // meaning the notification email below could never actually fire,
+      // despite the UI claiming "User notified."
+      for (const req of requestsToNotify) {
+        await supabase
+          .from('events')
+          .update({ payload: { ...req.payload, status: 'configured', configuredAt: new Date().toISOString() } })
+          .eq('id', req.id);
       }
 
-      return NextResponse.json({ success: true });
+      // Notify every unique customer who asked for this connector, once each
+      const uniqueEmails = [...new Set(requestsToNotify.map((r) => r.payload?.userEmail).filter(Boolean))] as string[];
+      if (uniqueEmails.length > 0) {
+        const { sendEmail } = await import('@/lib/services/notifications');
+        for (const email of uniqueEmails) {
+          await sendEmail({
+            to: email,
+            subject: `✅ ${connectorId} connector is now available!`,
+            body: `Great news! The ${connectorId} connector you requested is now ready.\n\nConnect it from your dashboard: https://agenticfactor.io/connectors`,
+          });
+        }
+      }
+
+      return NextResponse.json({ success: true, notified: uniqueEmails.length });
     }
 
     case 'override_plan': {
