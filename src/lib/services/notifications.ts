@@ -239,6 +239,102 @@ export async function notifyMissionStatus(
   await sendEmail({ to: email, ...template });
 }
 
+export interface RunSummaryOptions {
+  runNumber: number;
+  trigger: string;
+  agentsTotal: number;
+  agentsDone: number;
+  agentsFailed: number;
+  durationMs: number;
+  nextRunDescription?: string;
+}
+
+/**
+ * Send a per-run summary email after each scheduled or webhook-triggered execution.
+ * Gives non-technical customers proof that automation ran without them needing to log in.
+ */
+export async function notifyMissionRunSummary(
+  tenantId: string,
+  missionTitle: string,
+  missionId: string,
+  opts: RunSummaryOptions
+): Promise<void> {
+  const { createServiceClient } = await import('@/lib/supabase/server');
+  const supabase = createServiceClient();
+  const { data: { user } } = await supabase.auth.admin.getUserById(tenantId);
+  const email = user?.email;
+  if (!email) return;
+
+  const dashboardUrl = `https://agenticfactor.io/dashboard/missions/${missionId}`;
+  const durationSec = Math.round(opts.durationMs / 1000);
+  const durationLabel = durationSec < 60
+    ? `${durationSec}s`
+    : `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`;
+
+  const triggerLabel: Record<string, string> = {
+    manual: 'Manual run',
+    scheduled: 'Scheduled run',
+    webhook: 'Webhook trigger',
+  };
+
+  const statusIcon = opts.agentsFailed === 0 ? '✅' : opts.agentsDone > 0 ? '⚠️' : '❌';
+  const statusLabel = opts.agentsFailed === 0
+    ? 'All agents completed successfully'
+    : opts.agentsDone > 0
+    ? `${opts.agentsDone} completed, ${opts.agentsFailed} failed`
+    : 'Mission failed';
+
+  const nextRunLine = opts.nextRunDescription
+    ? `Next run: ${opts.nextRunDescription}`
+    : '';
+
+  const subject = `${statusIcon} Run #${opts.runNumber} complete: ${missionTitle}`;
+
+  const bodyLines = [
+    `${triggerLabel[opts.trigger] ?? 'Run'} #${opts.runNumber} of "${missionTitle}" has finished.`,
+    ``,
+    `Status: ${statusLabel}`,
+    `Agents: ${opts.agentsDone}/${opts.agentsTotal} completed`,
+    `Duration: ${durationLabel}`,
+    ...(nextRunLine ? [``, nextRunLine] : []),
+    ``,
+    `View results: ${dashboardUrl}`,
+  ];
+
+  const htmlBody = `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;padding:24px;">
+      <div style="background:linear-gradient(135deg,#3B82F6,#8B5CF6);padding:24px;border-radius:12px;color:white;margin-bottom:24px;">
+        <h1 style="margin:0;font-size:20px;">⚡ Agentic Factor</h1>
+        <p style="margin:8px 0 0;opacity:0.85;font-size:14px;">${triggerLabel[opts.trigger] ?? 'Run'} #${opts.runNumber} — ${missionTitle}</p>
+      </div>
+      <div style="background:#f8fafc;border-radius:10px;padding:20px;margin-bottom:20px;">
+        <div style="display:flex;gap:24px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:120px;text-align:center;">
+            <div style="font-size:28px;font-weight:700;color:${opts.agentsFailed === 0 ? '#22c55e' : '#ef4444'};">${statusIcon}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">Status</div>
+            <div style="font-size:13px;font-weight:600;margin-top:2px;">${statusLabel}</div>
+          </div>
+          <div style="flex:1;min-width:100px;text-align:center;">
+            <div style="font-size:28px;font-weight:700;color:#3B82F6;">${opts.agentsDone}/${opts.agentsTotal}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">Agents completed</div>
+          </div>
+          <div style="flex:1;min-width:100px;text-align:center;">
+            <div style="font-size:28px;font-weight:700;color:#8B5CF6;">${durationLabel}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">Duration</div>
+          </div>
+        </div>
+      </div>
+      ${nextRunLine ? `<p style="color:#64748b;font-size:14px;margin-bottom:16px;">${nextRunLine}</p>` : ''}
+      <a href="${dashboardUrl}" style="display:inline-block;background:linear-gradient(135deg,#3B82F6,#8B5CF6);color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">View Results →</a>
+      <div style="margin-top:24px;padding-top:16px;border-top:1px solid #eee;font-size:12px;color:#999;">
+        Sent by Agentic Factor Automation — Run #${opts.runNumber} of ${opts.agentsTotal} agents
+      </div>
+    </div>
+  `;
+
+  await sendEmail({ to: email, subject, body: bodyLines.join('\n'), htmlBody });
+}
+
 /**
  * Send a mission output/results email to the customer.
  * Used when a mission completes with deliverables (PDFs, spreadsheets, reports).

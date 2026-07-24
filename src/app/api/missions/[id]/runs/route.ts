@@ -4,7 +4,9 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 // ============================================================
 // GET /api/missions/:id/runs — Run history for a mission
-// Returns cron wake events, completions, failures, schedule changes
+//
+// Returns rows from mission_runs (one per execution), plus an
+// event-based check for whether an active schedule is set.
 // ============================================================
 
 export async function GET(
@@ -19,30 +21,31 @@ export async function GET(
   try {
     const supabase = createServiceClient();
 
+    // Fetch structured run records from mission_runs table
     const { data: runs, error } = await supabase
-      .from('events')
-      .select('event_type, payload, created_at')
-      .eq('entity_id', missionId)
+      .from('mission_runs')
+      .select('id, run_number, trigger, status, started_at, completed_at, duration_ms, agents_total, agents_done, agents_failed, summary')
+      .eq('mission_id', missionId)
       .eq('tenant_id', tenantId)
-      .in('event_type', [
-        'mission.resumed_by_cron',
-        'mission.completed',
-        'mission.failed',
-        'mission.scheduled',
-        'mission.unscheduled',
-        'mission.cancelled',
-        'mission.wait',
-      ])
-      .order('created_at', { ascending: false })
+      .order('started_at', { ascending: false })
       .limit(50);
 
     if (error) {
       console.error(`[GET /api/missions/${missionId}/runs] Error:`, error.message);
-      return NextResponse.json({ runs: [] });
+      return NextResponse.json({ runs: [], hasActiveSchedule: false });
     }
 
-    // Check if there's an active schedule (mission.wait with action=schedule, no newer unschedule)
-    const hasActiveSchedule = (runs || []).some(
+    // Check if there's an active schedule via events table
+    const { data: scheduleEvents } = await supabase
+      .from('events')
+      .select('event_type, payload, created_at')
+      .eq('entity_id', missionId)
+      .eq('tenant_id', tenantId)
+      .in('event_type', ['mission.wait', 'mission.unscheduled'])
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    const hasActiveSchedule = (scheduleEvents || []).some(
       (r) => r.event_type === 'mission.wait' && r.payload?.action === 'schedule'
     );
 

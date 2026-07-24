@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { executeMission } from '@/lib/services/runtime/executor';
+import { inngest } from '@/lib/inngest/client';
 
 // ============================================================
 // Cron Scheduler — Wakes up paused/scheduled missions
@@ -163,9 +163,14 @@ export async function GET(request: NextRequest) {
             .eq('event_type', 'mission.wait');
         }
 
-        // Re-execute the mission
-        executeMission(missionId, tenantId).catch(err => {
-          console.error(`[Cron Scheduler] Failed to resume mission ${missionId}:`, err);
+        // Fire Inngest event — runs in background, no Vercel timeout risk.
+        // Pass a pre-generated runId so the mission_runs row ties to this execution.
+        const runId = crypto.randomUUID();
+        await inngest.send({
+          name: 'mission.execute',
+          data: { missionId, tenantId, runId, trigger: 'scheduled' },
+        }).catch((err: unknown) => {
+          console.error(`[Cron Scheduler] Failed to fire Inngest for mission ${missionId}:`, err);
         });
 
         wokeCount++;

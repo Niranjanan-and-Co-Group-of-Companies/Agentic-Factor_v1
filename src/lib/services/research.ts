@@ -46,77 +46,62 @@ const DEFAULT_CONFIG: ResearchConfig = {
 };
 
 // ============================================================
-// Web Search Adapter
-// Abstraction over search providers. For scaffold, uses a
-// simulated search with realistic mock data. In production,
-// plug in Serper, Tavily, or Brave Search API.
+// Web Search Adapter — Tavily
 // ============================================================
 
 interface RawSearchResult {
   title: string;
   url: string;
   snippet: string;
+  relevance: number;
 }
 
-/**
- * Perform a web search. Currently uses simulated results.
- * Replace with a real search API (Serper, Tavily, etc.) in production.
- */
-async function webSearch(query: string, maxResults: number): Promise<RawSearchResult[]> {
-  // Simulated search results based on query keywords
-  const keywords = query.toLowerCase().split(/\s+/);
+async function webSearch(query: string, maxResults: number, timeoutMs: number): Promise<RawSearchResult[]> {
+  const apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) {
+    console.warn('[research] TAVILY_API_KEY not set — returning empty results');
+    return [];
+  }
 
-  const mockDatabase: RawSearchResult[] = [
-    {
-      title: 'AWS Cost Management Best Practices - Amazon Web Services',
-      url: 'https://docs.aws.amazon.com/cost-management/latest/userguide/best-practices.html',
-      snippet: 'Learn how to manage and optimize your AWS costs using CloudWatch billing alarms, Cost Explorer, and budgets.',
-    },
-    {
-      title: 'Slack API Documentation - Web API Methods',
-      url: 'https://api.slack.com/methods',
-      snippet: 'Complete reference for Slack Web API methods including chat.postMessage, files.upload, and conversations.list.',
-    },
-    {
-      title: 'E-commerce Data Analysis: Pricing Trends 2025',
-      url: 'https://example.com/ecommerce-pricing-trends',
-      snippet: 'Analysis of global e-commerce pricing trends, including dynamic pricing algorithms and competitive analysis frameworks.',
-    },
-    {
-      title: 'Web Scraping Best Practices and Legal Considerations',
-      url: 'https://example.com/web-scraping-guide',
-      snippet: 'Comprehensive guide to ethical web scraping, rate limiting, robots.txt compliance, and data extraction patterns.',
-    },
-    {
-      title: 'PostgreSQL JSONB Queries - Performance Guide',
-      url: 'https://www.postgresql.org/docs/current/functions-json.html',
-      snippet: 'Reference for PostgreSQL JSON/JSONB operators and functions, GIN index strategies for document queries.',
-    },
-    {
-      title: 'Email Deliverability Best Practices 2025',
-      url: 'https://example.com/email-deliverability',
-      snippet: 'Ensure high email deliverability with SPF, DKIM, DMARC configuration and engagement-based sending strategies.',
-    },
-    {
-      title: 'Statistical Analysis Methods for Business Intelligence',
-      url: 'https://example.com/statistical-analysis',
-      snippet: 'Overview of regression analysis, time series forecasting, and anomaly detection for business data.',
-    },
-  ];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  // Score results by keyword relevance
-  const scored = mockDatabase.map((result) => {
-    const text = `${result.title} ${result.snippet}`.toLowerCase();
-    const matchCount = keywords.filter((kw) => text.includes(kw)).length;
-    const relevance = matchCount / Math.max(keywords.length, 1);
-    return { ...result, relevance };
-  });
+  try {
+    const res = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query,
+        max_results: maxResults,
+        include_raw_content: false,
+      }),
+      signal: controller.signal,
+    });
 
-  // Sort by relevance, filter above threshold, limit
-  return scored
-    .filter((r) => r.relevance > 0.1)
-    .sort((a, b) => b.relevance - a.relevance)
-    .slice(0, maxResults);
+    if (!res.ok) {
+      console.error(`[research] Tavily returned ${res.status}`);
+      return [];
+    }
+
+    const data = await res.json();
+    return (data.results ?? []).map((r: any, i: number) => ({
+      title: r.title ?? '',
+      url: r.url ?? '',
+      snippet: r.content ?? '',
+      // Tavily returns results ranked best-first; assign descending relevance
+      relevance: Math.max(1 - i * 0.15, 0.1),
+    }));
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      console.warn('[research] Tavily request timed out');
+    } else {
+      console.error('[research] Tavily request failed:', err);
+    }
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // ============================================================
@@ -179,14 +164,14 @@ export async function executeResearch(
   const supabase = createServiceClient();
 
   // 1. Perform web search
-  const rawResults = await webSearch(query, cfg.maxSources);
+  const rawResults = await webSearch(query, cfg.maxSources, cfg.timeoutMs);
 
   // 2. Build source list with relevance scores
   const sources: ResearchSource[] = rawResults.map((r) => ({
     url: r.url,
     title: r.title,
     snippet: r.snippet,
-    relevance: 'relevance' in r ? (r as RawSearchResult & { relevance: number }).relevance : 0.5,
+    relevance: r.relevance,
   }));
 
   // 3. Compute confidence score

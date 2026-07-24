@@ -470,7 +470,8 @@ export async function executeAgent(
   inputContext: string,
   tokens: { provider: string, access_token: string }[] = [],
   isFinalAgent: boolean = false,
-  expectedOutputFormat?: string
+  expectedOutputFormat?: string,
+  runId?: string
 ): Promise<AgentResult> {
   const supabase = createServiceClient();
 
@@ -480,6 +481,7 @@ export async function executeAgent(
     event_type: 'agent.started',
     entity_type: 'agent',
     entity_id: agent.id,
+    run_id: runId ?? null,
     payload: { missionId, role: agent.role, inputContext },
   });
 
@@ -1385,6 +1387,7 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
           event_type: 'agent.completed',
           entity_type: 'agent',
           entity_id: agent.id,
+          run_id: runId ?? null,
           payload: { missionId, output: finalOutputJSON },
         });
 

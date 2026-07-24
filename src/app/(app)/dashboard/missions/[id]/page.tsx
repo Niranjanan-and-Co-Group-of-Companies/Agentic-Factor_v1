@@ -255,8 +255,20 @@ export default function MissionDetailPage() {
   const [endCondition, setEndCondition] = useState<'forever' | 'max_runs' | 'end_date'>('forever');
   const [maxRuns, setMaxRuns] = useState(5);
   const [endDate, setEndDate] = useState('');
-  const [runHistory, setRunHistory] = useState<Array<{event_type: string; payload: any; created_at: string}>>([]);
+  const [runHistory, setRunHistory] = useState<Array<{
+    id: string; run_number: number; trigger: string; status: string;
+    started_at: string; completed_at: string | null; duration_ms: number | null;
+    agents_total: number; agents_done: number; agents_failed: number;
+  }>>([]);
   const [isScheduled, setIsScheduled] = useState(false);
+  const [webhooks, setWebhooks] = useState<Array<{
+    id: string; label: string | null; triggerUrl: string;
+    last_triggered_at: string | null; trigger_count: number; created_at: string;
+  }>>([]);
+  const [webhookCreating, setWebhookCreating] = useState(false);
+  const [newWebhookLabel, setNewWebhookLabel] = useState("");
+  const [newWebhookSecret, setNewWebhookSecret] = useState<{id: string; secret: string; url: string} | null>(null);
+  const [webhookCopied, setWebhookCopied] = useState<string | null>(null);
 
   const handleRequestConnector = async () => {
     if (!connectorRequest.trim()) return;
@@ -474,6 +486,15 @@ export default function MissionDetailPage() {
           setIsScheduled(runsData.hasActiveSchedule || false);
         }
       } catch { /* run history fetch is non-critical */ }
+
+      // Fetch webhook triggers
+      try {
+        const webhooksRes = await fetch(`/api/webhooks/manage?missionId=${missionId}`);
+        if (webhooksRes.ok) {
+          const wData = await webhooksRes.json();
+          setWebhooks(wData.webhooks || []);
+        }
+      } catch { /* webhook fetch is non-critical */ }
 
       setLoading(false);
     }
@@ -1073,24 +1094,129 @@ export default function MissionDetailPage() {
         <div className="card" style={{ marginBottom: "var(--space-xl)" }}>
           <div className="card-header">
             <span className="card-title">📊 Run History</span>
-            <span className="badge badge-blue">{runHistory.length} runs</span>
+            <span className="badge badge-blue">{runHistory.length} run{runHistory.length !== 1 ? "s" : ""}</span>
           </div>
-          <div className="stack" style={{ gap: "var(--space-xs)", maxHeight: 300, overflowY: "auto" }}>
-            {runHistory.map((run, i) => {
-              const icon = run.event_type.includes('completed') ? '✅' : run.event_type.includes('failed') ? '❌' : run.event_type.includes('resumed') ? '🔄' : run.event_type.includes('scheduled') ? '⏰' : run.event_type.includes('unscheduled') ? '⏹' : run.event_type.includes('cancelled') ? '🚫' : '📌';
-              const label = run.event_type.includes('completed') ? 'Completed' : run.event_type.includes('failed') ? 'Failed' : run.event_type.includes('resumed') ? 'Started (cron)' : run.event_type.includes('unscheduled') ? 'Schedule removed' : run.event_type.includes('scheduled') ? `Scheduled: ${run.payload?.scheduleConfig || ''}` : run.event_type.includes('cancelled') ? 'Cancelled' : run.event_type.includes('wait') ? `Waiting: ${run.payload?.config || ''}` : run.event_type;
-              const time = new Date(run.created_at).toLocaleString();
+          <div className="stack" style={{ gap: "var(--space-xs)", maxHeight: 340, overflowY: "auto" }}>
+            {runHistory.map((run) => {
+              const statusIcon = run.status === "completed" ? "✅" : run.status === "failed" ? "❌" : run.status === "running" ? "⏳" : "⏸";
+              const triggerIcon = run.trigger === "scheduled" ? "⏰" : run.trigger === "webhook" ? "🔗" : "▶️";
+              const durSec = run.duration_ms ? Math.round(run.duration_ms / 1000) : null;
+              const durLabel = durSec === null ? "—" : durSec < 60 ? `${durSec}s` : `${Math.floor(durSec / 60)}m ${durSec % 60}s`;
               return (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)", padding: "8px 12px", background: "var(--bg-glass)", borderRadius: 8, fontSize: "0.82rem" }}>
-                  <span>{icon}</span>
-                  <span style={{ flex: 1 }}>{label}</span>
-                  <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>{time}</span>
+                <div key={run.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", background: "var(--bg-glass)", borderRadius: 8, fontSize: "0.82rem" }}>
+                  <span style={{ fontSize: "1rem" }}>{statusIcon}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontWeight: 600 }}>Run #{run.run_number}</span>
+                      <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", background: "var(--bg-secondary)", borderRadius: 4, padding: "1px 5px" }}>{triggerIcon} {run.trigger}</span>
+                    </div>
+                    <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 2 }}>
+                      {run.agents_done}/{run.agents_total} agents · {durLabel} · {new Date(run.started_at).toLocaleString()}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: "0.72rem", fontWeight: 600, color: run.status === "completed" ? "var(--emerald)" : run.status === "failed" ? "var(--rose)" : "var(--text-muted)", textTransform: "capitalize" }}>{run.status}</span>
                 </div>
               );
             })}
           </div>
         </div>
       )}
+
+      {/* WEBHOOK TRIGGERS */}
+      <div className="card" style={{ marginBottom: "var(--space-xl)" }}>
+        <div className="card-header">
+          <span className="card-title">🔗 Webhook Triggers</span>
+          <span className="badge badge-purple">Event-driven</span>
+        </div>
+        <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "var(--space-md)" }}>
+          Any external system — Google Sheets, Typeform, HubSpot, Zapier — can POST to a webhook URL to trigger this mission instantly. The full request body is passed to your agents as input.
+        </p>
+
+        {/* Existing webhooks */}
+        {webhooks.length > 0 && (
+          <div className="stack" style={{ gap: "var(--space-xs)", marginBottom: "var(--space-md)" }}>
+            {webhooks.map((wh) => (
+              <div key={wh.id} style={{ padding: "10px 12px", background: "var(--bg-glass)", borderRadius: 8, fontSize: "0.82rem" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600 }}>{wh.label || "Webhook"}</span>
+                  <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                    {wh.trigger_count} trigger{wh.trigger_count !== 1 ? "s" : ""}
+                    {wh.last_triggered_at ? ` · last ${formatTimeAgo(wh.last_triggered_at)}` : " · never triggered"}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      await fetch(`/api/webhooks/manage?id=${wh.id}`, { method: "DELETE" });
+                      setWebhooks((prev) => prev.filter((w) => w.id !== wh.id));
+                    }}
+                    style={{ marginLeft: "auto", fontSize: "0.7rem", color: "var(--rose)", background: "none", border: "none", cursor: "pointer", padding: "2px 6px" }}
+                  >Remove</button>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <code style={{ fontSize: "0.7rem", color: "var(--accent)", background: "var(--bg-secondary)", padding: "3px 8px", borderRadius: 4, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wh.triggerUrl}</code>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(wh.triggerUrl); setWebhookCopied(wh.id); setTimeout(() => setWebhookCopied(null), 2000); }}
+                    style={{ fontSize: "0.72rem", padding: "3px 8px", background: "var(--accent-subtle)", border: "1px solid var(--accent)", borderRadius: 4, cursor: "pointer", color: "var(--accent)", whiteSpace: "nowrap" }}
+                  >{webhookCopied === wh.id ? "Copied!" : "Copy URL"}</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* New webhook secret reveal (shown once after creation) */}
+        {newWebhookSecret && (
+          <div style={{ padding: "12px", background: "hsla(142,76%,36%,0.08)", border: "1px solid hsla(142,76%,36%,0.3)", borderRadius: 8, marginBottom: "var(--space-md)" }}>
+            <div style={{ fontWeight: 600, fontSize: "0.8rem", marginBottom: 6 }}>✅ Webhook created — save these now, the secret is shown only once</div>
+            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: 4 }}>Trigger URL</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              <code style={{ fontSize: "0.7rem", background: "var(--bg-secondary)", padding: "3px 8px", borderRadius: 4, flex: 1 }}>{newWebhookSecret.url}</code>
+              <button onClick={() => { navigator.clipboard.writeText(newWebhookSecret.url); setWebhookCopied("url"); setTimeout(() => setWebhookCopied(null), 2000); }} style={{ fontSize: "0.72rem", padding: "3px 8px", background: "var(--accent-subtle)", border: "1px solid var(--accent)", borderRadius: 4, cursor: "pointer", color: "var(--accent)" }}>{webhookCopied === "url" ? "Copied!" : "Copy"}</button>
+            </div>
+            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: 4 }}>Secret (send as <code>x-webhook-secret</code> header)</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              <code style={{ fontSize: "0.7rem", background: "var(--bg-secondary)", padding: "3px 8px", borderRadius: 4, flex: 1 }}>{newWebhookSecret.secret}</code>
+              <button onClick={() => { navigator.clipboard.writeText(newWebhookSecret.secret); setWebhookCopied("secret"); setTimeout(() => setWebhookCopied(null), 2000); }} style={{ fontSize: "0.72rem", padding: "3px 8px", background: "var(--accent-subtle)", border: "1px solid var(--accent)", borderRadius: 4, cursor: "pointer", color: "var(--accent)" }}>{webhookCopied === "secret" ? "Copied!" : "Copy"}</button>
+            </div>
+            <button onClick={() => setNewWebhookSecret(null)} style={{ fontSize: "0.72rem", color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer" }}>I've saved these — dismiss</button>
+          </div>
+        )}
+
+        {/* Create new webhook */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            value={newWebhookLabel}
+            onChange={(e) => setNewWebhookLabel(e.target.value)}
+            placeholder="Label (e.g. Google Sheets trigger)"
+            style={{ flex: 1, fontSize: "0.82rem", padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}
+          />
+          <button
+            disabled={webhookCreating}
+            onClick={async () => {
+              setWebhookCreating(true);
+              try {
+                const res = await fetch("/api/webhooks/manage", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ missionId, label: newWebhookLabel || undefined }),
+                });
+                if (res.ok) {
+                  const data = await res.json();
+                  setNewWebhookSecret({ id: data.id, secret: data.secret, url: data.triggerUrl });
+                  setNewWebhookLabel("");
+                  // Re-fetch webhooks list
+                  const listRes = await fetch(`/api/webhooks/manage?missionId=${missionId}`);
+                  if (listRes.ok) { const d = await listRes.json(); setWebhooks(d.webhooks || []); }
+                } else {
+                  alert("Failed to create webhook. Try again.");
+                }
+              } finally {
+                setWebhookCreating(false);
+              }
+            }}
+            style={{ fontSize: "0.82rem", padding: "7px 14px", borderRadius: 6, background: "var(--accent)", color: "white", border: "none", cursor: webhookCreating ? "not-allowed" : "pointer", opacity: webhookCreating ? 0.6 : 1, whiteSpace: "nowrap" }}
+          >{webhookCreating ? "Creating..." : "+ New Webhook"}</button>
+        </div>
+      </div>
 
       {/* PHASE 4.3: Localized Approvals */}
       {pendingActions.length > 0 && (
