@@ -922,13 +922,7 @@ export default function MissionDetailPage() {
           </div>
           <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginBottom: "var(--space-md)" }}>
             {isScheduled
-              ? (() => {
-                  const scheduledEvent = runHistory.find((r) => r.event_type === "mission.scheduled");
-                  const label = scheduledEvent?.payload?.scheduleConfig ? formatScheduleConfig(scheduledEvent.payload.scheduleConfig) : null;
-                  return label
-                    ? `This mission runs ${label}. The cron system will automatically execute it at the configured time.`
-                    : "This mission is set to run on a recurring schedule. The cron system will automatically execute it at the configured time.";
-                })()
+              ? "This mission is set to run on a recurring schedule. The cron system will automatically execute it at the configured time."
               : "Set this mission to run automatically on a recurring schedule."}
           </p>
           {!showSchedulePicker && !isScheduled && (

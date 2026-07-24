@@ -28,7 +28,7 @@ export const executeMissionBackground = inngest.createFunction(
     triggers: [{ event: 'mission.execute' }],
   },
   async ({ event, step }) => {
-    const { missionId, tenantId, runId: incomingRunId, trigger: incomingTrigger } = event.data;
+    const { missionId, tenantId, runId: incomingRunId, trigger: incomingTrigger, webhookPayload } = event.data;
 
     // ── Step 1: Fetch mission data + initialise run tracking ──
     const missionData = await step.run('fetch-mission', async () => {
@@ -84,17 +84,57 @@ export const executeMissionBackground = inngest.createFunction(
       }, { onConflict: 'id', ignoreDuplicates: true });
       if (runErr) console.warn('[Inngest] Failed to upsert mission_runs row (non-fatal):', runErr.message);
 
-      return { mission: missionRow.mission_json, tokens, runId, trigger, runNumber };
+      // ── Build initial context for the first agent ──
+
+      // 1. Webhook payload: the POST body becomes the first agent's input so
+      //    agents can act on the incoming data (new row, form submission, etc.)
+      let initialContext = '';
+      if (trigger === 'webhook' && webhookPayload) {
+        const formatted = typeof webhookPayload === 'string'
+          ? webhookPayload
+          : JSON.stringify(webhookPayload, null, 2);
+        initialContext = `WEBHOOK TRIGGER DATA:\n${formatted}`;
+      }
+
+      // 2. Cross-run memory: for recurring runs (#2+), inject the previous
+      //    completed run's summary so agents know what they did last time and
+      //    can avoid repeating work (e.g. skip already-processed leads).
+      if (runNumber > 1) {
+        const { data: lastRun } = await supabase
+          .from('mission_runs')
+          .select('run_number, started_at, agents_done, agents_total, summary')
+          .eq('mission_id', missionId)
+          .eq('status', 'completed')
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (lastRun) {
+          const prevDate = new Date(lastRun.started_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+          const prevLines = [
+            `PREVIOUS RUN CONTEXT (Run #${lastRun.run_number} — ${prevDate}):`,
+            `- Agents completed: ${lastRun.agents_done}/${lastRun.agents_total}`,
+            ...(lastRun.summary ? [`- Summary: ${typeof lastRun.summary === 'string' ? lastRun.summary : JSON.stringify(lastRun.summary)}`] : []),
+            `Use this context to avoid repeating work already done in prior runs.`,
+          ].join('\n');
+          initialContext = initialContext
+            ? `${prevLines}\n\n${initialContext}`
+            : prevLines;
+        }
+      }
+
+      return { mission: missionRow.mission_json, tokens, runId, trigger, runNumber, initialContext };
     });
 
-    const { mission, tokens, runId, trigger, runNumber } = missionData;
+    const { mission, tokens, runId, trigger, runNumber, initialContext } = missionData;
     const orchestration = mission.orchestration;
     const agents = mission.agents;
     const agentMap = new Map<string, any>(agents.map((a: any) => [a.id, a]));
 
     const startedAt = Date.now();
     let currentAgentId: string | null = orchestration.entryAgent;
-    let currentContext = '';
+    // Seed the first agent's context with webhook payload and/or previous-run memory
+    let currentContext = initialContext ?? '';
     let agentsDone = 0;
     let agentsFailed = 0;
 
@@ -357,8 +397,30 @@ export const generateBlueprintBackground = inngest.createFunction(
     };
 
     try {
-      const discoveryResult = await step.run('discovery-check', async () => {
-        await updateJobStatus('processing', { step: 'Analyzing your intent...' });
+      // ── Step 1: Pre-flight — tool check + initial status (fast) ──
+      await step.run('pre-flight', async () => {
+        await updateJobStatus('processing', { step: '🔍 Analyzing your goal...' });
+
+        // Check which tools the tenant has connected
+        const { data: perms } = await supabase
+          .from('tenant_permissions')
+          .select('provider')
+          .eq('tenant_id', tenantId);
+
+        const toolList = perms?.length
+          ? perms.map((p: any) => p.provider).slice(0, 3).join(', ')
+          : null;
+
+        await updateJobStatus('processing', {
+          step: toolList
+            ? `🔌 Connected tools ready: ${toolList}`
+            : '🔌 No connectors needed — reading only',
+        });
+      });
+
+      // ── Step 2: LLM generation (the slow step — 15-30s) ──
+      const discoveryResult = await step.run('generate-mission', async () => {
+        await updateJobStatus('processing', { step: '🤖 AI architect is designing your agent team...' });
 
         const { generateMissionJSON } = await import('@/lib/services/intake');
         const result = await generateMissionJSON(intent, tenantId, files);
@@ -368,9 +430,20 @@ export const generateBlueprintBackground = inngest.createFunction(
         }
         if (!result.mission) throw new Error('Blueprint generation returned empty.');
 
-        return { type: 'blueprint' as const, mission: result.mission, rawLLMOutput: result.rawLLMOutput };
+        // Fire a descriptive "designed" message with real agent names so the
+        // frontend can show them in the live log before the blueprint loads.
+        const mission = result.mission;
+        const roles = (mission.agents as any[]).slice(0, 4).map((a) => a.role);
+        const roleStr = roles.join(' → ');
+        const extra = mission.agents.length > 4 ? ` + ${mission.agents.length - 4} more` : '';
+        await updateJobStatus('processing', {
+          step: `📐 ${mission.agents.length}-agent pipeline designed: ${roleStr}${extra}`,
+        });
+
+        return { type: 'blueprint' as const, mission, rawLLMOutput: result.rawLLMOutput };
       });
 
+      // ── Discovery flow ──
       if (discoveryResult.type === 'discovery') {
         await step.run('save-discovery', async () => {
           await updateJobStatus('discovery', { question: discoveryResult.question });
@@ -378,12 +451,21 @@ export const generateBlueprintBackground = inngest.createFunction(
         return { success: true, jobId, type: 'discovery' };
       }
 
+      // ── Step 3: Validate + save ──
       await step.run('save-blueprint', async () => {
+        await updateJobStatus('processing', { step: '✅ Validating blueprint structure...' });
+        // Brief pause so SSE can pick up the validation message before completed fires
+        await new Promise<void>((r) => setTimeout(r, 1200));
+
         const mission = discoveryResult.mission;
         await updateJobStatus('completed', {
           blueprint: mission,
           rawLLMOutput: discoveryResult.rawLLMOutput,
-          meta: { agentCount: mission.agents.length, pattern: mission.orchestration.pattern, timeoutSeconds: mission.orchestration.timeoutSeconds },
+          meta: {
+            agentCount: mission.agents.length,
+            pattern: mission.orchestration.pattern,
+            timeoutSeconds: mission.orchestration.timeoutSeconds,
+          },
         });
       });
 

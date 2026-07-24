@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import UnifiedInput from "@/components/UnifiedInput";
@@ -58,6 +58,9 @@ function MissionCreatorInner() {
   const [showAuthPopup, setShowAuthPopup] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<{name: string; content: string; size: number}[]>([]);
+  const [logEntries, setLogEntries] = useState<Array<{text: string; done: boolean; id: number}>>([]);
+  const logCounter = useRef(0);
+  const lastSeenStep = useRef('');
   const searchParams = useSearchParams();
 
   // ── Extract text content from File objects ──
@@ -127,7 +130,8 @@ function MissionCreatorInner() {
     const finalIntent = overrideIntent || intent;
     if (!finalIntent.trim() || finalIntent.length < 10) { setError("Describe your mission in at least 10 characters."); return; }
     setLoading(true); setError(""); setProgressMessage("Starting blueprint generation...");
-    
+    setLogEntries([]); lastSeenStep.current = ''; logCounter.current = 0;
+
     try {
       // Process any new files from this submission
       let filesToSend = attachedFiles;
@@ -185,52 +189,65 @@ function MissionCreatorInner() {
           // We use cookies (credentials: include) which EventSource sends automatically.
         });
         
+        const pushLog = (text: string, markPrevDone = true) => {
+          if (text === lastSeenStep.current) return; // deduplicate repeated SSE ticks
+          lastSeenStep.current = text;
+          const id = ++logCounter.current;
+          setLogEntries(prev =>
+            markPrevDone
+              ? [...prev.map(e => ({ ...e, done: true })), { text, done: false, id }]
+              : [...prev, { text, done: false, id }]
+          );
+        };
+
         eventSource.onmessage = (event) => {
           try {
             const statusData = JSON.parse(event.data);
-            
-            // Update progress message
+
+            // Accumulate step into live log
             if (statusData.step) {
+              pushLog(statusData.step);
               setProgressMessage(statusData.step);
             }
-            
+
             // Handle terminal states
             if (statusData.status === 'completed') {
-              console.log('[Creator] Blueprint completed via SSE');
+              pushLog('🚀 Blueprint ready — loading preview...');
               const agentsWithTrust = (statusData.blueprint.agents as BlueprintAgent[]).map((a: any) => ({
                 ...a, trustLevel: ("conditional" as TrustLevel),
               }));
-              setBlueprint({ ...statusData.blueprint, agents: agentsWithTrust });
-              setPhase("reviewing");
-              setProgressMessage("");
-              setLoading(false);
+              // Short pause so user can read the final log entry
+              setTimeout(() => {
+                setBlueprint({ ...statusData.blueprint, agents: agentsWithTrust });
+                setPhase("reviewing");
+                setProgressMessage("");
+                setLoading(false);
+                setLogEntries([]);
+              }, 800);
               eventSource.close();
               resolve();
               return;
             }
-            
+
             if (statusData.status === 'discovery') {
-              console.log('[Creator] Discovery question via SSE');
               setDiscoveryQuestion(statusData.question);
               setPhase("discovery");
               setProgressMessage("");
               setLoading(false);
+              setLogEntries([]);
               eventSource.close();
               resolve();
               return;
             }
-            
+
             if (statusData.status === 'failed') {
               eventSource.close();
               reject(new Error(statusData.error || "Blueprint generation failed."));
               return;
             }
-            
-            // Processing / pending — update UI
-            if (statusData.status === 'processing') {
-              setProgressMessage(statusData.step || "Designing agent team...");
-            } else if (statusData.status === 'pending') {
-              setProgressMessage("Starting blueprint generation...");
+
+            if (statusData.status === 'pending') {
+              pushLog('⏳ Starting blueprint generation...');
             }
           } catch (parseErr) {
             console.warn('[Creator] SSE parse error, continuing...', parseErr);
@@ -446,9 +463,31 @@ function MissionCreatorInner() {
                   </span>
                 </div>
                 {loading && (
-                  <div style={{ marginTop: "var(--space-md)", display: "flex", alignItems: "center", gap: 8, color: "var(--accent)", fontSize: "0.85rem" }}>
-                    <span className="animate-glow" style={{ display: "inline-block", width: 14, height: 14, borderRadius: "50%", background: "var(--accent)" }} />
-                    {progressMessage || "Generating blueprint with AI..."}
+                  <div className="animate-slide-in" style={{ marginTop: "var(--space-md)", borderRadius: "var(--radius-md)", border: "1px solid var(--border)", background: "var(--bg-secondary)", overflow: "hidden" }}>
+                    {/* Header bar */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)", background: "var(--bg-card)" }}>
+                      <span className="animate-glow" style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "var(--accent)", flexShrink: 0 }} />
+                      <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--accent)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Live Generation</span>
+                      <span style={{ marginLeft: "auto", fontSize: "0.68rem", color: "var(--text-muted)" }}>AI Architect</span>
+                    </div>
+                    {/* Log lines */}
+                    <div style={{ padding: "12px 14px", minHeight: 56, fontFamily: "ui-monospace, 'Cascadia Code', monospace" }}>
+                      {logEntries.length === 0 ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                          <span className="animate-spin">◌</span>
+                          {progressMessage || "Starting…"}
+                        </div>
+                      ) : (
+                        logEntries.map((entry) => (
+                          <div key={entry.id} className={entry.done ? "" : "animate-slide-in"} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "3px 0", fontSize: "0.8rem", color: entry.done ? "var(--text-muted)" : "var(--text-primary)", transition: "color 0.4s" }}>
+                            <span style={{ flexShrink: 0, fontSize: "0.75rem", marginTop: 1 }}>
+                              {entry.done ? "✓" : <span className="animate-spin">◌</span>}
+                            </span>
+                            <span style={{ lineHeight: 1.5 }}>{entry.text}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 )}
                 {error && <div style={{ marginTop: "var(--space-md)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem", lineHeight: 1.6 }}>❌ {error}</div>}
