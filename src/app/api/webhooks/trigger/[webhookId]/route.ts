@@ -17,10 +17,10 @@ import { inngest } from '@/lib/inngest/client';
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { webhookId: string } }
+  context: { params: Promise<{ webhookId: string }> }
 ) {
+  const { webhookId } = await context.params;
   const supabase = createServiceClient();
-  const { webhookId } = params;
 
   // Validate secret
   const secret = req.headers.get('x-webhook-secret');
@@ -81,13 +81,14 @@ export async function POST(
 // Health-check for webhook URL validation
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { webhookId: string } }
+  context: { params: Promise<{ webhookId: string }> }
 ) {
+  const { webhookId } = await context.params;
   const supabase = createServiceClient();
   const { data } = await supabase
     .from('mission_webhooks')
     .select('id, mission_id, label')
-    .eq('id', params.webhookId)
+    .eq('id', webhookId)
     .single();
 
   if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
