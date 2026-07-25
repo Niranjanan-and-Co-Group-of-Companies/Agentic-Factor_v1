@@ -102,6 +102,29 @@ async function verifyApiKey(
         return { verified: true, accountInfo: `Account: ${data.friendly_name || accountSid}` };
       }
 
+      case 'calendly': {
+        const apiKey = fields.apiKey;
+        if (!apiKey) return { verified: false, error: 'Personal Access Token is required' };
+        const res = await fetch('https://api.calendly.com/users/me', {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (!res.ok) return { verified: false, error: 'Invalid Calendly token' };
+        const data = await res.json();
+        const name = data.resource?.name || 'verified';
+        return { verified: true, accountInfo: `Account: ${name}` };
+      }
+
+      case 'typeform': {
+        const apiKey = fields.apiKey;
+        if (!apiKey) return { verified: false, error: 'Personal Access Token is required' };
+        const res = await fetch('https://api.typeform.com/me', {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (!res.ok) return { verified: false, error: 'Invalid Typeform token' };
+        const data = await res.json();
+        return { verified: true, accountInfo: `Account: ${data.email || data.alias || 'verified'}` };
+      }
+
       case 'apollo': {
         const apiKey = fields.apiKey;
         if (!apiKey) return { verified: false, error: 'API key is required' };

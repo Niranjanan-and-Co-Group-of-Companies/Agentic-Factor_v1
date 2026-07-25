@@ -37,3 +37,5 @@ import './search';
 import './hunter';
 import './outreach';
 import './apollo';
+import './calendly';
+import './typeform';

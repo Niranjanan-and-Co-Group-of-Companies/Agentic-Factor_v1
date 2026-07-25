@@ -138,6 +138,10 @@ export default function Sidebar() {
         <span className="icon">🔑</span> Credentials
       </Link>
 
+      <Link href="/dashboard/usage" className="nav-link">
+        <span className="icon">📈</span> Usage & Credits
+      </Link>
+
       <div style={{ borderTop: "1px solid var(--border)", margin: "var(--space-sm) 0" }} />
 
       <Link href="/pricing" className="nav-link">
