@@ -102,6 +102,22 @@ async function verifyApiKey(
         return { verified: true, accountInfo: `Account: ${data.friendly_name || accountSid}` };
       }
 
+      case 'apollo': {
+        const apiKey = fields.apiKey;
+        if (!apiKey) return { verified: false, error: 'API key is required' };
+        // Use a minimal people search (1 result) to verify the key
+        const res = await fetch('https://api.apollo.io/api/v1/mixed_people/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+          body: JSON.stringify({ per_page: 1 }),
+        });
+        if (res.status === 401 || res.status === 403) return { verified: false, error: 'Invalid Apollo.io API key' };
+        if (!res.ok) return { verified: false, error: `Apollo.io returned HTTP ${res.status}` };
+        const data = await res.json();
+        const credits = data.partial_results_limit ?? null;
+        return { verified: true, accountInfo: credits ? `Connected · ${credits} credits/month` : 'Apollo.io key verified' };
+      }
+
       default:
         // For providers without a verify endpoint, skip verification and trust the user
         return { verified: true, accountInfo: 'Credentials saved (not verified)' };
