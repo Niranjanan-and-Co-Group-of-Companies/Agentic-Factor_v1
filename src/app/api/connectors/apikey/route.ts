@@ -4,6 +4,46 @@ import { createServiceClient } from '@/lib/supabase/server';
 
 export const maxDuration = 15;
 
+// GET /api/connectors/apikey
+// Returns all connected API key providers for the tenant — never returns the actual tokens.
+export async function GET(request: NextRequest) {
+  const authResult = await extractTenantContext(request);
+  if (isAuthError(authResult)) return authResult;
+  const { tenantId } = authResult;
+
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from('tenant_permissions')
+    .select('provider, scopes, updated_at, created_at')
+    .eq('tenant_id', tenantId)
+    .contains('scopes', ['apikey'])
+    .order('updated_at', { ascending: false });
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ credentials: data ?? [] });
+}
+
+// DELETE /api/connectors/apikey?provider=xxx
+// Revokes (deletes) a stored API key credential.
+export async function DELETE(request: NextRequest) {
+  const authResult = await extractTenantContext(request);
+  if (isAuthError(authResult)) return authResult;
+  const { tenantId } = authResult;
+
+  const provider = new URL(request.url).searchParams.get('provider');
+  if (!provider) return NextResponse.json({ error: 'provider is required' }, { status: 400 });
+
+  const supabase = createServiceClient();
+  const { error } = await supabase
+    .from('tenant_permissions')
+    .delete()
+    .eq('tenant_id', tenantId)
+    .eq('provider', provider);
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ success: true });
+}
+
 // POST /api/connectors/apikey
 // Stores a customer-provided API key (or multi-field credentials) in tenant_permissions.
 // Single-field connectors: stores raw string. Multi-field: stores JSON.

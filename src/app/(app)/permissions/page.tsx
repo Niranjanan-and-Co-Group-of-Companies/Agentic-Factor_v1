@@ -1,18 +1,41 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
-// ============================================================
-// Types
-// ============================================================
+interface ApiCredential {
+  provider: string;
+  scopes: string[];
+  updated_at: string;
+  created_at: string;
+}
+
 interface Permission {
   id: string; service: string; type: string; scope: string;
   confidentialityLevel: "public" | "internal" | "confidential" | "restricted";
   granted: boolean; missionTitle: string;
 }
 
-const levelColors: Record<string, string> = { public: "badge-green", internal: "badge-blue", confidential: "badge-amber", restricted: "badge-red" };
-const typeIcons: Record<string, string> = { api_key: "🔑", oauth_token: "🔗", database_credential: "🗄️", file_access: "📁" };
+const levelColors: Record<string, string> = {
+  public: "badge-green", internal: "badge-blue",
+  confidential: "badge-amber", restricted: "badge-red",
+};
+
+const PROVIDER_LABELS: Record<string, string> = {
+  hunter: "Hunter.io", apollo: "Apollo.io", stripe: "Stripe", sendgrid: "SendGrid",
+  twilio: "Twilio", openai_api: "OpenAI", anthropic_api: "Anthropic", replicate: "Replicate",
+  aws: "Amazon Web Services", vercel: "Vercel", supabase_ext: "Supabase", firebase: "Firebase",
+  segment: "Segment", mixpanel: "Mixpanel", make: "Make (Integromat)", woocommerce: "WooCommerce",
+  bamboohr: "BambooHR", heygen: "HeyGen", langsmith: "LangSmith", shiprocket: "Shiprocket",
+  razorpay: "Razorpay", calendly: "Calendly", typeform: "Typeform",
+};
+
+const PROVIDER_ICONS: Record<string, string> = {
+  hunter: "🎯", apollo: "🔭", stripe: "💳", sendgrid: "✉️", twilio: "📞",
+  openai_api: "🤖", anthropic_api: "🧠", replicate: "🔬", aws: "🟧", vercel: "▲",
+  supabase_ext: "⚡", firebase: "🔥", segment: "📡", mixpanel: "📈", make: "🔄",
+  woocommerce: "🛒", bamboohr: "🎋", heygen: "🎬", langsmith: "🔗", shiprocket: "🚀",
+  razorpay: "💸", calendly: "📅", typeform: "📝",
+};
 
 function getSupabase() {
   return createBrowserClient(
@@ -21,191 +44,209 @@ function getSupabase() {
   );
 }
 
-// ============================================================
-// Permission Gate — Live Data
-// ============================================================
 export default function PermissionsPage() {
+  const [credentials, setCredentials] = useState<ApiCredential[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [secrets, setSecrets] = useState<Record<string, string>>({});
-  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchPermissions();
-  }, []);
-
-  const fetchPermissions = async () => {
+  const fetchAll = useCallback(async () => {
     const supabase = getSupabase();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
 
-    const { data: rows } = await supabase
-      .from("permissions")
-      .select("id, service, type, scope, confidentiality_level, granted, mission_title")
-      .eq("tenant_id", user.id)
-      .order("created_at", { ascending: false });
+    // Fetch connected API keys
+    const credRes = await fetch('/api/connectors/apikey');
+    if (credRes.ok) {
+      const { credentials: creds } = await credRes.json() as { credentials: ApiCredential[] };
+      setCredentials(creds ?? []);
+    }
 
-    if (rows) {
-      setPermissions(rows.map((r: Record<string, unknown>) => ({
-        id: r.id as string,
-        service: (r.service as string) || "Service",
-        type: (r.type as string) || "api_key",
-        scope: (r.scope as string) || "read",
-        confidentialityLevel: (r.confidentiality_level as Permission["confidentialityLevel"]) || "internal",
-        granted: (r.granted as boolean) ?? false,
-        missionTitle: (r.mission_title as string) || "Mission",
-      })));
+    // Fetch mission-requested permissions (legacy table — may not exist)
+    try {
+      const { data: rows } = await supabase
+        .from("permissions")
+        .select("id, service, type, scope, confidentiality_level, granted, mission_title")
+        .eq("tenant_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (rows) {
+        setPermissions(rows.map((r: Record<string, unknown>) => ({
+          id: r.id as string,
+          service: (r.service as string) || "Service",
+          type: (r.type as string) || "api_key",
+          scope: (r.scope as string) || "read",
+          confidentialityLevel: (r.confidentiality_level as Permission["confidentialityLevel"]) || "internal",
+          granted: (r.granted as boolean) ?? false,
+          missionTitle: (r.mission_title as string) || "Mission",
+        })));
+      }
+    } catch {
+      // Table may not exist — silent
     }
 
     setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const revokeCredential = async (provider: string) => {
+    if (!confirm(`Revoke ${PROVIDER_LABELS[provider] ?? provider} credentials? This cannot be undone.`)) return;
+    setRevoking(provider);
+    const res = await fetch(`/api/connectors/apikey?provider=${provider}`, { method: 'DELETE' });
+    if (res.ok) {
+      setCredentials(prev => prev.filter(c => c.provider !== provider));
+    }
+    setRevoking(null);
   };
 
-  const handleSave = async (permId: string) => {
+  const handlePermSave = async (permId: string) => {
     const value = secrets[permId];
     if (!value?.trim()) return;
     setSaving(permId);
-
     try {
       const supabase = getSupabase();
-      const { error } = await supabase
-        .from("permissions")
-        .update({ granted: true, updated_at: new Date().toISOString() })
-        .eq("id", permId);
-
-      if (!error) {
-        setPermissions((prev) => prev.map((p) => p.id === permId ? { ...p, granted: true } : p));
-      }
-    } catch {
-      // Silent — permission table might not exist yet
-    }
-
+      await supabase.from("permissions").update({ granted: true }).eq("id", permId);
+      setPermissions(prev => prev.map(p => p.id === permId ? { ...p, granted: true } : p));
+    } catch { /* silent */ }
     setSaving(null);
     setSaved(permId);
     setTimeout(() => setSaved(null), 2000);
   };
 
-  const grantedCount = permissions.filter((p) => p.granted).length;
-  const pendingCount = permissions.filter((p) => !p.granted).length;
+  const card: React.CSSProperties = {
+    background: "var(--surface)", border: "1px solid var(--border)",
+    borderRadius: "var(--radius)", padding: "var(--space-lg)",
+  };
 
-  // ── Loading state ──
   if (loading) {
     return (
-      <>
-        <div className="page-header">
-          <h1 className="page-title">🔐 Permission Gate</h1>
-          <p className="page-subtitle">Loading credentials...</p>
-        </div>
-        <div className="stack">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="card perm-card" style={{ padding: "var(--space-lg)" }}>
-              <div className="animate-glow" style={{ width: 40, height: 40, borderRadius: 8, background: "var(--border)", marginRight: 16 }} />
-              <div style={{ flex: 1 }}>
-                <div className="animate-glow" style={{ width: `${40 + i * 20}%`, height: 16, borderRadius: 4, background: "var(--border)", marginBottom: 8 }} />
-                <div className="animate-glow" style={{ width: "70%", height: 12, borderRadius: 4, background: "var(--border)" }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </>
-    );
-  }
-
-  // ── Empty state ──
-  if (permissions.length === 0) {
-    return (
-      <>
-        <div className="page-header">
-          <h1 className="page-title">🔐 Permission Gate</h1>
-          <p className="page-subtitle">Securely provide credentials required by your agent teams</p>
-        </div>
-        <div className="card" style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md) var(--space-lg)", background: "var(--accent-subtle)", borderColor: "hsla(217,91%,60%,0.2)" }}>
-          <div className="row" style={{ fontSize: "0.85rem" }}>
-            <span>🛡️</span>
-            <span>All credentials are encrypted with <strong>AES-256-GCM</strong> using per-tenant derived keys.</span>
-          </div>
-        </div>
-        <div className="card" style={{ textAlign: "center", padding: "var(--space-2xl)" }}>
-          <div style={{ fontSize: "3rem", marginBottom: "var(--space-md)" }}>🔐</div>
-          <h2 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}>No Permissions Required Yet</h2>
-          <p style={{ color: "var(--text-secondary)", marginBottom: "var(--space-lg)" }}>
-            Permissions will appear here when your missions need external service credentials (API keys, OAuth tokens, database access).
-          </p>
-          <a href="/" className="btn btn-primary">🎯 Create a Mission</a>
-        </div>
-      </>
+      <div className="page-container stack" style={{ gap: "var(--space-lg)" }}>
+        <div style={{ fontWeight: 700, fontSize: "1.5rem" }}>Credentials</div>
+        <div style={{ color: "var(--text-muted)" }}>Loading...</div>
+      </div>
     );
   }
 
   return (
-    <>
-      <div className="page-header">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <div>
-            <h1 className="page-title">🔐 Permission Gate</h1>
-            <p className="page-subtitle">Securely provide credentials required by your agent teams</p>
-          </div>
-          <div className="row">
-            <span className="badge badge-green">{grantedCount} Granted</span>
-            <span className="badge badge-amber">{pendingCount} Pending</span>
-          </div>
+    <div className="page-container stack" style={{ gap: "var(--space-lg)", maxWidth: 860 }}>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: "1.5rem" }}>Credentials</div>
+        <div style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginTop: 4 }}>
+          Manage connected API keys. Values are AES-256-GCM encrypted and only decrypted at agent runtime.
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md) var(--space-lg)", background: "var(--accent-subtle)", borderColor: "hsla(217,91%,60%,0.2)" }}>
-        <div className="row" style={{ fontSize: "0.85rem" }}>
-          <span>🛡️</span>
-          <span>All credentials are encrypted with <strong>AES-256-GCM</strong> using per-tenant derived keys. Values are never stored in plaintext and are only decrypted at agent runtime within your tenant&apos;s isolated context.</span>
+      {/* ── Connected API Keys ── */}
+      <div style={card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-md)" }}>
+          <div style={{ fontWeight: 600 }}>Connected API Keys</div>
+          <a href="/connectors" style={{ fontSize: "0.85rem", color: "var(--accent)" }}>
+            + Add connector →
+          </a>
         </div>
-      </div>
 
-      <div className="stack">
-        {permissions.map((perm) => (
-          <div key={perm.id} className="card perm-card animate-slide-in">
-            <div className="perm-icon" style={{ background: perm.granted ? "var(--emerald-bg)" : "var(--amber-bg)" }}>
-              {typeIcons[perm.type] || "🔑"}
-            </div>
-            <div className="perm-details">
-              <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-xs)" }}>
-                <div style={{ fontWeight: 600 }}>{perm.service}</div>
-                <div className="row">
-                  <span className={`badge ${levelColors[perm.confidentialityLevel]}`}>{perm.confidentialityLevel}</span>
-                  {perm.granted && <span className="badge badge-green">✓ Granted</span>}
+        {credentials.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "var(--space-xl)", color: "var(--text-muted)" }}>
+            <div style={{ fontSize: "2rem", marginBottom: "var(--space-sm)" }}>🔌</div>
+            <div>No API keys connected yet.</div>
+            <a href="/connectors" style={{ color: "var(--accent)", fontSize: "0.9rem" }}>
+              Go to Connectors →
+            </a>
+          </div>
+        ) : (
+          <div className="stack" style={{ gap: "var(--space-sm)" }}>
+            {credentials.map((cred) => (
+              <div key={cred.provider} style={{
+                display: "flex", alignItems: "center", gap: "var(--space-md)",
+                padding: "var(--space-sm) var(--space-md)",
+                background: "var(--background)", borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--border)",
+              }}>
+                <div style={{ fontSize: "1.4rem", width: 32, textAlign: "center" }}>
+                  {PROVIDER_ICONS[cred.provider] ?? "🔑"}
                 </div>
-              </div>
-              <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginBottom: "var(--space-sm)" }}>
-                <span style={{ color: "var(--text-muted)" }}>Mission:</span> {perm.missionTitle} · <span style={{ color: "var(--text-muted)" }}>Type:</span> {perm.type.replace(/_/g, " ")} · <span style={{ color: "var(--text-muted)" }}>Scope:</span> <code style={{ fontSize: "0.78rem", color: "var(--accent)" }}>{perm.scope}</code>
-              </div>
-
-              {!perm.granted ? (
-                <div className="perm-input">
-                  <div className="row" style={{ gap: "var(--space-sm)" }}>
-                    <div style={{ flex: 1, position: "relative" }}>
-                      <input
-                        className="input" type={showSecrets[perm.id] ? "text" : "password"}
-                        placeholder={`Enter ${perm.type.replace(/_/g, " ")} for ${perm.service}...`}
-                        value={secrets[perm.id] || ""} onChange={(e) => setSecrets({ ...secrets, [perm.id]: e.target.value })}
-                        style={{ paddingRight: "45px", fontSize: "0.85rem" }}
-                      />
-                      <button className="perm-toggle" onClick={() => setShowSecrets({ ...showSecrets, [perm.id]: !showSecrets[perm.id] })}>
-                        {showSecrets[perm.id] ? "🙈" : "👁️"}
-                      </button>
-                    </div>
-                    <button className="btn btn-primary btn-sm" onClick={() => handleSave(perm.id)} disabled={saving === perm.id || !secrets[perm.id]?.trim()}>
-                      {saving === perm.id ? "🔒 Encrypting..." : saved === perm.id ? "✓ Saved!" : "🔒 Encrypt & Save"}
-                    </button>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 500 }}>
+                    {PROVIDER_LABELS[cred.provider] ?? cred.provider}
+                  </div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                    Connected · Last updated {new Date(cred.updated_at).toLocaleDateString()}
                   </div>
                 </div>
-              ) : (
-                <div className="row" style={{ fontSize: "0.8rem", color: "var(--emerald)" }}>
-                  <span>🔒</span> Credential securely stored (AES-256-GCM encrypted)
+                <div style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+                  <span style={{ fontSize: "0.75rem", background: "color-mix(in srgb, var(--emerald) 15%, transparent)",
+                    color: "var(--emerald)", borderRadius: 4, padding: "2px 8px", fontWeight: 600 }}>
+                    ✓ Active
+                  </span>
+                  <button
+                    onClick={() => revokeCredential(cred.provider)}
+                    disabled={revoking === cred.provider}
+                    style={{ background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
+                      color: "var(--rose)", cursor: "pointer", padding: "4px 10px", fontSize: "0.8rem",
+                      opacity: revoking === cred.provider ? 0.5 : 1 }}>
+                    {revoking === cred.provider ? "..." : "Revoke"}
+                  </button>
                 </div>
-              )}
-            </div>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
-    </>
+
+      {/* ── Mission-Requested Permissions (existing flow) ── */}
+      {permissions.length > 0 && (
+        <div style={card}>
+          <div style={{ fontWeight: 600, marginBottom: "var(--space-md)" }}>
+            Mission Permission Requests
+          </div>
+          <div style={{ fontSize: "0.82rem", color: "var(--text-muted)", marginBottom: "var(--space-md)" }}>
+            These permissions were requested by your agent missions and require your approval.
+          </div>
+          <div className="stack" style={{ gap: "var(--space-sm)" }}>
+            {permissions.map((perm) => (
+              <div key={perm.id} style={{
+                padding: "var(--space-md)", background: "var(--background)",
+                borderRadius: "var(--radius-sm)", border: "1px solid var(--border)",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--space-sm)" }}>
+                  <div>
+                    <div style={{ fontWeight: 500 }}>{perm.service}</div>
+                    <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                      Mission: {perm.missionTitle} · Scope: <code style={{ color: "var(--accent)" }}>{perm.scope}</code>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "var(--space-xs)" }}>
+                    <span className={`badge ${levelColors[perm.confidentialityLevel]}`}>{perm.confidentialityLevel}</span>
+                    {perm.granted && <span className="badge badge-green">✓ Granted</span>}
+                  </div>
+                </div>
+                {!perm.granted && (
+                  <div style={{ display: "flex", gap: "var(--space-sm)" }}>
+                    <input
+                      type="password"
+                      placeholder={`Enter credential for ${perm.service}...`}
+                      value={secrets[perm.id] || ""}
+                      onChange={(e) => setSecrets(s => ({ ...s, [perm.id]: e.target.value }))}
+                      style={{ flex: 1, padding: "var(--space-sm) var(--space-md)",
+                        background: "var(--surface)", border: "1px solid var(--border)",
+                        borderRadius: "var(--radius-sm)", color: "var(--text)", fontSize: "0.85rem" }}
+                    />
+                    <button className="btn btn-primary"
+                      onClick={() => handlePermSave(perm.id)}
+                      disabled={saving === perm.id || !secrets[perm.id]?.trim()}>
+                      {saving === perm.id ? "Saving..." : saved === perm.id ? "✓ Saved" : "Grant"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
