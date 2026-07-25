@@ -142,6 +142,10 @@ export default function Sidebar() {
         <span className="icon">📈</span> Usage & Credits
       </Link>
 
+      <Link href="/settings/team" className="nav-link">
+        <span className="icon">👥</span> Team
+      </Link>
+
       <div style={{ borderTop: "1px solid var(--border)", margin: "var(--space-sm) 0" }} />
 
       <Link href="/pricing" className="nav-link">

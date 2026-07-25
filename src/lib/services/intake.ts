@@ -949,5 +949,16 @@ export async function persistMission(
     },
   });
 
+  // Snapshot version 1 (non-fatal if mission_versions table not yet migrated)
+  try {
+    await supabase.from('mission_versions').insert({
+      mission_id: finalMissionId,
+      tenant_id: tenantId,
+      version_number: 1,
+      mission_json: mission,
+      change_summary: 'Initial blueprint',
+    });
+  } catch { /* table may not exist yet */ }
+
   return mission;
 }

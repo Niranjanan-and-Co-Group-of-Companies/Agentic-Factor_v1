@@ -269,6 +269,11 @@ export default function MissionDetailPage() {
   const [newWebhookLabel, setNewWebhookLabel] = useState("");
   const [newWebhookSecret, setNewWebhookSecret] = useState<{id: string; secret: string; url: string} | null>(null);
   const [webhookCopied, setWebhookCopied] = useState<string | null>(null);
+  const [versions, setVersions] = useState<Array<{
+    id: string; version_number: number; change_summary: string; created_at: string;
+  }>>([]);
+  const [restoringVersion, setRestoringVersion] = useState<string | null>(null);
+  const [restoreSuccess, setRestoreSuccess] = useState<number | null>(null);
 
   const handleRequestConnector = async () => {
     if (!connectorRequest.trim()) return;
@@ -495,6 +500,15 @@ export default function MissionDetailPage() {
           setWebhooks(wData.webhooks || []);
         }
       } catch { /* webhook fetch is non-critical */ }
+
+      // Fetch version history
+      try {
+        const versionsRes = await fetch(`/api/missions/${missionId}/versions`);
+        if (versionsRes.ok) {
+          const vData = await versionsRes.json();
+          setVersions(vData.versions || []);
+        }
+      } catch { /* non-critical */ }
 
       setLoading(false);
     }
@@ -1211,6 +1225,63 @@ export default function MissionDetailPage() {
           >{webhookCreating ? "Creating..." : "+ New Webhook"}</button>
         </div>
       </div>
+
+      {/* VERSION HISTORY */}
+      {versions.length > 0 && (
+        <div className="card" style={{ marginBottom: "var(--space-xl)" }}>
+          <div className="card-header">
+            <span className="card-title">🕐 Blueprint Version History</span>
+            <span className="badge badge-blue">{versions.length} version{versions.length !== 1 ? "s" : ""}</span>
+          </div>
+          <div className="stack" style={{ gap: "var(--space-xs)", maxHeight: 280, overflowY: "auto" }}>
+            {versions.map((v, idx) => (
+              <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "var(--bg-glass)", borderRadius: 8, fontSize: "0.82rem" }}>
+                <div style={{ width: 28, height: 28, borderRadius: "50%", background: idx === 0 ? "color-mix(in srgb, var(--accent) 20%, transparent)" : "var(--bg-secondary)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: "0.75rem", flexShrink: 0, color: idx === 0 ? "var(--accent)" : "var(--text-muted)" }}>
+                  v{v.version_number}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: idx === 0 ? 600 : 400 }}>
+                    {v.change_summary}
+                    {idx === 0 && <span style={{ marginLeft: 8, fontSize: "0.7rem", color: "var(--emerald)", fontWeight: 600 }}>CURRENT</span>}
+                  </div>
+                  <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 2 }}>
+                    {new Date(v.created_at).toLocaleString()}
+                  </div>
+                </div>
+                {idx > 0 && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`Restore to Version ${v.version_number}? The current blueprint will be replaced.`)) return;
+                      setRestoringVersion(v.id);
+                      const res = await fetch(`/api/missions/${missionId}/versions`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ versionId: v.id }),
+                      });
+                      if (res.ok) {
+                        const { newVersion } = await res.json();
+                        setRestoreSuccess(v.version_number);
+                        setTimeout(() => setRestoreSuccess(null), 3000);
+                        const vRes = await fetch(`/api/missions/${missionId}/versions`);
+                        if (vRes.ok) { const vd = await vRes.json(); setVersions(vd.versions || []); }
+                      }
+                      setRestoringVersion(null);
+                    }}
+                    disabled={restoringVersion === v.id}
+                    style={{ fontSize: "0.75rem", padding: "4px 10px", borderRadius: 6, background: "none", border: "1px solid var(--border)", color: "var(--accent)", cursor: "pointer", whiteSpace: "nowrap", opacity: restoringVersion === v.id ? 0.5 : 1 }}>
+                    {restoringVersion === v.id ? "Restoring..." : "Restore"}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {restoreSuccess !== null && (
+            <div style={{ marginTop: "var(--space-sm)", padding: "8px 12px", background: "color-mix(in srgb, var(--emerald) 15%, transparent)", borderRadius: 6, fontSize: "0.82rem", color: "var(--emerald)" }}>
+              ✓ Restored to Version {restoreSuccess}. A new version snapshot was created.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* PHASE 4.3: Localized Approvals */}
       {pendingActions.length > 0 && (
