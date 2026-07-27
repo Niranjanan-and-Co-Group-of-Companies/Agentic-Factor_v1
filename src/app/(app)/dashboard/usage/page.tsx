@@ -10,6 +10,7 @@ import { useEffect, useState, useCallback } from "react";
 interface BillingData {
   plan: string;
   credits_remaining: number;
+  credits_topup: number;
   credits_total: number;
   credits_used_this_month: number;
   billing_period_start: string;
@@ -272,6 +273,49 @@ export default function UsagePage() {
           )}
         </div>
       </div>
+
+      {/* ── Credit Forecast ── */}
+      {billing && billing.credits_used_this_month > 0 && (() => {
+        const periodStart = billing.billing_period_start ? new Date(billing.billing_period_start) : new Date();
+        const daysSinceStart = Math.max(1, Math.floor((Date.now() - periodStart.getTime()) / (24 * 60 * 60 * 1000)));
+        const dailyBurnRate = billing.credits_used_this_month / daysSinceStart;
+        const remaining = (billing.credits_remaining ?? 0) + (billing.credits_topup ?? 0);
+        const daysUntilEmpty = dailyBurnRate > 0 ? Math.floor(remaining / dailyBurnRate) : null;
+        const projectedMonthly = Math.round(dailyBurnRate * 30);
+        return (
+          <div style={card}>
+            <div style={{ fontWeight: 600, marginBottom: 'var(--space-md)' }}>Credit Forecast</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--space-md)' }}>
+              <div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--accent)' }}>
+                  {dailyBurnRate.toFixed(1)}
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Credits / day (avg)</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--purple)' }}>
+                  {projectedMonthly}
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Projected this month</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 700, color: daysUntilEmpty !== null && daysUntilEmpty < 7 ? 'var(--rose)' : 'var(--emerald)' }}>
+                  {daysUntilEmpty !== null ? `${daysUntilEmpty}d` : '∞'}
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Until credits run out</div>
+              </div>
+            </div>
+            {daysUntilEmpty !== null && daysUntilEmpty < 7 && (
+              <div style={{ marginTop: 'var(--space-md)', padding: 'var(--space-sm) var(--space-md)',
+                background: 'color-mix(in srgb, var(--rose) 10%, transparent)', borderRadius: 'var(--radius-sm)',
+                fontSize: '0.85rem', color: 'var(--rose)' }}>
+                ⚠ Credits will run out in {daysUntilEmpty} day{daysUntilEmpty !== 1 ? 's' : ''}.{' '}
+                <a href="/pricing" style={{ color: 'var(--rose)', textDecoration: 'underline' }}>Buy a top-up →</a>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Spending Cap ── */}
       <div style={card}>

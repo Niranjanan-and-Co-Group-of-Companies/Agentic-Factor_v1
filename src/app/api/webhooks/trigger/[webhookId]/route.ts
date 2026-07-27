@@ -31,7 +31,7 @@ export async function POST(
   // Look up webhook record
   const { data: webhook, error: lookupErr } = await supabase
     .from('mission_webhooks')
-    .select('id, tenant_id, mission_id, webhook_secret, trigger_count')
+    .select('id, tenant_id, mission_id, webhook_secret, trigger_count, filter_conditions')
     .eq('id', webhookId)
     .single();
 
@@ -44,11 +44,31 @@ export async function POST(
   }
 
   // Parse request body — accept any JSON payload
-  let webhookPayload: unknown = {};
+  let webhookPayload: Record<string, unknown> = {};
   try {
     webhookPayload = await req.json();
   } catch {
     // Non-JSON body is fine — pass empty object
+  }
+
+  // Evaluate filter_conditions if set — skip trigger if payload doesn't match
+  const conditions = webhook.filter_conditions as Array<{ field: string; operator: string; value: unknown }> | null;
+  if (conditions?.length) {
+    const matched = conditions.every(({ field, operator, value }) => {
+      const actual = field.split('.').reduce<unknown>((obj, key) => (obj as Record<string, unknown>)?.[key], webhookPayload);
+      switch (operator) {
+        case 'eq':  return actual === value;
+        case 'neq': return actual !== value;
+        case 'gt':  return (actual as number) > (value as number);
+        case 'lt':  return (actual as number) < (value as number);
+        case 'contains': return String(actual ?? '').includes(String(value));
+        case 'exists':   return actual !== undefined && actual !== null;
+        default: return true;
+      }
+    });
+    if (!matched) {
+      return NextResponse.json({ skipped: true, reason: 'filter_conditions not matched' }, { status: 200 });
+    }
   }
 
   // Generate a runId here so the caller can track this specific execution

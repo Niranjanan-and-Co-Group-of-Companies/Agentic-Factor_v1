@@ -146,13 +146,21 @@ export default function Sidebar() {
         <span className="icon">👥</span> Team
       </Link>
 
+      <Link href="/templates" className="nav-link">
+        <span className="icon">📋</span> Templates
+      </Link>
+
+      <Link href="/audit-logs" className="nav-link">
+        <span className="icon">📜</span> Audit Logs
+      </Link>
+
       <div style={{ borderTop: "1px solid var(--border)", margin: "var(--space-sm) 0" }} />
 
       <Link href="/pricing" className="nav-link">
         <span className="icon">🏷️</span> Pricing
       </Link>
-      <Link href="/terms" className="nav-link">
-        <span className="icon">📜</span> Terms & Conditions
+      <Link href="/onboarding" className="nav-link">
+        <span className="icon">🚀</span> Get Started
       </Link>
       <Link href="/contact" className="nav-link">
         <span className="icon">💬</span> Support

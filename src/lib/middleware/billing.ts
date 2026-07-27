@@ -144,7 +144,7 @@ export async function checkCredits(tenantId: string, cost: number = 1): Promise<
 
   const { data: billing } = await supabase
     .from('tenant_billing')
-    .select('plan, credits_remaining, credits_topup, credits_total, billing_status, model_tier, is_trial')
+    .select('plan, credits_remaining, credits_topup, credits_total, credits_used_this_month, billing_status, model_tier, is_trial, monthly_credit_limit')
     .eq('tenant_id', tenantId)
     .single();
 
@@ -161,6 +161,19 @@ export async function checkCredits(tenantId: string, cost: number = 1): Promise<
       ? ` You have ${creditsTopup} frozen top-up credits that will be restored when you resubscribe.`
       : '';
     return { allowed: false, plan, reason: `Subscription cancelled. Please resubscribe to continue.${frozenMsg}` };
+  }
+
+  // Enforce monthly spending cap
+  const monthlyLimit = billing?.monthly_credit_limit ?? null;
+  const usedThisMonth = billing?.credits_used_this_month ?? 0;
+  if (monthlyLimit !== null && usedThisMonth + cost > monthlyLimit) {
+    return {
+      allowed: false,
+      plan,
+      reason: `Monthly spending cap of ${monthlyLimit} credits reached (${usedThisMonth} used). Raise your cap in Usage & Credits or wait for next billing period.`,
+      creditsRemaining: totalAvailable,
+      creditsTotal: billing?.credits_total ?? 30,
+    };
   }
 
   if (totalAvailable < cost) {
@@ -269,7 +282,7 @@ export async function deductCredits(
 
   const { data } = await supabase
     .from('tenant_billing')
-    .select('credits_remaining, credits_topup, credits_used_this_month')
+    .select('credits_remaining, credits_topup, credits_used_this_month, monthly_credit_limit')
     .eq('tenant_id', tenantId)
     .single();
 
@@ -277,10 +290,17 @@ export async function deductCredits(
     const creditsMonthly = data.credits_remaining || 0;
     const creditsTopup = data.credits_topup || 0;
     const totalAvailable = creditsMonthly + creditsTopup;
-    
+    const usedThisMonth = data.credits_used_this_month || 0;
+    const monthlyLimit = data.monthly_credit_limit ?? null;
+
     // Hard stop: refuse to deduct if credits are insufficient
     if (totalAvailable < amount) {
       throw new Error(`Insufficient credits: ${totalAvailable} remaining (${creditsMonthly} monthly + ${creditsTopup} top-up), ${amount} needed for ${actionType}`);
+    }
+
+    // Hard stop: refuse to deduct if monthly spending cap would be exceeded
+    if (monthlyLimit !== null && usedThisMonth + amount > monthlyLimit) {
+      throw new Error(`Monthly spending cap of ${monthlyLimit} credits reached (${usedThisMonth} used). Mission paused. Raise your cap in Usage & Credits.`);
     }
 
     // Two-bucket deduction: consume monthly credits FIRST, then top-up

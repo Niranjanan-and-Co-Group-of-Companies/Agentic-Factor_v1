@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
   const [billingRes, missionsRes, runsRes] = await Promise.all([
     supabase
       .from('tenant_billing')
-      .select('plan, credits_remaining, credits_total, credits_used_this_month, billing_period_start, billing_period_end, monthly_credit_limit, billing_status, is_trial')
+      .select('plan, credits_remaining, credits_topup, credits_total, credits_used_this_month, billing_period_start, billing_period_end, monthly_credit_limit, billing_status, is_trial')
       .eq('tenant_id', tenantId)
       .single(),
 
