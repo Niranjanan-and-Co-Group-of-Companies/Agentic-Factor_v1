@@ -13,7 +13,8 @@ const STATUS_COLORS: Record<string, string> = {
   draft: "var(--purple)", failed: "var(--rose)", deadlocked: "var(--rose)",
 };
 
-const NAV_LINKS = [
+// Zone 1 — always visible, never scroll
+const PINNED_LINKS = [
   { href: "/dashboard",       icon: "📊", label: "Dashboard" },
   { href: "/connectors",      icon: "🔌", label: "Connectors" },
   { href: "/permissions",     icon: "🔑", label: "Credentials" },
@@ -23,7 +24,8 @@ const NAV_LINKS = [
   { href: "/audit-logs",      icon: "📜", label: "Audit Logs" },
 ];
 
-const BOTTOM_LINKS = [
+// Zone 2 — scrollable section (above missions)
+const SCROLL_LINKS = [
   { href: "/pricing",    icon: "🏷️", label: "Pricing" },
   { href: "/onboarding", icon: "🚀", label: "Get Started" },
   { href: "/contact",    icon: "💬", label: "Support" },
@@ -37,17 +39,15 @@ function getSupabase() {
 }
 
 export default function Sidebar() {
-  const [user, setUser]                   = useState<UserProfile | null>(null);
-  const [missions, setMissions]           = useState<Mission[]>([]);
-  const [loadingAuth, setLoadingAuth]     = useState(true);
+  const [user, setUser]                       = useState<UserProfile | null>(null);
+  const [missions, setMissions]               = useState<Mission[]>([]);
+  const [loadingAuth, setLoadingAuth]         = useState(true);
   const [loadingMissions, setLoadingMissions] = useState(false);
-  const [mobileOpen, setMobileOpen]       = useState(false);
+  const [mobileOpen, setMobileOpen]           = useState(false);
   const pathname = usePathname();
 
-  // Close drawer on every navigation
   useEffect(() => { setMobileOpen(false); }, [pathname]);
 
-  // Lock body scroll while drawer is open
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
@@ -55,7 +55,7 @@ export default function Sidebar() {
 
   useEffect(() => {
     const supabase = getSupabase();
-    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
 
     supabase.auth.getUser().then(({ data: { user: u } }) => {
       if (u) {
@@ -65,9 +65,7 @@ export default function Sidebar() {
           avatar: u.user_metadata?.avatar_url || u.user_metadata?.picture || null,
         });
         fetchMissions(u.id);
-
-        realtimeChannel = supabase
-          .channel("sidebar-missions")
+        channel = supabase.channel("sidebar-missions")
           .on("postgres_changes", { event: "*", schema: "public", table: "missions", filter: `tenant_id=eq.${u.id}` },
             () => fetchMissions(u.id))
           .subscribe();
@@ -75,7 +73,7 @@ export default function Sidebar() {
       setLoadingAuth(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
       if (session?.user) {
         setUser({
           name:   session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split("@")[0] || "User",
@@ -83,27 +81,18 @@ export default function Sidebar() {
           avatar: session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || null,
         });
         fetchMissions(session.user.id);
-      } else {
-        setUser(null);
-        setMissions([]);
-      }
+      } else { setUser(null); setMissions([]); }
     });
 
-    return () => {
-      subscription.unsubscribe();
-      if (realtimeChannel) supabase.removeChannel(realtimeChannel);
-    };
+    return () => { subscription.unsubscribe(); if (channel) supabase.removeChannel(channel); };
   }, []);
 
   const fetchMissions = async (userId: string) => {
     setLoadingMissions(true);
     try {
       const { data, error } = await getSupabase()
-        .from("missions")
-        .select("id, title, status")
-        .eq("tenant_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(10);
+        .from("missions").select("id, title, status")
+        .eq("tenant_id", userId).order("created_at", { ascending: false }).limit(20);
       if (!error && data) setMissions(data);
     } catch { /* silent */ }
     setLoadingMissions(false);
@@ -111,15 +100,14 @@ export default function Sidebar() {
 
   const handleSignOut = async () => {
     await getSupabase().auth.signOut();
-    setUser(null);
-    setMissions([]);
+    setUser(null); setMissions([]);
     window.location.href = "/";
   };
 
-  // ── Shared pieces ────────────────────────────────────────────
+  // ── Shared sub-components ────────────────────────────────────
 
   const MissionSkeleton = () => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "0 var(--space-sm)" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "0 4px" }}>
       {[1, 2, 3].map(i => (
         <div key={i} className="mission-link" style={{ opacity: 0.3 }}>
           <div className="ml-dot animate-glow" style={{ background: "var(--text-muted)" }} />
@@ -129,23 +117,28 @@ export default function Sidebar() {
     </div>
   );
 
-  const NavLinks = () => (
-    <>
-      {NAV_LINKS.map(l => (
+  // Zone 1 — pinned nav links (Dashboard → Audit Logs)
+  const PinnedNav = () => (
+    <div className="sidebar-top-nav">
+      {PINNED_LINKS.map(l => (
         <Link key={l.href} href={l.href} className="nav-link">
           <span className="icon">{l.icon}</span>{l.label}
         </Link>
       ))}
+    </div>
+  );
 
+  // Zone 2 — scrollable area (Pricing/Get Started/Support + Missions sub-scroll)
+  const ScrollArea = () => (
+    <div className="sidebar-scroll-area">
       <div className="sidebar-divider" />
-
-      {BOTTOM_LINKS.map(l => (
+      {SCROLL_LINKS.map(l => (
         <Link key={l.href} href={l.href} className="nav-link">
           <span className="icon">{l.icon}</span>{l.label}
         </Link>
       ))}
 
-      {/* My Missions */}
+      {/* Missions — height-capped, sub-scrolls within the scroll area */}
       <div className="missions-folder">
         <div className="missions-folder-title">📁 My Missions</div>
         {loadingAuth ? <MissionSkeleton /> : user ? (
@@ -167,10 +160,11 @@ export default function Sidebar() {
           </Link>
         )}
       </div>
-    </>
+    </div>
   );
 
-  const UserFooter = () => (
+  // Zone 3 — pinned footer (user profile + system status)
+  const Footer = () => (
     <div className="sidebar-footer">
       {loadingAuth ? (
         <div className="nav-link" style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
@@ -208,7 +202,7 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Mobile top bar — hidden on desktop via CSS */}
+      {/* Mobile top bar */}
       <div className="mobile-topbar">
         <button className="mobile-menu-btn" onClick={() => setMobileOpen(true)} aria-label="Open menu">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
@@ -221,18 +215,17 @@ export default function Sidebar() {
         <div style={{ width: 44 }} />
       </div>
 
-      {/* Desktop sidebar */}
+      {/* Desktop sidebar — three-zone layout */}
       <nav className="sidebar">
         <div className="sidebar-header">
           <Image src="/logo.png" alt="Agentic Factor" width={160} height={87} style={{ objectFit: "contain" }} />
         </div>
-        <div className="sidebar-nav">
-          <NavLinks />
-        </div>
-        <UserFooter />
+        <PinnedNav />
+        <ScrollArea />
+        <Footer />
       </nav>
 
-      {/* Mobile slide-in drawer */}
+      {/* Mobile slide-in drawer — same three-zone layout */}
       {mobileOpen && (
         <div className="mobile-drawer-overlay" onClick={() => setMobileOpen(false)}>
           <nav className="mobile-drawer" onClick={e => e.stopPropagation()}>
@@ -240,10 +233,9 @@ export default function Sidebar() {
               <Image src="/logo.png" alt="Agentic Factor" width={110} height={60} style={{ objectFit: "contain" }} />
               <button className="mobile-close-btn" onClick={() => setMobileOpen(false)} aria-label="Close menu">✕</button>
             </div>
-            <div className="sidebar-nav">
-              <NavLinks />
-            </div>
-            <UserFooter />
+            <PinnedNav />
+            <ScrollArea />
+            <Footer />
           </nav>
         </div>
       )}
