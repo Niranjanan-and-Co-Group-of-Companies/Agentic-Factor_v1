@@ -75,26 +75,56 @@ body {
 .app-shell { display: flex; min-height: 100vh; }
 
 .sidebar {
-  width: 260px; padding: var(--space-lg);
+  width: 260px;
   background: var(--bg-nav);
   backdrop-filter: blur(20px);
   border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: var(--space-sm);
+  display: flex; flex-direction: column;
   position: fixed; top: 0; left: 0; bottom: 0; z-index: 50;
-  overflow-y: auto;
+  overflow: hidden; /* inner sections handle scrolling, not the sidebar itself */
 }
 
-.sidebar-logo {
-  font-size: 1.25rem; font-weight: 800;
-  background: linear-gradient(135deg, var(--accent), var(--purple));
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  padding: var(--space-md) 0; margin-bottom: var(--space-md);
-  letter-spacing: -0.5px;
+/* Pinned logo at top */
+.sidebar-header {
+  flex-shrink: 0;
+  display: flex; justify-content: center; align-items: center;
+  padding: var(--space-lg) var(--space-md) var(--space-md);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Scrollable nav area — grows to fill remaining height */
+.sidebar-nav {
+  flex: 1;
+  min-height: 0; /* required: lets flex child shrink below its content size */
+  overflow-y: auto;
+  padding: var(--space-md);
+  display: flex; flex-direction: column; gap: 2px;
+}
+
+/* Pinned user profile + status at bottom */
+.sidebar-footer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: var(--border);
+  margin: var(--space-sm) 0;
+  flex-shrink: 0;
+}
+
+.sidebar-status {
+  padding: var(--space-sm) var(--space-md) var(--space-md);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  display: flex; align-items: center; gap: 4px;
 }
 
 .nav-link {
   display: flex; align-items: center; gap: var(--space-sm);
   padding: var(--space-sm) var(--space-md);
+  min-height: 44px; /* WCAG touch target */
   border-radius: var(--radius-md);
   color: var(--text-secondary); text-decoration: none;
   font-size: 0.9rem; font-weight: 500;
@@ -446,19 +476,21 @@ body {
 
 /* ── My Missions Sidebar ── */
 .missions-folder {
-  padding: var(--space-sm) 0; border-top: 1px solid var(--border);
+  padding: var(--space-sm) 0;
+  border-top: 1px solid var(--border);
   margin-top: var(--space-sm);
-  flex: 1; overflow-y: auto; min-height: 0; padding-right: var(--space-xs);
 }
 .missions-folder-title {
   font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
   letter-spacing: 1px; color: var(--text-muted);
-  padding: var(--space-xs) var(--space-md); margin-bottom: var(--space-xs);
-  position: sticky; top: 0; background: var(--bg-nav); z-index: 1; padding-bottom: 4px;
+  padding: var(--space-xs) var(--space-md);
+  margin-bottom: var(--space-xs);
 }
 .mission-link {
-  display: flex; align-items: center; gap: 6px;
-  padding: 4px var(--space-md); font-size: 0.78rem;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px var(--space-md);
+  min-height: 40px; /* comfortable touch target */
+  font-size: 0.78rem;
   color: var(--text-secondary); text-decoration: none;
   border-radius: var(--radius-sm);
   transition: all var(--duration) var(--ease);
@@ -467,9 +499,71 @@ body {
 .mission-link:hover { background: var(--accent-subtle); color: var(--accent); }
 .mission-link .ml-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 
+/* ── Mobile top bar ── */
+.mobile-topbar {
+  display: none; /* shown via media query */
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  height: 60px;
+  background: var(--bg-nav);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  align-items: center; justify-content: space-between;
+  padding: 0 var(--space-md);
+}
+
+.mobile-menu-btn {
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid var(--border);
+  border-radius: var(--radius-md); color: var(--text-primary);
+  cursor: pointer; flex-shrink: 0;
+  transition: all var(--duration) var(--ease);
+}
+.mobile-menu-btn:hover { border-color: var(--accent); background: var(--accent-subtle); }
+
+/* Mobile drawer overlay (backdrop) */
+.mobile-drawer-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: hsla(222, 47%, 5%, 0.8);
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s var(--ease);
+}
+
+/* Slide-in drawer panel */
+.mobile-drawer {
+  position: absolute; top: 0; left: 0; bottom: 0;
+  width: min(80vw, 300px);
+  background: var(--bg-nav);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  animation: drawerSlideIn 0.25s var(--ease);
+}
+@keyframes drawerSlideIn {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+.mobile-drawer-head {
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--space-md) var(--space-md);
+  border-bottom: 1px solid var(--border);
+}
+
+.mobile-close-btn {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text-muted);
+  cursor: pointer; font-size: 1rem;
+  transition: all var(--duration) var(--ease);
+}
+.mobile-close-btn:hover { color: var(--rose); border-color: var(--rose); }
+
 /* ── Responsive ── */
 @media (max-width: 1024px) {
-  .sidebar { width: 220px; padding: var(--space-md); }
+  .sidebar { width: 220px; }
   .main-content { margin-left: 220px; padding: var(--space-lg); }
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
@@ -479,10 +573,18 @@ body {
 }
 @media (max-width: 768px) {
   .sidebar { display: none; }
-  .main-content { margin-left: 0; }
-  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .mobile-topbar { display: flex; }
+  .main-content {
+    margin-left: 0;
+    padding: var(--space-md);
+    padding-top: calc(60px + var(--space-md)); /* clear mobile top bar */
+  }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
   .gemini-panel { width: calc(100vw - 32px); right: 16px; }
+  .gemini-fab { bottom: 16px; right: 16px; }
   .command-popup { width: calc(100vw - 32px); left: 16px; transform: none; }
+  .page-title { font-size: 1.4rem; }
+  .stat-value { font-size: 1.5rem; }
 }
 
 /* ── User Profile Card ── */
