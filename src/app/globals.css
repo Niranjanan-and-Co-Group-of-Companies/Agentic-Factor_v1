@@ -95,8 +95,8 @@ body {
 /* Scrollable nav area — grows to fill remaining height */
 .sidebar-nav {
   flex: 1;
-  min-height: 0; /* required: lets flex child shrink below its content size */
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden; /* nav links stay put — only missions-folder sub-scrolls */
   padding: var(--space-md);
   display: flex; flex-direction: column; gap: 2px;
 }
@@ -476,6 +476,9 @@ body {
 
 /* ── My Missions Sidebar ── */
 .missions-folder {
+  flex: 1;        /* takes all remaining height after the nav links above it */
+  min-height: 80px; /* always show at least a few missions */
+  overflow-y: auto; /* sub-scrolls independently — nav links above never move */
   padding: var(--space-sm) 0;
   border-top: 1px solid var(--border);
   margin-top: var(--space-sm);
