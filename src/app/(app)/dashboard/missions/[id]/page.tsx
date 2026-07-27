@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useAuthPopup } from "@/components/providers/AuthProvider";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import ConnectorQuickConnect from "@/components/ConnectorQuickConnect";
 
 interface AgentNode { id: string; role: string; status: string; index: number; successScore: number | null; trustLevel: string; }
 interface ClarificationItem { id: string; agentRole: string; question: string; context: string; category: string; priority: string; missionTitle: string; }
@@ -233,6 +234,8 @@ export default function MissionDetailPage() {
   const [connectorRequest, setConnectorRequest] = useState("");
   const [connectorSending, setConnectorSending] = useState(false);
   const [connectorToast, setConnectorToast] = useState<string | null>(null);
+  // Quick-connect: shown when a run fails with connector_required
+  const [quickConnectProvider, setQuickConnectProvider] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   // Phase 5: Awaiting Input state
   const [pendingQuestion, setPendingQuestion] = useState<{ question: string; options: string[]; agentRole: string; agentId: string } | null>(null);
@@ -261,6 +264,8 @@ export default function MissionDetailPage() {
     agents_total: number; agents_done: number; agents_failed: number;
   }>>([]);
   const [isScheduled, setIsScheduled] = useState(false);
+  const [schedulePaused, setSchedulePaused] = useState(false);
+  const [togglingPause, setTogglingPause] = useState(false);
   const [webhooks, setWebhooks] = useState<Array<{
     id: string; label: string | null; triggerUrl: string;
     last_triggered_at: string | null; trigger_count: number; created_at: string;
@@ -489,6 +494,14 @@ export default function MissionDetailPage() {
           const runsData = await runsRes.json();
           setRunHistory(runsData.runs || []);
           setIsScheduled(runsData.hasActiveSchedule || false);
+          // Fetch schedule pause state
+          try {
+            const schedRes = await fetch(`/api/missions/${missionId}/schedule`);
+            if (schedRes.ok) {
+              const schedData = await schedRes.json() as { schedule_paused: boolean };
+              setSchedulePaused(schedData.schedule_paused ?? false);
+            }
+          } catch { /* non-critical */ }
         }
       } catch { /* run history fetch is non-critical */ }
 
@@ -875,6 +888,31 @@ export default function MissionDetailPage() {
         </div>
       )}
 
+      {/* MISSING CONNECTOR BANNER — shown when last run failed due to connector_required */}
+      {runHistory.length > 0 && runHistory[0].status === "failed" && runHistory[0].agents_failed > 0 && (
+        <div style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md) var(--space-lg)", background: "hsla(38,92%,50%,0.08)", border: "1px solid hsla(38,92%,50%,0.3)", borderRadius: "var(--radius)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-md)" }}>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--amber)" }}>⚠️ Last run failed — a connector may not be set up</div>
+            <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: 2 }}>
+              Check the run details or connect a missing service right here without leaving the page.
+            </div>
+          </div>
+          <button className="btn btn-sm" style={{ background: "var(--amber)", color: "black", flexShrink: 0 }}
+            onClick={() => setQuickConnectProvider("__unknown__")}>
+            Connect a Service →
+          </button>
+        </div>
+      )}
+
+      {/* QUICK CONNECT MODAL */}
+      {quickConnectProvider && (
+        <ConnectorQuickConnect
+          provider={quickConnectProvider === "__unknown__" ? "custom_unknown" : quickConnectProvider}
+          onConnected={() => { setQuickConnectProvider(null); setRefreshTrigger(t => t + 1); }}
+          onClose={() => setQuickConnectProvider(null)}
+        />
+      )}
+
       {/* MISSION FAILURE CARD */}
       {mission.status === "failed" && (
         <div className="card animate-slide-in" style={{ marginBottom: "var(--space-xl)", borderColor: "hsla(0,84%,60%,0.4)", background: "hsla(0,84%,60%,0.06)" }}>
@@ -943,12 +981,35 @@ export default function MissionDetailPage() {
             <button className="btn btn-ghost" onClick={() => setShowSchedulePicker(true)}>📅 Set Schedule</button>
           )}
           {isScheduled && (
-            <button className="btn btn-ghost" style={{ color: "var(--ruby)" }} onClick={async () => {
-              if (!confirm('Stop the recurring schedule for this mission?')) return;
-              await fetch(`/api/missions/${missionId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unschedule' }) });
-              setIsScheduled(false);
-              window.location.reload();
-            }}>✕ Remove Schedule</button>
+            <div style={{ display: "flex", gap: "var(--space-sm)", flexWrap: "wrap" }}>
+              <button
+                className="btn btn-ghost"
+                disabled={togglingPause}
+                onClick={async () => {
+                  setTogglingPause(true);
+                  const res = await fetch(`/api/missions/${missionId}/schedule`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paused: !schedulePaused }),
+                  });
+                  if (res.ok) setSchedulePaused(p => !p);
+                  setTogglingPause(false);
+                }}
+              >
+                {togglingPause ? '...' : schedulePaused ? '▶ Resume Schedule' : '⏸ Pause Schedule'}
+              </button>
+              <button className="btn btn-ghost" style={{ color: "var(--ruby)" }} onClick={async () => {
+                if (!confirm('Stop the recurring schedule for this mission?')) return;
+                await fetch(`/api/missions/${missionId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unschedule' }) });
+                setIsScheduled(false);
+                window.location.reload();
+              }}>✕ Remove Schedule</button>
+            </div>
+          )}
+          {isScheduled && schedulePaused && (
+            <div style={{ marginTop: "var(--space-sm)", padding: "6px 12px", background: "color-mix(in srgb, var(--amber) 12%, transparent)", borderRadius: 6, fontSize: "0.82rem", color: "var(--amber)" }}>
+              ⏸ Schedule is paused — the cron will skip this mission until you resume it.
+            </div>
           )}
           {showSchedulePicker && (
             <div style={{ marginTop: "var(--space-md)" }}>
@@ -1122,7 +1183,13 @@ export default function MissionDetailPage() {
                       {run.agents_done}/{run.agents_total} agents · {durLabel} · {new Date(run.started_at).toLocaleString()}
                     </div>
                   </div>
-                  <span style={{ fontSize: "0.72rem", fontWeight: 600, color: run.status === "completed" ? "var(--emerald)" : run.status === "failed" ? "var(--rose)" : "var(--text-muted)", textTransform: "capitalize" }}>{run.status}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: "0.72rem", fontWeight: 600, color: run.status === "completed" ? "var(--emerald)" : run.status === "failed" ? "var(--rose)" : "var(--text-muted)", textTransform: "capitalize" }}>{run.status}</span>
+                    <button
+                      onClick={() => { sessionStorage.setItem(`run_mission_${run.id}`, missionId as string); window.location.href = `/dashboard/runs/${run.id}`; }}
+                      style={{ fontSize: "0.68rem", padding: "2px 7px", background: "none", border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer", color: "var(--accent)" }}
+                    >Details →</button>
+                  </div>
                 </div>
               );
             })}

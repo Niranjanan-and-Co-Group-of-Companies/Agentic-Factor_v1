@@ -39,3 +39,38 @@ import './outreach';
 import './apollo';
 import './calendly';
 import './typeform';
+import './slack';
+import './github';
+import './hubspot';
+import './salesforce';
+import './notion';
+import './airtable';
+import './twilio';
+import './discord';
+import './twitter';
+import './stripe';
+import './zoho-crm';
+import './ab-test';
+// Voice stack
+import './vapi';
+import './elevenlabs';
+import './deepgram';
+// Google (OAuth token)
+import './google-calendar';
+import './google-sheets';
+import './gmail';
+// Microsoft 365 (OAuth token)
+import './microsoft-teams';
+import './microsoft-calendar';
+// Atlassian / productivity (OAuth token)
+import './jira';
+import './monday';
+import './asana';
+import './mailchimp';
+// API key connectors
+import './sendgrid';
+import './linear';
+import './zendesk';
+import './shopify';
+// Universal custom connector
+import './custom';

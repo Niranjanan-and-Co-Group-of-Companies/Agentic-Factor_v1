@@ -1,6 +1,8 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { createBrowserClient } from "@supabase/ssr";
+
+interface CustomConnector { provider: string; metadata: { display_name: string; base_url: string | null; auth_type: string } | null; updated_at: string; }
 import ConnectorLogo from "@/components/ConnectorLogos";
 
 // ============================================================
@@ -105,9 +107,14 @@ const CONNECTORS: ConnectorDef[] = [
   { id: "typeform", label: "Typeform", icon: "📝", description: "Fetch form responses and trigger agent workflows when new submissions arrive — turns form data into automated actions.", category: "productivity", status: "available", provider: "typeform", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "Personal Access Token", placeholder: "Your Typeform token" }], apiKeyHelpText: "Find in Typeform → Account → Personal Tokens" },
   { id: "hunter", label: "Hunter.io", icon: "🎯", description: "Find verified professional email addresses by company domain — powers outreach and lead generation agents.", category: "research", status: "available", provider: "hunter", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "Your Hunter.io API key" }], apiKeyHelpText: "Find in Hunter.io → Dashboard → API (free plan: 25 searches/month)" },
 
+  // ── New API key connectors ──
+  { id: "vapi", label: "Vapi.ai", icon: "📞", description: "AI-powered voice calls — inbound reception agents, outbound feedback calls, appointment reminders, and lead qualification via phone.", category: "communication", status: "available", provider: "vapi", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "Your Vapi API key" }], apiKeyHelpText: "Find in Vapi Dashboard → Account → API Keys. Also configure your phone number webhook URL to: https://agenticfactor.io/api/voice/inbound/[missionId]" },
+  { id: "elevenlabs", label: "ElevenLabs", icon: "🎙️", description: "Ultra-realistic AI voice generation — create branded voices for your reception agent or any text-to-speech use case.", category: "ai", status: "available", provider: "elevenlabs", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "Your ElevenLabs API key" }], apiKeyHelpText: "Find in ElevenLabs → Profile → API Key" },
+  { id: "deepgram", label: "Deepgram", icon: "🎤", description: "Real-time and batch speech-to-text transcription. Transcribe call recordings, voicemails, and meeting audio.", category: "ai", status: "available", provider: "deepgram", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "Your Deepgram API key" }], apiKeyHelpText: "Find in Deepgram Console → Settings → API Keys" },
+  { id: "linear", label: "Linear", icon: "⚡", description: "Modern issue tracking for engineering teams — create issues, manage sprints, and triage bugs automatically.", category: "devtools", status: "available", provider: "linear", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "lin_api_..." }], apiKeyHelpText: "Find in Linear → Settings → API → Personal API Keys" },
+  { id: "zendesk", label: "Zendesk", icon: "🎧", description: "Customer support tickets, live chat, and help center management — auto-respond and triage support requests.", category: "crm", status: "available", provider: "zendesk", connectionType: "apikey", apiKeyFields: [{ key: "email", label: "Agent Email", placeholder: "you@company.com" }, { key: "token", label: "API Token", placeholder: "Your Zendesk API token" }, { key: "subdomain", label: "Subdomain", placeholder: "yourcompany" }], apiKeyHelpText: "Zendesk Admin → Apps and Integrations → Zendesk API → API Token" },
+  { id: "shopify", label: "Shopify", icon: "🛍️", description: "Store management, product listings, order fulfillment, inventory tracking, and customer management.", category: "ecommerce", status: "available", provider: "shopify", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "Access Token", placeholder: "shpat_..." }, { key: "shop", label: "Shop Domain", placeholder: "mystore.myshopify.com" }], apiKeyHelpText: "Shopify Admin → Settings → Apps → Develop apps → Create app → Admin API access token" },
   // ── Coming Soon ──
-  { id: "shopify", label: "Shopify", icon: "🛍️", description: "Store management, product listings, order fulfillment, and inventory tracking.", category: "ecommerce", status: "coming_soon" },
-  { id: "zendesk", label: "Zendesk", icon: "🎧", description: "Customer support tickets, live chat, and help center management.", category: "crm", status: "coming_soon" },
   { id: "gcp", label: "Google Cloud", icon: "🔵", description: "BigQuery, Cloud Functions, Pub/Sub, and GCS for data engineering agents.", category: "cloud", status: "coming_soon" },
   { id: "workday", label: "Workday", icon: "🏢", description: "Enterprise HCM, payroll, and workforce management.", category: "hr", status: "coming_soon" },
   { id: "tiktok", label: "TikTok", icon: "🎵", description: "Content analytics, ad management, and engagement tracking.", category: "social", status: "coming_soon" },
@@ -174,13 +181,29 @@ export default function ConnectorsPage() {
   const [requestSending, setRequestSending] = useState(false);
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
   const [apiKeyVerified, setApiKeyVerified] = useState(false);
+  // Custom connector state
+  const [customConnectors, setCustomConnectors] = useState<CustomConnector[]>([]);
+  const [showCustomModal, setShowCustomModal] = useState(false);
+  const [customForm, setCustomForm] = useState({ name: '', api_key: '', base_url: '', auth_type: 'bearer' });
+  const [savingCustom, setSavingCustom] = useState(false);
+  const [customError, setCustomError] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 4000);
   };
 
-  useEffect(() => { checkConnectionStatus(); }, []);
+  useEffect(() => { checkConnectionStatus(); fetchCustomConnectors(); }, []);
+
+  const fetchCustomConnectors = async () => {
+    try {
+      const res = await fetch('/api/connectors/custom', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json() as { connectors: CustomConnector[] };
+        setCustomConnectors(data.connectors ?? []);
+      }
+    } catch { /* silent */ }
+  };
 
   const checkConnectionStatus = async () => {
     const supabase = getSupabase();
@@ -191,7 +214,6 @@ export default function ConnectorsPage() {
 
     const providers = new Set<string>();
     try {
-      // tenantId === user.id directly — skip tenants table (RLS often blocks browser client)
       const { data: perms } = await supabase
         .from('tenant_permissions')
         .select('provider')
@@ -203,6 +225,38 @@ export default function ConnectorsPage() {
 
     setConnectedProviders(providers);
     setLoading(false);
+  };
+
+  const handleSaveCustomConnector = async () => {
+    if (!customForm.name.trim()) { setCustomError('Name is required'); return; }
+    if (!customForm.api_key.trim()) { setCustomError('API Key is required'); return; }
+    setSavingCustom(true);
+    setCustomError(null);
+    try {
+      const res = await fetch('/api/connectors/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(customForm),
+      });
+      const data = await res.json() as { success?: boolean; error?: string };
+      if (!res.ok || !data.success) { setCustomError(data.error ?? 'Failed to save'); setSavingCustom(false); return; }
+      showToast(`✅ ${customForm.name} connected!`);
+      setShowCustomModal(false);
+      setCustomForm({ name: '', api_key: '', base_url: '', auth_type: 'bearer' });
+      fetchCustomConnectors();
+      checkConnectionStatus();
+    } catch { setCustomError('Network error'); }
+    setSavingCustom(false);
+  };
+
+  const handleDeleteCustomConnector = async (provider: string, name: string) => {
+    try {
+      await fetch(`/api/connectors/custom?provider=${provider}`, { method: 'DELETE', credentials: 'include' });
+      showToast(`✓ ${name} removed`);
+      fetchCustomConnectors();
+      checkConnectionStatus();
+    } catch { /* silent */ }
   };
 
   const filtered = useMemo(() => {
@@ -573,6 +627,108 @@ export default function ConnectorsPage() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Custom Connectors Section ── */}
+      <div style={{ marginTop: 'var(--space-2xl)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-xl)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>🔌 Custom API Connectors</div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
+              Connect any REST API not listed above — agents can call it using the <code>custom_api_call</code> tool.
+            </div>
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={() => { setShowCustomModal(true); setCustomError(null); }}>
+            + Add Any API
+          </button>
+        </div>
+
+        {customConnectors.length === 0 ? (
+          <div style={{ padding: 'var(--space-lg)', background: 'var(--surface)', border: '1px dashed var(--border)', borderRadius: 'var(--radius)', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+            No custom APIs added yet. Click <strong>+ Add Any API</strong> to connect Vapi, your internal CRM, hotel PMS, or any REST service.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 'var(--space-md)' }}>
+            {customConnectors.map(c => (
+              <div key={c.provider} className="card" style={{ padding: 'var(--space-md)', borderColor: 'hsla(152,69%,50%,0.3)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{c.metadata?.display_name ?? c.provider}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                      {c.metadata?.base_url ?? 'No base URL'} · {c.metadata?.auth_type ?? 'bearer'}
+                    </div>
+                  </div>
+                  <span className="badge badge-green" style={{ fontSize: '0.6rem' }}>✓ Connected</span>
+                </div>
+                <div style={{ marginTop: 'var(--space-sm)', fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                  tool: custom_api_call · connector_name: &quot;{c.metadata?.display_name ?? c.provider}&quot;
+                </div>
+                <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 'var(--space-sm)', fontSize: '0.75rem' }}
+                  onClick={() => handleDeleteCustomConnector(c.provider, c.metadata?.display_name ?? c.provider)}>
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Custom Connector Modal ── */}
+      {showCustomModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}
+          onClick={() => setShowCustomModal(false)}>
+          <div className="card" style={{ width: '100%', maxWidth: 460, padding: 'var(--space-xl)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>🔌 Add Custom API Connector</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>Connect any REST API — Vapi, hotel PMS, internal tools, anything</div>
+              </div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowCustomModal(false)}>✕</button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+              {[
+                { key: 'name', label: 'Connector Name', placeholder: 'e.g. Vapi, My Hotel PMS, Pipedrive', type: 'text' },
+                { key: 'api_key', label: 'API Key / Token', placeholder: 'Your secret key or bearer token', type: 'password' },
+                { key: 'base_url', label: 'Base URL (optional)', placeholder: 'https://api.vapi.ai', type: 'text' },
+              ].map(field => (
+                <div key={field.key}>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>{field.label}</label>
+                  <input className="input" type={field.type} placeholder={field.placeholder}
+                    value={customForm[field.key as keyof typeof customForm]}
+                    onChange={e => setCustomForm(prev => ({ ...prev, [field.key]: e.target.value }))}
+                    style={{ fontSize: '0.85rem' }} autoComplete="off" />
+                </div>
+              ))}
+              <div>
+                <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Auth Type</label>
+                <select className="input" value={customForm.auth_type} onChange={e => setCustomForm(prev => ({ ...prev, auth_type: e.target.value }))} style={{ fontSize: '0.85rem' }}>
+                  <option value="bearer">Bearer Token (Authorization: Bearer ...)</option>
+                  <option value="apikey">API Key Header (X-API-Key: ...)</option>
+                  <option value="basic">Basic Auth (base64 encoded)</option>
+                  <option value="token">Token (Authorization: Token ...)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 'var(--space-sm)', padding: 'var(--space-sm) var(--space-md)', background: 'var(--bg-glass)', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem', color: 'var(--text-muted)', borderLeft: '3px solid var(--accent)' }}>
+              💡 Agents use this via: <code>custom_api_call</code> tool with <code>connector_name: &quot;{customForm.name || 'YourName'}&quot;</code>
+            </div>
+
+            {customError && (
+              <div style={{ padding: 'var(--space-sm)', background: 'hsla(0,84%,60%,0.1)', border: '1px solid hsla(0,84%,60%,0.3)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: 'hsl(0,84%,70%)', marginTop: 'var(--space-md)' }}>
+                ❌ {customError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 'var(--space-sm)', justifyContent: 'flex-end', marginTop: 'var(--space-lg)' }}>
+              <button className="btn btn-ghost" onClick={() => setShowCustomModal(false)} disabled={savingCustom}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSaveCustomConnector} disabled={savingCustom}>
+                {savingCustom ? 'Saving…' : 'Save Connector →'}
+              </button>
+            </div>
           </div>
         </div>
       )}
