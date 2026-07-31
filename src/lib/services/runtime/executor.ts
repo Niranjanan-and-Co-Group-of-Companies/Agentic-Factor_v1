@@ -364,6 +364,8 @@ export async function executeMission(
           { role: 'system', content: `You are the Mission Supervisor. Based on the previous agent's output and the mission goal, decide which agent should run next. If the goal is fully achieved, return null. Return JSON: {"nextAgentId": "uuid-here" | null, "reasoning": "why"}` },
           { role: 'user', content: `Mission: ${mission.title}\n\nAvailable Agents:\n${JSON.stringify(availableAgents, null, 2)}\n\nPrevious Agent Output:\n${output}` }
         ], { jsonMode: true, tier: 2 });
+        const { deductCredits: deductSupervisor, CREDIT_COSTS: SC } = await import('@/lib/middleware/billing');
+        deductSupervisor(tenantId, SC.llm_call_pro, `supervisor_routing:${agent.id}`).catch(() => {});
         const decisionData = JSON.parse(decision.content);
         currentAgentId = decisionData.nextAgentId;
         currentContext = output;

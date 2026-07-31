@@ -307,11 +307,18 @@ async function runRealSideEffects(
   pythonCode: string,
   sandboxEnvs: Record<string, string>,
   dryRunOutputJSON: string,
-  agentId: string
+  agentId: string,
+  tenantId: string
 ): Promise<string> {
   let finalOutputJSON = dryRunOutputJSON;
   console.log(`[Agent ${agentId}] Phase 2: Executing real side effects...`);
   try {
+    // Charge for Phase 2 sandbox before spinning it up
+    const { deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
+    await deductCredits(tenantId, CREDIT_COSTS.code_execution, `e2b_phase2_realrun:${agentId}`).catch(
+      (e: any) => console.warn(`[Agent ${agentId}] Phase 2 credit deduction failed (non-fatal):`, e.message)
+    );
+
     const finalEnvs = { ...sandboxEnvs };
     delete finalEnvs['AF_DRY_RUN'];
 
@@ -575,7 +582,7 @@ export async function executeAgent(
         if (process.env.TWITTER_BEARER_TOKEN) resumeEnvs['TWITTER_BEARER_TOKEN'] = process.env.TWITTER_BEARER_TOKEN;
         if (process.env.FACEBOOK_APP_ID) resumeEnvs['FACEBOOK_APP_ID'] = process.env.FACEBOOK_APP_ID;
 
-        const realOutput = await runRealSideEffects(approvedCode, resumeEnvs, existingAction.payload.output, agent.id);
+        const realOutput = await runRealSideEffects(approvedCode, resumeEnvs, existingAction.payload.output, agent.id, tenantId);
         return { output: realOutput, finalCode: approvedCode };
       }
 
@@ -639,6 +646,10 @@ export async function executeAgent(
       const { generateEmbedding } = await import('../llm-router');
       const ragQueryText = `${agent.role}: ${agent.systemPrompt}. Input context: ${inputContext?.substring(0, 500) || 'initial'}`;
       const queryEmbedding = await generateEmbedding(ragQueryText);
+      if (queryEmbedding) {
+        const { deductCredits: deductEmbed, CREDIT_COSTS: EC } = await import('@/lib/middleware/billing');
+        deductEmbed(tenantId, EC.embedding, `rag_embedding:${agent.role}`).catch(() => {});
+      }
 
       let availableResources = '';
       let strictBoundaries = '';
@@ -1277,6 +1288,8 @@ Be a real critic, not a rubber stamp — but don't be pedantic about minor forma
 
 Respond: {"valid": boolean, "reason": "string if invalid"}`;
           const criticResult = await callLLM([{ role: 'user', content: criticPrompt }], { temperature: 0, jsonMode: true, tier: 3 });
+          const { deductCredits: deductCritic, CREDIT_COSTS: CC } = await import('@/lib/middleware/billing');
+          deductCritic(tenantId, CC.llm_call_flash, `critic_llm:${agent.role}`).catch(() => {});
           const criticParsed = robustJSONParse(criticResult.content);
           if (!criticParsed.valid) {
             // Capture this as a feedback example before retrying — an
@@ -1396,7 +1409,7 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
         // (read-only agents and reversible-write agents under conditional
         // trust, plus any agent under autonomous trust, land here directly).
         if (hasWriteOps) {
-          finalOutputJSON = await runRealSideEffects(pythonCode, sandboxEnvs, finalOutputJSON, agent.id);
+          finalOutputJSON = await runRealSideEffects(pythonCode, sandboxEnvs, finalOutputJSON, agent.id, tenantId);
         } else {
           console.log(`[Agent ${agent.id}] No write operations detected — skipping Phase 2.`);
         }
