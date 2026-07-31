@@ -279,8 +279,19 @@ export default function PricingPage() {
                 <h3 style={{ fontSize: "1.1rem", fontWeight: 700, margin: 0 }}>{plan.name}</h3>
                 {plan.subtitle && <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 500 }}>{plan.subtitle}</span>}
               </div>
-              <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: "4px 0 var(--space-md)" }}>{plan.description}</p>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+              <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: "4px 0 var(--space-md)" }}>
+                {plan.id === "individual" && billingPeriod === "annual" ? "₹24,990/year — 2 months free" :
+                 plan.id === "pro"        && billingPeriod === "annual" ? "₹29,990/seat/year — 2 months free" :
+                 plan.description}
+              </p>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                {/* Strikethrough original price when annual */}
+                {plan.id === "individual" && billingPeriod === "annual" && (
+                  <span style={{ fontSize: "1.1rem", color: "var(--text-muted)", textDecoration: "line-through" }}>₹29,988</span>
+                )}
+                {plan.id === "pro" && billingPeriod === "annual" && (
+                  <span style={{ fontSize: "1.1rem", color: "var(--text-muted)", textDecoration: "line-through" }}>From ₹35,988</span>
+                )}
                 <span style={{ fontSize: "2rem", fontWeight: 800 }}>
                   {plan.id === "individual" && billingPeriod === "annual" ? "₹24,990" :
                    plan.id === "pro"        && billingPeriod === "annual" ? "From ₹29,990" :
