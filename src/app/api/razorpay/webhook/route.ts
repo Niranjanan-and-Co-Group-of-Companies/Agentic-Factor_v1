@@ -211,7 +211,7 @@ export async function POST(request: NextRequest) {
             await sendEmail({
               to: email,
               subject: '❌ Agentic Factor Payment Failed',
-              body: `Your payment of $${((payment.amount / 100) / 85).toFixed(0)} (₹${(payment.amount / 100).toFixed(0)}) failed.\n\nReason: ${payment.error_description || 'Unknown'}\n\nPlease update your payment method: https://agenticfactor.io/pricing`,
+              body: `Your payment of ₹${(payment.amount / 100).toFixed(0)} failed.\n\nReason: ${payment.error_description || 'Unknown'}\n\nPlease update your payment method: https://agenticfactor.io/pricing`,
             });
           }
         }

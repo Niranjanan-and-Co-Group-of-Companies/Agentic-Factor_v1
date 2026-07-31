@@ -12,7 +12,7 @@ const plans = [
     id: "free",
     name: "Free",
     subtitle: "Trial",
-    price: "$0",
+    price: "₹0",
     period: "forever",
     description: "Try the power of AI agents",
     credits: "30 credits (one-time)",
@@ -34,8 +34,7 @@ const plans = [
     id: "individual",
     name: "Individual",
     subtitle: "Prosumer",
-    price: "$29",
-    priceUsd: "",
+    price: "₹2,499",
     period: "/month",
     description: "For solo founders & power users",
     credits: "1,000 credits/month",
@@ -59,10 +58,9 @@ const plans = [
     id: "pro",
     name: "Pro",
     subtitle: "Teams",
-    price: "From $53",
-    priceUsd: "",
+    price: "From ₹4,548",
     period: "/month",
-    description: "$27 base + $26/seat",
+    description: "₹2,299 base + ₹2,249/seat",
     credits: "1,000 credits/seat/month",
     features: [
       { label: "1,000 credits/seat/month", detail: "scales with team" },
@@ -269,7 +267,6 @@ export default function PricingPage() {
               <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: "4px 0 var(--space-md)" }}>{plan.description}</p>
               <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
                 <span style={{ fontSize: "2rem", fontWeight: 800 }}>{plan.price}</span>
-                {plan.priceUsd && <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>({plan.priceUsd})</span>}
                 <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>{plan.period}</span>
               </div>
               <div style={{ marginTop: 8, padding: "6px 12px", background: "hsla(155,80%,40%,0.1)", borderRadius: "var(--radius-sm)", border: "1px solid hsla(155,80%,40%,0.2)", display: "inline-block" }}>
@@ -308,19 +305,19 @@ export default function PricingPage() {
                 <div style={{ marginTop: 12, padding: "8px 12px", background: "var(--bg-card)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", marginBottom: 4 }}>
                     <span style={{ color: "var(--text-muted)" }}>Base platform fee</span>
-                    <span>$27</span>
+                    <span>₹2,299</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", marginBottom: 4 }}>
-                    <span style={{ color: "var(--text-muted)" }}>{seatCount} × $26/seat</span>
-                    <span>${(26 * seatCount).toLocaleString("en-US")}</span>
+                    <span style={{ color: "var(--text-muted)" }}>{seatCount} × ₹2,249/seat</span>
+                    <span>₹{(2249 * seatCount).toLocaleString("en-IN")}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", marginBottom: 4, color: "var(--emerald)" }}>
                     <span>Credits included</span>
-                    <span>{(1000 * seatCount).toLocaleString("en-US")} credits/mo</span>
+                    <span>{(1000 * seatCount).toLocaleString("en-IN")} credits/mo</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.95rem", fontWeight: 800, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
                     <span>Total</span>
-                    <span style={{ color: "var(--accent)" }}>${(27 + 26 * seatCount).toLocaleString("en-US")}/mo</span>
+                    <span style={{ color: "var(--accent)" }}>₹{(2299 + 2249 * seatCount).toLocaleString("en-IN")}/mo</span>
                   </div>
                 </div>
               </div>
@@ -363,9 +360,9 @@ export default function PricingPage() {
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-md)" }}>
           {[
-            { name: "Starter Pack", credits: 200, price: 7, originalPrice: null, discount: null, packId: "starter" },
-            { name: "Power Pack", credits: 500, price: 15, originalPrice: 18, discount: "13.4%", packId: "power" },
-            { name: "Mega Pack", credits: 1500, price: 42, originalPrice: 53, discount: "22.2%", packId: "mega" },
+            { name: "Starter Pack", credits: 200, price: 599, originalPrice: null, discount: null, packId: "starter" },
+            { name: "Power Pack", credits: 500, price: 1299, originalPrice: 1499, discount: "13%", packId: "power" },
+            { name: "Mega Pack", credits: 1500, price: 3499, originalPrice: 4499, discount: "22%", packId: "mega" },
           ].map((pack, i) => (
             <div key={i} className="card" style={{ padding: "var(--space-lg)", textAlign: "center", position: "relative" }}>
               {pack.discount && (
@@ -381,13 +378,13 @@ export default function PricingPage() {
               <div style={{ marginBottom: 12 }}>
                 {pack.originalPrice && (
                   <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", textDecoration: "line-through", marginRight: 6 }}>
-                    ${pack.originalPrice.toLocaleString("en-US")}
+                    ₹{pack.originalPrice.toLocaleString("en-IN")}
                   </span>
                 )}
-                <span style={{ fontSize: "1.1rem", fontWeight: 700 }}>${pack.price.toLocaleString("en-US")}</span>
+                <span style={{ fontSize: "1.1rem", fontWeight: 700 }}>₹{pack.price.toLocaleString("en-IN")}</span>
               </div>
               <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: 12 }}>
-                ${(pack.price / pack.credits).toFixed(2)}/credit
+                ₹{(pack.price / pack.credits).toFixed(2)}/credit
               </div>
               <button
                 className="btn btn-ghost btn-sm"

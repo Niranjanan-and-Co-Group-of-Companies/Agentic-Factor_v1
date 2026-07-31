@@ -24,14 +24,7 @@ interface Blueprint {
   permissions: { type: string; service: string; scope: string; confidentialityLevel: string; granted: boolean }[];
   discoveryQuestions?: string[];
 }
-interface SimilarMission { pattern_summary: string; orchestration_pattern: string; agent_count: number; similarity: number; }
 type Phase = "input" | "discovery" | "reviewing" | "confirmed";
-
-const SIMILAR_MISSIONS: SimilarMission[] = [
-  { pattern_summary: "AWS Cost Monitoring + Slack Alerts", orchestration_pattern: "sequential", agent_count: 2, similarity: 0.92 },
-  { pattern_summary: "E-commerce Data Pipeline + Reporting", orchestration_pattern: "sequential", agent_count: 3, similarity: 0.85 },
-  { pattern_summary: "Social Media Sentiment Analysis", orchestration_pattern: "parallel", agent_count: 4, similarity: 0.78 },
-];
 
 const TRUST_LABELS: Record<TrustLevel, { label: string; icon: string; desc: string }> = {
   manual: { label: "Manual", icon: "🛑", desc: "Pauses for your approval before any write action (sending, posting, deleting) — pure research/lookup steps never pause" },
@@ -496,24 +489,6 @@ function MissionCreatorInner() {
           </div>
 
           <div className="stack">
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">🧠 Similar Missions</span>
-                <span className="badge badge-blue">Vector Memory</span>
-              </div>
-              <div className="stack" style={{ gap: "var(--space-sm)" }}>
-                {SIMILAR_MISSIONS.map((m, i) => (
-                  <div key={i} className="card" style={{ padding: "var(--space-md)", cursor: "pointer" }} onClick={() => setIntent(m.pattern_summary)}>
-                    <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>{m.pattern_summary}</div>
-                    <div className="row" style={{ marginTop: "var(--space-sm)" }}>
-                      <span className="badge badge-purple" style={{ fontSize: "0.65rem" }}>{m.orchestration_pattern}</span>
-                      <span className="badge badge-blue" style={{ fontSize: "0.65rem" }}>{m.agent_count} agents</span>
-                      <span style={{ fontSize: "0.7rem", color: "var(--emerald)", marginLeft: "auto" }}>{(m.similarity * 100).toFixed(0)}%</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
             <div className="card" style={{ borderColor: "hsla(217,91%,60%,0.2)", background: "var(--accent-subtle)" }}>
               <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.7 }}>
                 <strong style={{ color: "var(--accent)" }}>How it works:</strong><br />
