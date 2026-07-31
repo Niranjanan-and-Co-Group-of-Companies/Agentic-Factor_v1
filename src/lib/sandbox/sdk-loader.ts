@@ -969,7 +969,7 @@ def call(
 
 def linkedin_post(content: str, visibility: str = "PUBLIC") -> Dict:
     """Post to LinkedIn feed."""
-    token = _get_token("linkedin")
+    token = _get_token("linkedin_oidc")
     profile = _request("GET", "https://api.linkedin.com/v2/userinfo", token=token, provider="linkedin")
     person_urn = f"urn:li:person:{profile.get('sub', '')}"
 

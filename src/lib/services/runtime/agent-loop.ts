@@ -694,7 +694,7 @@ The \`agenticfactor\` Python SDK is pre-installed and provides tested, reliable 
 **USE THIS SDK instead of writing raw HTTP requests.** It handles authentication, retries, and error handling automatically.
 
 AVAILABLE MODULES:
-  from agenticfactor import gmail, calendar, drive, sheets, search, files, api
+  from agenticfactor import gmail, calendar, drive, sheets, search, files, api, social
   from agenticfactor._core import ask_user, notify_user, schedule_check
 
   # GMAIL — Send, read, search emails
@@ -732,13 +732,30 @@ AVAILABLE MODULES:
   files.parse_csv(file_path_or_bytes)  # Returns 2D list
   files.parse_excel(file_path_or_bytes)
 
+  # SOCIAL MEDIA — Twitter/X, LinkedIn, Facebook, Instagram (USE THIS for all social posting)
+  social.post_tweet(text="Your tweet text here")  # Post to Twitter/X (max 280 chars per tweet)
+  social.get_tweets(query="agenticfactor", max_results=10)  # Search recent tweets
+  social.get_twitter_user_me()  # Get authenticated Twitter profile
+  social.post_linkedin(text="Your LinkedIn post", visibility="PUBLIC")  # Post to LinkedIn
+  social.get_linkedin_profile()  # Get LinkedIn profile (returns sub, name, email)
+  social.get_facebook_pages()  # List managed Facebook Pages → returns [{id, name, access_token}]
+  social.post_facebook(page_id="PAGE_ID", message="Post text")  # Post to Facebook Page
+  social.get_instagram_accounts()  # List linked Instagram business accounts
+  social.post_instagram(ig_user_id="IG_USER_ID", image_url="https://...", caption="Caption")
+  social.post_to_all(text="Cross-post text", platforms=["twitter", "linkedin"])  # Post to multiple
+
   # UNIVERSAL API — Call ANY connector with OAuth token
   api.call(provider="salesforce", method="GET", endpoint="/services/data/v58.0/query", params={"q": "SELECT Id FROM Lead"})
   api.call(provider="hubspot", method="GET", endpoint="/crm/v3/objects/contacts")
-  api.linkedin_post(content="Exciting news!")
   api.slack_send(channel="#general", text="Hello team!")
   api.github_create_issue(owner="org", repo="repo", title="Bug", body="Details")
-  api.notion_create_page(parent_id="...", title="New Page", content="...")
+
+  # NOTION — Always search for the page/database ID first, never hardcode it
+  # Step 1: Search to find the target page or database
+  notion_results = api.call("notion", "POST", "/search", json_data={"query": "page title or keyword"}, headers={"Notion-Version": "2022-06-28"})
+  notion_page_id = notion_results["results"][0]["id"]  # Use the first match
+  # Step 2: Create a page under it
+  api.call("notion", "POST", "/pages", json_data={"parent": {"page_id": notion_page_id}, "properties": {"title": [{"text": {"content": "Page Title"}}]}, "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"text": {"content": "Content here"}}]}}]}, headers={"Notion-Version": "2022-06-28"})
 
   # INTERACTIVE — Pause and ask user, or schedule future checks
   ask_user(question="What budget should I use?", options=["$500", "$1000", "$2000"])
@@ -750,17 +767,19 @@ INSTRUCTIONS:
 2. The script MUST print the final output as a valid JSON string to standard output (stdout).
 3. Do NOT print anything else to stdout. Use sys.stderr.write() for any debugging or logs.
 4. **USE THE agenticfactor SDK** for all API interactions. It handles OAuth tokens automatically.
-5. If the SDK doesn't have a specific wrapper, use \`api.call(provider, method, endpoint)\` for any connector.
-6. OAuth tokens are also available as environment variables if needed: ${envKeys || 'None'}
-7. **CRITICAL STRICT RULE**: NEVER output simulated, mocked, or placeholder data. You MUST execute real API requests using the SDK.
-8. Enclose your Python code inside a triple-backtick block with 'python' as the language identifier.
-9. **DO NOT CATCH FATAL ERRORS**: Let the script crash naturally on errors.
-10. **READING INPUT**: Previous agent data is in \`_input_data\` (parsed JSON dict) and \`_input\` (raw string).
-11. If you need to ask the user something, use \`ask_user()\`. The script will pause and resume when user responds.
-12. **MULTI-LINE STRINGS**: For multi-line text, use triple double-quotes (""" only, NEVER triple single-quotes '''). NEVER put raw HTML inside triple-quoted strings — it breaks Python syntax. Instead, build HTML using a list of strings joined together: lines = []; lines.append('<tr>'); html = '\n'.join(lines).
-13. **JSON IN STRINGS**: When building JSON manually, use json.dumps() instead of hand-crafting JSON strings with f-strings.
-14. **HTML CONTENT**: NEVER embed raw HTML directly in triple-quoted strings. ALWAYS build HTML by concatenating regular strings or using a list: parts = []; parts.append(f'<tr><td>{name}</td></tr>'); html = ''.join(parts). This prevents quote conflicts.
-15. **STRING SAFETY**: Never mix quote types carelessly. If a string contains single quotes, wrap it in double quotes. If it contains double quotes, wrap it in single quotes. For strings with both, use triple double-quotes (""" only).`;
+5. For social media (Twitter/X, LinkedIn, Facebook, Instagram) ALWAYS use the \`social\` module — e.g. \`social.post_tweet()\`, \`social.post_linkedin()\`. NEVER write raw HTTP requests for social APIs.
+6. For Twitter threads: post each tweet individually using \`social.post_tweet(text=tweet)\` in a loop — Twitter has no native thread API.
+7. If the SDK doesn't have a specific wrapper, use \`api.call(provider, method, endpoint)\` for any connector.
+8. OAuth tokens are also available as environment variables if needed: ${envKeys || 'None'}
+9. **CRITICAL STRICT RULE**: NEVER output simulated, mocked, or placeholder data. You MUST execute real API requests using the SDK.
+10. Enclose your Python code inside a triple-backtick block with 'python' as the language identifier.
+11. **DO NOT CATCH FATAL ERRORS**: Let the script crash naturally on errors.
+12. **READING INPUT**: Previous agent data is in \`_input_data\` (parsed JSON dict) and \`_input\` (raw string).
+13. If you need to ask the user something, use \`ask_user()\`. The script will pause and resume when user responds.
+14. **MULTI-LINE STRINGS**: For multi-line text, use triple double-quotes (""" only, NEVER triple single-quotes '''). NEVER put raw HTML inside triple-quoted strings — it breaks Python syntax. Instead, build HTML using a list of strings joined together: lines = []; lines.append('<tr>'); html = '\n'.join(lines).
+15. **JSON IN STRINGS**: When building JSON manually, use json.dumps() instead of hand-crafting JSON strings with f-strings.
+16. **HTML CONTENT**: NEVER embed raw HTML directly in triple-quoted strings. ALWAYS build HTML by concatenating regular strings or using a list: parts = []; parts.append(f'<tr><td>{name}</td></tr>'); html = ''.join(parts). This prevents quote conflicts.
+17. **STRING SAFETY**: Never mix quote types carelessly. If a string contains single quotes, wrap it in double quotes. If it contains double quotes, wrap it in single quotes. For strings with both, use triple double-quotes (""" only).`;
 
 
       const response = await callLLM(
