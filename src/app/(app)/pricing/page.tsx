@@ -58,9 +58,9 @@ const plans = [
     id: "pro",
     name: "Pro",
     subtitle: "Teams",
-    price: "From ₹5,248",
+    price: "From ₹2,999",
     period: "/month",
-    description: "₹2,499 base + ₹2,749/seat",
+    description: "₹2,999/seat/month — no base fee",
     credits: "2,500 credits/seat/month",
     features: [
       { label: "2,500 credits/seat/month", detail: "2.5× more than Individual" },
@@ -123,6 +123,7 @@ export default function PricingPage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [seatCount, setSeatCount] = useState(1);
+  const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'annual'>('monthly');
 
   useEffect(() => { fetchBilling(); }, []);
 
@@ -161,7 +162,7 @@ export default function PricingPage() {
       const res = await fetch("/api/razorpay/create-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId, quantity: planId === "pro" ? seatCount : 1, baseFee: planId === "pro" ? 2499 : 0, seatPrice: planId === "pro" ? 2749 : 0 }),
+        body: JSON.stringify({ planId, quantity: planId === "pro" ? seatCount : 1, billingPeriod }),
       });
 
       const data = await res.json();
@@ -242,6 +243,20 @@ export default function PricingPage() {
         </div>
       </div>
 
+      {/* Billing period toggle */}
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "var(--space-md)", marginBottom: "var(--space-xl)" }}>
+        <span style={{ fontSize: "0.88rem", fontWeight: billingPeriod === "monthly" ? 700 : 400 }}>Monthly</span>
+        <div
+          onClick={() => setBillingPeriod(p => p === "monthly" ? "annual" : "monthly")}
+          style={{ width: 48, height: 26, borderRadius: 13, background: billingPeriod === "annual" ? "var(--accent)" : "var(--border)", cursor: "pointer", position: "relative", transition: "background 0.2s" }}
+        >
+          <div style={{ position: "absolute", top: 3, left: billingPeriod === "annual" ? 25 : 3, width: 20, height: 20, borderRadius: "50%", background: "white", transition: "left 0.2s" }} />
+        </div>
+        <span style={{ fontSize: "0.88rem", fontWeight: billingPeriod === "annual" ? 700 : 400 }}>
+          Annual <span style={{ background: "var(--emerald)", color: "white", fontSize: "0.68rem", fontWeight: 700, padding: "2px 8px", borderRadius: 10, marginLeft: 4 }}>2 months free</span>
+        </span>
+      </div>
+
       {/* Plan cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(265px, 1fr))", gap: "var(--space-lg)", maxWidth: 1200, margin: "0 auto" }}>
         {plans.map((plan) => (
@@ -266,8 +281,16 @@ export default function PricingPage() {
               </div>
               <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: "4px 0 var(--space-md)" }}>{plan.description}</p>
               <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-                <span style={{ fontSize: "2rem", fontWeight: 800 }}>{plan.price}</span>
-                <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>{plan.period}</span>
+                <span style={{ fontSize: "2rem", fontWeight: 800 }}>
+                  {plan.id === "individual" && billingPeriod === "annual" ? "₹24,990" :
+                   plan.id === "pro"        && billingPeriod === "annual" ? "From ₹29,990" :
+                   plan.price}
+                </span>
+                <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                  {plan.id === "individual" && billingPeriod === "annual" ? "/year (₹2,082/mo)" :
+                   plan.id === "pro"        && billingPeriod === "annual" ? "/seat/year (₹2,499/mo)" :
+                   plan.period}
+                </span>
               </div>
               <div style={{ marginTop: 8, padding: "6px 12px", background: "hsla(155,80%,40%,0.1)", borderRadius: "var(--radius-sm)", border: "1px solid hsla(155,80%,40%,0.2)", display: "inline-block" }}>
                 <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--emerald)" }}>🪙 {plan.credits}</span>
@@ -304,20 +327,24 @@ export default function PricingPage() {
                 </div>
                 <div style={{ marginTop: 12, padding: "8px 12px", background: "var(--bg-card)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", marginBottom: 4 }}>
-                    <span style={{ color: "var(--text-muted)" }}>Base platform fee</span>
-                    <span>₹2,499</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", marginBottom: 4 }}>
-                    <span style={{ color: "var(--text-muted)" }}>{seatCount} × ₹2,749/seat</span>
-                    <span>₹{(2749 * seatCount).toLocaleString("en-IN")}</span>
+                    <span style={{ color: "var(--text-muted)" }}>{seatCount} × {billingPeriod === "annual" ? "₹29,990/seat/yr" : "₹2,999/seat/mo"}</span>
+                    <span>₹{(billingPeriod === "annual" ? 29990 * seatCount : 2999 * seatCount).toLocaleString("en-IN")}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", marginBottom: 4, color: "var(--emerald)" }}>
                     <span>Credits included</span>
                     <span>{(2500 * seatCount).toLocaleString("en-IN")} credits/mo</span>
                   </div>
+                  {billingPeriod === "annual" && (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", marginBottom: 4, color: "var(--emerald)" }}>
+                      <span>vs monthly price</span>
+                      <span>Save ₹{(2999 * seatCount * 2).toLocaleString("en-IN")}/yr</span>
+                    </div>
+                  )}
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.95rem", fontWeight: 800, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
                     <span>Total</span>
-                    <span style={{ color: "var(--accent)" }}>₹{(2499 + 2749 * seatCount).toLocaleString("en-IN")}/mo</span>
+                    <span style={{ color: "var(--accent)" }}>
+                      ₹{(billingPeriod === "annual" ? 29990 * seatCount : 2999 * seatCount).toLocaleString("en-IN")}/{billingPeriod === "annual" ? "yr" : "mo"}
+                    </span>
                   </div>
                 </div>
               </div>

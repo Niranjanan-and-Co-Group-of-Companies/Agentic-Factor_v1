@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyWebhookSignature, resolvePlanName } from '@/lib/services/razorpay';
+import { verifyWebhookSignature } from '@/lib/services/razorpay';
 import { createServiceClient } from '@/lib/supabase/server';
 import { sendEmail } from '@/lib/services/notifications';
 
@@ -12,13 +12,26 @@ import { sendEmail } from '@/lib/services/notifications';
 // Credit-based plan configurations
 const PLAN_CONFIGS: Record<string, {
   credits: number; maxActiveMissions: number; modelTier: string;
-  maxStorageMb: number; governance: string;
+  maxStorageMb: number; governance: string; annual?: boolean; basePlan?: string;
 }> = {
-  free:       { credits: 30,    maxActiveMissions: 1,     modelTier: 'flash',  maxStorageMb: 100,       governance: 'none' },
-  individual: { credits: 1000,  maxActiveMissions: 5,     modelTier: 'mixed',  maxStorageMb: 10_240,    governance: 'basic_memory' },
-  pro:        { credits: 2500,  maxActiveMissions: 50,    modelTier: 'all',    maxStorageMb: 102_400,   governance: 'rbac' },
-  enterprise: { credits: 99999, maxActiveMissions: 99999, modelTier: 'custom', maxStorageMb: 1_048_576, governance: 'full_audit' },
+  free:               { credits: 30,    maxActiveMissions: 1,     modelTier: 'flash',  maxStorageMb: 100,       governance: 'none' },
+  individual:         { credits: 1000,  maxActiveMissions: 5,     modelTier: 'mixed',  maxStorageMb: 10_240,    governance: 'basic_memory' },
+  individual_annual:  { credits: 1000,  maxActiveMissions: 5,     modelTier: 'mixed',  maxStorageMb: 10_240,    governance: 'basic_memory', annual: true, basePlan: 'individual' },
+  pro:                { credits: 2500,  maxActiveMissions: 50,    modelTier: 'all',    maxStorageMb: 102_400,   governance: 'rbac' },
+  pro_annual:         { credits: 2500,  maxActiveMissions: 50,    modelTier: 'all',    maxStorageMb: 102_400,   governance: 'rbac', annual: true, basePlan: 'pro' },
+  enterprise:         { credits: 99999, maxActiveMissions: 99999, modelTier: 'custom', maxStorageMb: 1_048_576, governance: 'full_audit' },
 };
+
+function resolveLocalPlanName(razorpayPlanId: string): string {
+  const envMap: Record<string, string> = {
+    [process.env.RAZORPAY_PLAN_INDIVIDUAL || '']:        'individual',
+    [process.env.RAZORPAY_PLAN_INDIVIDUAL_ANNUAL || '']:  'individual_annual',
+    [process.env.RAZORPAY_PLAN_PRO || '']:               'pro',
+    [process.env.RAZORPAY_PLAN_PRO_ANNUAL || '']:        'pro_annual',
+    [process.env.RAZORPAY_PLAN_ENTERPRISE || '']:        'enterprise',
+  };
+  return envMap[razorpayPlanId] || 'free';
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,8 +59,11 @@ export async function POST(request: NextRequest) {
         if (!subscription) break;
 
         const tenantId = subscription.notes?.tenant_id;
-        const planName = resolvePlanName(subscription.plan_id);
+        const planName = resolveLocalPlanName(subscription.plan_id);
         const config = PLAN_CONFIGS[planName] || PLAN_CONFIGS['free'];
+        const isAnnual = config.annual === true;
+        const seatCount = parseInt(subscription.notes?.seat_count || '1', 10);
+        const creditsToGive = config.credits * (isAnnual ? 12 : 1) * seatCount;
 
         if (tenantId) {
           // Get existing top-up credits (for resubscribe — return frozen credits)
@@ -66,9 +82,9 @@ export async function POST(request: NextRequest) {
               razorpay_subscription_id: subscription.id,
               razorpay_customer_id: subscription.customer_id || null,
               razorpay_plan_id: subscription.plan_id,
-              // Credit-based fields
-              credits_remaining: config.credits,
-              credits_total: config.credits,
+              // Credit-based fields — annual plans get 12 months upfront
+              credits_remaining: creditsToGive,
+              credits_total: creditsToGive,
               credits_used_this_month: 0,
               // Preserve existing top-up credits (returned on resubscribe)
               // credits_topup is NOT touched — frozen credits come back automatically
@@ -114,13 +130,15 @@ export async function POST(request: NextRequest) {
 
           const planName = billing?.plan || 'individual';
           const config = PLAN_CONFIGS[planName] || PLAN_CONFIGS['individual'];
+          const renewalSeats = parseInt(subscription.notes?.seat_count || '1', 10);
+          const renewalCredits = config.credits * (config.annual ? 12 : 1) * renewalSeats;
 
           // Reset credits for new billing cycle
           await supabase
             .from('tenant_billing')
             .update({
               billing_status: 'active',
-              credits_remaining: config.credits,
+              credits_remaining: renewalCredits,
               credits_used_this_month: 0,
               billing_period_start: new Date().toISOString(),
               updated_at: new Date().toISOString(),
@@ -132,7 +150,7 @@ export async function POST(request: NextRequest) {
             event_type: 'billing.payment_success',
             entity_type: 'billing',
             entity_id: subscription.id,
-            payload: { amount: payment?.amount, currency: payment?.currency, method: payment?.method, creditsRefilled: config.credits },
+            payload: { amount: payment?.amount, currency: payment?.currency, method: payment?.method, creditsRefilled: renewalCredits },
           });
 
           console.log(`[Razorpay Webhook] Credits reset to ${config.credits} for tenant ${tenantId}`);

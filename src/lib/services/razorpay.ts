@@ -23,30 +23,21 @@ function getRazorpay(): InstanceType<typeof Razorpay> {
 
 // ── Plan configuration (create these in Razorpay Dashboard) ──
 export const RAZORPAY_PLANS = {
-  individual: {
-    name: 'Individual',
-    priceInr: 2499,
-    interval: 'monthly',
-    description: '20 missions/mo, 5 agents/mission, 200K tokens/day',
-  },
-  pro: {
-    name: 'Pro (Per Seat)',
-    priceInr: 2749,
-    interval: 'monthly',
-    description: '50 missions/mo, 2500 credits/seat/mo, all models',
-  },
-  enterprise: {
-    name: 'Enterprise',
-    priceInr: 0, // Custom pricing
-    interval: 'monthly',
-    description: 'Unlimited everything. Contact sales.',
-  },
+  individual:         { name: 'Individual',             priceInr: 2499,  interval: 'monthly', description: '1,000 credits/month, 5 missions' },
+  individual_annual:  { name: 'Individual Annual',      priceInr: 24990, interval: 'yearly',  description: '1,000 credits/month, 2 months free' },
+  pro:                { name: 'Pro Per Seat',            priceInr: 2999,  interval: 'monthly', description: '2,500 credits/seat/month, all models' },
+  pro_annual:         { name: 'Pro Per Seat Annual',     priceInr: 29990, interval: 'yearly',  description: '2,500 credits/seat/month, 2 months free' },
+  enterprise:         { name: 'Enterprise',              priceInr: 0,     interval: 'monthly', description: 'Unlimited everything. Contact sales.' },
 } as const;
+
+const ANNUAL_PLANS = new Set(['individual_annual', 'pro_annual']);
+const PRO_PLANS    = new Set(['pro', 'pro_annual']);
 
 /**
  * Create a Razorpay subscription for a tenant.
- * Pro plan: ₹2,299 base + ₹2,249/seat (base added as recurring addon).
- * Individual plan: flat ₹2,499/month.
+ * Monthly plans: charged every month.
+ * Annual plans: charged once per year — 2 months free vs monthly price.
+ * Pro plans: quantity = seat count, Razorpay multiplies price × seats automatically.
  */
 export async function createSubscription(
   tenantId: string,
@@ -65,36 +56,23 @@ export async function createSubscription(
     throw new Error(`No Razorpay plan ID configured for plan: ${planId}. Set RAZORPAY_PLAN_${planId.toUpperCase()} env var.`);
   }
 
+  const isAnnual = ANNUAL_PLANS.has(planId);
+  const isPro    = PRO_PLANS.has(planId);
+
   const subscription = await razorpay.subscriptions.create({
     plan_id: razorpayPlanId,
-    total_count: 12, // 12 billing cycles
-    quantity: planId === 'pro' ? quantity : 1,
+    total_count: isAnnual ? 10 : 120, // 10 years for annual, 10 years for monthly
+    quantity: isPro ? quantity : 1,
     notes: {
       tenant_id: tenantId,
       plan: planId,
+      seat_count: String(isPro ? quantity : 1),
       email,
     },
     notify_info: {
       notify_email: email,
     },
   } as any);
-
-  // Pro plan: Add ₹2,299 recurring base fee as an addon
-  if (planId === 'pro') {
-    try {
-      await (razorpay.subscriptions as any).createAddon(subscription.id, {
-        item: {
-          name: 'Pro Base Fee',
-          amount: 249900, // ₹2,499 in paise
-          currency: 'INR',
-        },
-        quantity: 1,
-      });
-      console.log(`[Razorpay] Added ₹2,499 base addon to Pro subscription ${subscription.id}`);
-    } catch (addonErr) {
-      console.warn('[Razorpay] Failed to add base addon (non-fatal):', addonErr);
-    }
-  }
 
   return {
     subscriptionId: subscription.id,
@@ -149,9 +127,11 @@ export function verifyWebhookSignature(
  */
 export function resolvePlanName(razorpayPlanId: string): string {
   const envMap: Record<string, string> = {
-    [process.env.RAZORPAY_PLAN_INDIVIDUAL || '']: 'individual',
-    [process.env.RAZORPAY_PLAN_PRO || '']: 'pro',
-    [process.env.RAZORPAY_PLAN_ENTERPRISE || '']: 'enterprise',
+    [process.env.RAZORPAY_PLAN_INDIVIDUAL || '']:        'individual',
+    [process.env.RAZORPAY_PLAN_INDIVIDUAL_ANNUAL || '']:  'individual_annual',
+    [process.env.RAZORPAY_PLAN_PRO || '']:               'pro',
+    [process.env.RAZORPAY_PLAN_PRO_ANNUAL || '']:        'pro_annual',
+    [process.env.RAZORPAY_PLAN_ENTERPRISE || '']:        'enterprise',
   };
   return envMap[razorpayPlanId] || 'free';
 }

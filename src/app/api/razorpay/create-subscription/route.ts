@@ -15,11 +15,16 @@ export async function POST(request: NextRequest) {
   const { tenantId } = authResult;
 
   try {
-    const { planId, quantity } = await request.json();
+    const { planId, quantity, billingPeriod } = await request.json();
 
     if (!planId || !['individual', 'pro', 'enterprise'].includes(planId)) {
       return NextResponse.json({ error: 'Invalid plan. Choose: individual, pro, or enterprise.' }, { status: 400 });
     }
+
+    // Resolve to annual plan ID if requested
+    const resolvedPlanId = (billingPeriod === 'annual' && planId !== 'enterprise')
+      ? `${planId}_annual`
+      : planId;
 
     // Get user email for Razorpay notifications
     const supabase = createServiceClient();
@@ -40,8 +45,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create the Razorpay subscription
-    const result = await createSubscription(tenantId, planId, email, quantity || 1);
+    // Create the Razorpay subscription (annual plans use resolvedPlanId)
+    const result = await createSubscription(tenantId, resolvedPlanId, email, quantity || 1);
 
     // Store the subscription ID (status will be updated by webhook on payment)
     await supabase
