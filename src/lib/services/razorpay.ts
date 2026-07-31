@@ -31,9 +31,9 @@ export const RAZORPAY_PLANS = {
   },
   pro: {
     name: 'Pro (Per Seat)',
-    priceInr: 1249,
+    priceInr: 2749,
     interval: 'monthly',
-    description: '100 missions/mo, 15 agents/mission, 500K tokens/day',
+    description: '50 missions/mo, 2500 credits/seat/mo, all models',
   },
   enterprise: {
     name: 'Enterprise',
@@ -85,12 +85,12 @@ export async function createSubscription(
       await (razorpay.subscriptions as any).createAddon(subscription.id, {
         item: {
           name: 'Pro Base Fee',
-          amount: 229900, // ₹2,299 in paise
+          amount: 249900, // ₹2,499 in paise
           currency: 'INR',
         },
         quantity: 1,
       });
-      console.log(`[Razorpay] Added ₹2,299 base addon to Pro subscription ${subscription.id}`);
+      console.log(`[Razorpay] Added ₹2,499 base addon to Pro subscription ${subscription.id}`);
     } catch (addonErr) {
       console.warn('[Razorpay] Failed to add base addon (non-fatal):', addonErr);
     }

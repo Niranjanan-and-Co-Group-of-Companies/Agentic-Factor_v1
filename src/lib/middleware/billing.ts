@@ -26,7 +26,7 @@ export interface PlanConfig {
 const PLAN_DEFAULTS: Record<string, PlanConfig> = {
   free:       { credits: 30,    maxActiveMissions: 1,     modelTier: 'flash',  maxStorageMb: 100,       governance: 'none',          isTrial: true,  maxClarifications: 2, maxFanOutRoles: 0,      schedulingEnabled: false },
   individual: { credits: 1000,  maxActiveMissions: 5,     modelTier: 'mixed',  maxStorageMb: 10_240,    governance: 'basic_memory',  isTrial: false, maxClarifications: 4, maxFanOutRoles: 2,      schedulingEnabled: true },
-  pro:        { credits: 1000,  maxActiveMissions: 50,    modelTier: 'all',    maxStorageMb: 102_400,   governance: 'rbac',          isTrial: false, maxClarifications: 6, maxFanOutRoles: 99999,  schedulingEnabled: true },
+  pro:        { credits: 2500,  maxActiveMissions: 50,    modelTier: 'all',    maxStorageMb: 102_400,   governance: 'rbac',          isTrial: false, maxClarifications: 6, maxFanOutRoles: 99999,  schedulingEnabled: true },
   enterprise: { credits: 99999, maxActiveMissions: 99999, modelTier: 'custom', maxStorageMb: 1_048_576, governance: 'full_audit',    isTrial: false, maxClarifications: 10, maxFanOutRoles: 99999, schedulingEnabled: true },
 };
 

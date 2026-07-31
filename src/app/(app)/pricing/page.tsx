@@ -58,12 +58,12 @@ const plans = [
     id: "pro",
     name: "Pro",
     subtitle: "Teams",
-    price: "From ₹4,548",
+    price: "From ₹5,248",
     period: "/month",
-    description: "₹2,299 base + ₹2,249/seat",
-    credits: "1,000 credits/seat/month",
+    description: "₹2,499 base + ₹2,749/seat",
+    credits: "2,500 credits/seat/month",
     features: [
-      { label: "1,000 credits/seat/month", detail: "scales with team" },
+      { label: "2,500 credits/seat/month", detail: "2.5× more than Individual" },
       { label: "50 active missions", detail: "concurrent" },
       { label: "All models", detail: "Claude Sonnet 4, Gemini Pro, GPT-4o + Premium" },
       { label: "100GB storage", detail: "for RAG documents" },
@@ -161,7 +161,7 @@ export default function PricingPage() {
       const res = await fetch("/api/razorpay/create-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId, quantity: planId === "pro" ? seatCount : 1, baseFee: planId === "pro" ? 2299 : 0, seatPrice: planId === "pro" ? 2249 : 0 }),
+        body: JSON.stringify({ planId, quantity: planId === "pro" ? seatCount : 1, baseFee: planId === "pro" ? 2499 : 0, seatPrice: planId === "pro" ? 2749 : 0 }),
       });
 
       const data = await res.json();
@@ -305,19 +305,19 @@ export default function PricingPage() {
                 <div style={{ marginTop: 12, padding: "8px 12px", background: "var(--bg-card)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", marginBottom: 4 }}>
                     <span style={{ color: "var(--text-muted)" }}>Base platform fee</span>
-                    <span>₹2,299</span>
+                    <span>₹2,499</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", marginBottom: 4 }}>
-                    <span style={{ color: "var(--text-muted)" }}>{seatCount} × ₹2,249/seat</span>
-                    <span>₹{(2249 * seatCount).toLocaleString("en-IN")}</span>
+                    <span style={{ color: "var(--text-muted)" }}>{seatCount} × ₹2,749/seat</span>
+                    <span>₹{(2749 * seatCount).toLocaleString("en-IN")}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", marginBottom: 4, color: "var(--emerald)" }}>
                     <span>Credits included</span>
-                    <span>{(1000 * seatCount).toLocaleString("en-IN")} credits/mo</span>
+                    <span>{(2500 * seatCount).toLocaleString("en-IN")} credits/mo</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.95rem", fontWeight: 800, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
                     <span>Total</span>
-                    <span style={{ color: "var(--accent)" }}>₹{(2299 + 2249 * seatCount).toLocaleString("en-IN")}/mo</span>
+                    <span style={{ color: "var(--accent)" }}>₹{(2499 + 2749 * seatCount).toLocaleString("en-IN")}/mo</span>
                   </div>
                 </div>
               </div>
