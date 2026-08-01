@@ -296,9 +296,9 @@ export function classifyAgentActions(code: string): { hasWriteOps: boolean; writ
 
 // ── PHASE 2: REAL SIDE EFFECTS ──────────────────────────────────────────
 // Executes the validated pythonCode for real (no AF_DRY_RUN), merging Phase 1
-// artifacts into the result. Falls back to the dry-run output unchanged if
-// the real run fails to create/execute — Phase 1 already validated the data,
-// so a Phase 2 infra failure shouldn't fail the whole agent.
+// artifacts into the result. Throws on any failure so the caller's retry loop
+// can surface the real error — silently returning Phase 1's dry-run output
+// would make the mission appear successful when nothing actually happened.
 // Extracted into its own function so the resume-after-approval path can
 // invoke real execution for the first time at resume — previously the
 // stored payload was already the result of a real run that happened BEFORE
@@ -368,8 +368,7 @@ ${pythonCode}`.replace(/\x00/g, '');
       const finalStdout = finalExec.logs.stdout.join('\n').trim();
 
       if (finalExec.error) {
-        console.error(`[Agent ${agentId}] Phase 2 (side effects) failed: ${finalExec.error.value}`);
-        // Don't fail the mission — data was already validated in Phase 1
+        throw new Error(`Phase 2 real execution failed: ${finalExec.error.value}`);
       } else {
         console.log(`[Agent ${agentId}] Phase 2: Side effects executed successfully.`);
         const cleanFinalStdout = finalStdout.split('\n').filter(line => !line.startsWith('__SIGNAL__:')).join('\n').trim();
@@ -391,7 +390,7 @@ ${pythonCode}`.replace(/\x00/g, '');
       await finalSandbox.kill().catch(() => {});
     }
   } catch (phase2Err: any) {
-    console.error(`[Agent ${agentId}] Phase 2 sandbox creation failed (non-fatal):`, phase2Err.message);
+    throw phase2Err;
   }
   return finalOutputJSON;
 }
@@ -1344,6 +1343,8 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
           '"sample_id"',
           '"dummy"',
           'todo: implement',
+          '"dryrun_',
+          '"dry_run": true',
         ];
         const detectedMocks = mockPatterns.filter(p => outputStr.includes(p));
         if (detectedMocks.length > 0) {

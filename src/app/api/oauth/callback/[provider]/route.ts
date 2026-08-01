@@ -492,6 +492,77 @@ export async function GET(
         console.warn('[OAuth] Mission notification check failed (non-fatal):', notifyErr);
       }
     }
+    // ── Live token verification ──
+    // For providers where a bad scope causes silent mid-mission failures (Slack
+    // threads not posting, GitHub 403s), we ping the provider's identity
+    // endpoint immediately after storage. If the token is invalid or lacks basic
+    // access, we surface the error now instead of letting a mission fail later.
+    let tokenWarning = '';
+    if (tenantId && accessToken) {
+      try {
+        if (provider === 'slack') {
+          // auth.test confirms the bot token is valid and returns granted scopes
+          // in the X-OAuth-Scopes header — we store those as the authoritative list.
+          const testRes = await fetch('https://slack.com/api/auth.test', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          });
+          const testData = await testRes.json();
+          if (!testData.ok) {
+            console.error(`[OAuth slack] auth.test failed: ${testData.error}`);
+            tokenWarning = `Slack token verification failed (${testData.error}). Please reconnect.`;
+          } else {
+            // X-OAuth-Scopes header has the definitive granted scope list
+            const grantedScopes = testRes.headers.get('x-oauth-scopes') || scope;
+            if (grantedScopes) {
+              const scopeList = grantedScopes.split(/[,\s]+/).filter(Boolean);
+              await supabase
+                .from('tenant_permissions')
+                .update({ scopes: scopeList })
+                .eq('tenant_id', tenantId)
+                .eq('provider', 'slack');
+              console.log(`[OAuth slack] Scopes verified and updated: ${grantedScopes}`);
+              if (!scopeList.includes('chat:write')) {
+                tokenWarning = 'Your Slack app is missing the chat:write scope. Missions that post Slack messages will fail. Re-install your Slack App with chat:write enabled.';
+                console.warn(`[OAuth slack] chat:write missing from scopes: ${grantedScopes}`);
+              }
+            }
+          }
+        } else if (provider === 'github') {
+          const ghRes = await fetch('https://api.github.com/user', {
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'AgenticFactor/1.0' },
+          });
+          if (ghRes.status === 401 || ghRes.status === 403) {
+            console.error(`[OAuth github] Token verification failed: HTTP ${ghRes.status}`);
+            tokenWarning = 'GitHub token verification failed. The token may be invalid or revoked.';
+          } else {
+            // GitHub returns granted scopes in X-OAuth-Scopes header
+            const ghScopes = ghRes.headers.get('x-oauth-scopes');
+            if (ghScopes) {
+              const scopeList = ghScopes.split(/[,\s]+/).filter(Boolean);
+              await supabase
+                .from('tenant_permissions')
+                .update({ scopes: scopeList })
+                .eq('tenant_id', tenantId)
+                .eq('provider', 'github');
+              console.log(`[OAuth github] Scopes verified and updated: ${ghScopes}`);
+            }
+          }
+        } else if (provider === 'notion') {
+          const notionRes = await fetch('https://api.notion.com/v1/users/me', {
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Notion-Version': '2022-06-28' },
+          });
+          if (notionRes.status === 401 || notionRes.status === 403) {
+            console.error(`[OAuth notion] Token verification failed: HTTP ${notionRes.status}`);
+            tokenWarning = 'Notion token verification failed. Please reconnect.';
+          }
+        }
+      } catch (verifyErr: any) {
+        // Non-fatal — don't block the success page, just log
+        console.warn(`[OAuth ${provider}] Live verification error (non-fatal):`, verifyErr.message);
+      }
+    }
+
     // ── Smart redirect: popup-aware ──
     // If opened as a popup from mission page, send postMessage and close.
     // If opened directly (e.g., from connectors page), redirect normally.
@@ -513,16 +584,18 @@ export async function GET(
 <head><meta charset="utf-8"><title>Connected!</title>
 <style>
   body { background: #0a0e1a; color: #fff; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-  .card { text-align: center; padding: 2rem; }
+  .card { text-align: center; padding: 2rem; max-width: 420px; }
   .check { font-size: 3rem; margin-bottom: 1rem; }
   p { color: #8b95a5; font-size: 0.9rem; margin-top: 0.5rem; }
+  .warning { background: #2d1f00; border: 1px solid #f59e0b; border-radius: 8px; color: #fbbf24; font-size: 0.85rem; padding: 0.75rem 1rem; margin-top: 1rem; text-align: left; }
 </style>
 </head>
 <body>
 <div class="card">
-  <div class="check">✅</div>
-  <h2>${displayName} Connected!</h2>
+  <div class="check">${tokenWarning ? '⚠️' : '✅'}</div>
+  <h2>${displayName} ${tokenWarning ? 'Connected with Warning' : 'Connected!'}</h2>
   <p>This window will close automatically...</p>
+  ${tokenWarning ? `<div class="warning">${tokenWarning}</div>` : ''}
 </div>
 <script>
   // Send success message to parent window (mission page popup flow)
