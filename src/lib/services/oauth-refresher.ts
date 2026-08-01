@@ -220,6 +220,10 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
     'notion': 'notion',
     'zoho': 'zoho', 'zoho crm': 'zoho',
     'discord': 'discord',
+    'hubspot': 'hubspot', 'hub spot': 'hubspot',
+    'salesforce': 'salesforce', 'sfdc': 'salesforce',
+    'airtable': 'airtable', 'air table': 'airtable',
+    'asana': 'asana',
     // ── Social Media Connectors ──
     'twitter': 'twitter', 'x': 'twitter', 'x.com': 'twitter',
     'twitter/x': 'twitter', 'x (twitter)': 'twitter',
@@ -232,6 +236,8 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
 
   // Map api_key service names → DB provider keys in tenant_permissions
   const API_KEY_ALIASES: Record<string, string> = {
+    'zendesk': 'zendesk',
+    'linear': 'linear',
     'hunter': 'hunter', 'hunter.io': 'hunter', 'hunterio': 'hunter',
     'sendgrid': 'sendgrid', 'send grid': 'sendgrid',
     'stripe': 'stripe',

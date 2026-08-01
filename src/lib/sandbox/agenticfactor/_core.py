@@ -242,17 +242,18 @@ PROVIDER_BASE_URLS = {
     "facebook": "https://graph.facebook.com/v19.0",
     "instagram": "https://graph.facebook.com/v19.0",
     # ── Other ──
-    "salesforce": "",  # Instance-specific
+    "salesforce": "",   # Instance-specific — read SALESFORCE_BASE_URL from env
     "hubspot": "https://api.hubapi.com",
-    "jira": "",  # Instance-specific
+    "jira": "",         # Instance-specific — read JIRA_BASE_URL / CUSTOM_JIRA_BASE_URL from env
     "stripe": "https://api.stripe.com/v1",
-    "shopify": "",  # Store-specific
+    "shopify": "",      # Store-specific — read SHOPIFY_BASE_URL from env
     "twilio": "https://api.twilio.com/2010-04-01",
     "sendgrid": "https://api.sendgrid.com/v3",
     "airtable": "https://api.airtable.com/v0",
-    "zendesk": "",  # Instance-specific
-    "intercom": "https://api.intercom.io",
+    "zendesk": "",      # Instance-specific — read ZENDESK_BASE_URL / CUSTOM_ZENDESK_BASE_URL from env
+    "linear": "https://api.linear.app",
     "asana": "https://app.asana.com/api/1.0",
+    "intercom": "https://api.intercom.io",
     "trello": "https://api.trello.com/1",
     "monday": "https://api.monday.com/v2",
 }

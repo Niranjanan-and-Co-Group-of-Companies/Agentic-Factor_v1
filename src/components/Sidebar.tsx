@@ -10,7 +10,7 @@ interface UserProfile { name: string; email: string; avatar: string | null; }
 
 const STATUS_COLORS: Record<string, string> = {
   active: "var(--emerald)", building: "var(--amber)", pending_approval: "var(--accent)",
-  draft: "var(--purple)", failed: "var(--rose)", deadlocked: "var(--rose)",
+  draft: "var(--purple)", deadlocked: "var(--amber)",
 };
 
 // Zone 1 — always visible, never scroll
@@ -144,10 +144,9 @@ export default function Sidebar() {
         {loadingAuth ? <MissionSkeleton /> : user ? (
           loadingMissions ? <MissionSkeleton /> :
           missions.length > 0 ? missions.map(m => (
-            <Link key={m.id} href={`/dashboard?mission=${m.id}`} className="mission-link"
-              style={m.status === "failed" ? { color: "var(--text-muted)", fontStyle: "italic" } : undefined}>
+            <Link key={m.id} href={`/dashboard?mission=${m.id}`} className="mission-link">
               <div className="ml-dot" style={{ background: STATUS_COLORS[m.status] || "var(--text-muted)" }} />
-              {m.title}{m.status === "failed" ? " (failed)" : ""}
+              {m.title}
             </Link>
           )) : (
             <Link href="/dashboard/creator" className="mission-link" style={{ color: "var(--emerald)" }}>

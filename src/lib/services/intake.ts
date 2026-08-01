@@ -13,6 +13,7 @@ const KNOWN_PROVIDERS = [
   'google', 'twitter', 'facebook', 'instagram', 'linkedin_oidc',
   'slack', 'github', 'notion', 'discord', 'zoho',
   'whatsapp', 'messenger', 'azure', 'teams', 'stripe', 'shopify',
+  'hubspot', 'salesforce', 'airtable', 'asana',
 ] as const;
 
 // Keywords → provider mappings. Order matters: more specific matches first.
@@ -32,6 +33,10 @@ const PROVIDER_KEYWORDS: Array<{ keywords: string[]; provider: string }> = [
   { keywords: ['teams', 'microsoft teams'], provider: 'teams' },
   { keywords: ['stripe'], provider: 'stripe' },
   { keywords: ['shopify'], provider: 'shopify' },
+  { keywords: ['hubspot', 'hub spot'], provider: 'hubspot' },
+  { keywords: ['salesforce', 'sales force', 'sfdc'], provider: 'salesforce' },
+  { keywords: ['airtable', 'air table'], provider: 'airtable' },
+  { keywords: ['asana'], provider: 'asana' },
   { keywords: ['google', 'gmail', 'gdrive', 'google drive', 'google calendar', 'google sheets', 'gcp', 'workspace'], provider: 'google' },
 ];
 
@@ -181,11 +186,11 @@ You must decompose the user's intent into:
    - "orchestrator_worker" — supervisor delegates to workers. Best for open-ended tasks where sub-task count isn't known upfront.
    - "hierarchical" — nested teams. Best for very large missions (15+ agents) with distinct phases.
    RULE: If 6 or more agents are needed AND their tasks can be split into independent work streams, you MUST use "parallel" or "orchestrator_worker" — NEVER use "sequential" for missions that large.
-8. **timeoutSeconds**: How long agents can be idle before deadlock detection (default 300).
+8. **timeoutSeconds**: How long the mission can run before the watchdog declares it stuck (default 900 for complex missions, 300 for simple ones).
 9. **Validation Checklist**: 3-8 specific assertions to verify the mission output quality.
 10. **Permissions**: All credentials the agents will need. Each permission MUST have:
    - "type": one of "api_key", "oauth_token", "database_credential", "file_access", "service_account", "webhook"
-   - "service": MUST be one of these EXACT provider keys (case-sensitive). OAuth providers: "google", "twitter", "facebook", "instagram", "linkedin_oidc", "slack", "github", "notion", "discord", "zoho", "whatsapp", "messenger", "azure", "teams", "stripe", "shopify". API key providers: "hunter_io", "apollo", "twilio", "sendgrid", "aws", "openai_api", "anthropic_api", "replicate", "segment", "mixpanel", "heygen", "langsmith", "bamboohr", "woocommerce", "make", "firebase", "vercel", "supabase_ext", "shiprocket", "razorpay". Do NOT use full names like "Hunter.io" or "Apollo.io" — use ONLY the short key.
+   - "service": MUST be one of these EXACT provider keys (case-sensitive). OAuth providers: "google", "twitter", "facebook", "instagram", "linkedin_oidc", "slack", "github", "notion", "discord", "zoho", "whatsapp", "messenger", "azure", "teams", "stripe", "shopify", "hubspot", "salesforce", "airtable", "asana". API key providers: "zendesk", "linear", "hunter_io", "apollo", "twilio", "sendgrid", "aws", "openai_api", "anthropic_api", "replicate", "segment", "mixpanel", "heygen", "langsmith", "bamboohr", "woocommerce", "make", "firebase", "vercel", "supabase_ext", "shiprocket", "razorpay". For ANY service not in this list, use type "api_key" and service "custom_<slug>" (e.g., "custom_jira", "custom_freshdesk") — the customer will be prompted to add their API key via the Connectors page. Do NOT use full names like "Hunter.io" or "Apollo.io" — use ONLY the short key.
    - "scope": string (e.g., "tweet.write", "pages_manage_posts", "chat:write")
    - "confidentialityLevel": one of "public", "internal", "confidential", "restricted"
 11. **Discovery Questions**: Generate 3 or more highly specific "discoveryQuestions" to ask the user. These questions must gather missing context or exact preferences needed to refine the agents' system prompts before deployment.
@@ -201,6 +206,13 @@ IMPORTANT RULES:
 - NEVER use sys.exit() in pythonScript — the sandbox crashes on it. Let scripts end naturally.
 - For social media tasks, ALWAYS use the agenticfactor.social module — NEVER write raw API calls.
 - HUNTER.IO / APOLLO: When a mission requires contact enrichment, include the "hunter_io" or "apollo" permission and call api.call('hunter_io', 'GET', 'https://api.hunter.io/v2/email-finder', params={"domain": domain, "first_name": first_name, "last_name": last_name, "api_key": os.environ.get("HUNTER_IO_API_KEY")}) where domain/name values come from input_data, not hardcoded strings.
+- HUBSPOT: Use oauth_token type, service "hubspot". Call api.call('hubspot', 'GET', '/crm/v3/objects/contacts', ...) — the base URL https://api.hubapi.com is automatic.
+- SALESFORCE: Use oauth_token type, service "salesforce". The base URL is instance-specific — read SALESFORCE_BASE_URL from env: base = os.environ.get('SALESFORCE_BASE_URL', '').
+- ZENDESK: Use api_key type, service "zendesk". The base URL is instance-specific — read ZENDESK_BASE_URL from env: base = os.environ.get('ZENDESK_BASE_URL', ''). Token is in ZENDESK_ACCESS_TOKEN.
+- LINEAR: Use api_key type, service "linear". Call api.call('linear', 'POST', 'https://api.linear.app/graphql', json_data={"query": "..."}).
+- AIRTABLE: Use oauth_token type, service "airtable". Call api.call('airtable', 'GET', f'/v0/{base_id}/{table_name}').
+- ASANA: Use oauth_token type, service "asana". Call api.call('asana', 'GET', '/tasks', ...).
+- CUSTOM/UNLISTED CONNECTORS: For any service not in the provider list, use type "api_key" and service "custom_<slug>" (e.g., "custom_jira" for Jira). In pythonScript, read the token: token = os.environ.get('CUSTOM_<SLUG>_ACCESS_TOKEN', ''); base_url = os.environ.get('CUSTOM_<SLUG>_BASE_URL', ''); auth_type = os.environ.get('CUSTOM_<SLUG>_AUTH_TYPE', 'bearer'). Build the auth header based on auth_type (bearer → "Authorization: Bearer {token}", apikey → "X-API-Key: {token}", basic → "Authorization: Basic {b64(token)}"). Use full URLs in every request. Example for Jira: token = os.environ.get('CUSTOM_JIRA_ACCESS_TOKEN', ''); base_url = os.environ.get('CUSTOM_JIRA_BASE_URL', ''); resp = requests.get(f"{base_url}/rest/api/3/issue/{issue_id}", headers={"Authorization": f"Bearer {token}"}).
 
 OUTPUT SIZE CONSTRAINTS (CRITICAL):
 - Agent systemPrompt: MAX 150 words. Be dense and specific — no filler.
@@ -279,7 +291,7 @@ Example 1 — User says: "Monitor my AWS costs and alert on Slack if spending ex
   ],
   "orchestration": {
     "pattern": "sequential",
-    "timeoutSeconds": 300,
+    "timeoutSeconds": 900,
     "edges": [{"from": "agent-0", "to": "agent-1"}]
   },
   "validationChecklist": [

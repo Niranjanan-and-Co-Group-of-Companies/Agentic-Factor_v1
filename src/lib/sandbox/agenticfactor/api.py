@@ -23,43 +23,82 @@ def call(
     api_key_header: str = "Authorization",
 ) -> Any:
     """
-    Universal API caller — works for ANY connector.
-    
+    Universal API caller — works for ANY connector including custom ones.
+
+    For custom connectors added via the Connectors page, use:
+        api.call('custom_<slug>', 'GET', 'https://full.url/path', ...)
+    The base URL, auth type, and auth header are read automatically from env vars
+    injected by the platform (CUSTOM_<SLUG>_BASE_URL, CUSTOM_<SLUG>_AUTH_TYPE,
+    CUSTOM_<SLUG>_AUTH_HEADER). No hardcoding needed.
+
     Args:
-        provider: Provider name (e.g., "salesforce", "hubspot", "jira")
+        provider: Provider name (e.g., "hubspot", "slack", "custom_jira")
         method: HTTP method (GET, POST, PUT, PATCH, DELETE)
-        endpoint: API endpoint path (e.g., "/crm/v3/objects/contacts")
+        endpoint: API endpoint path or full URL for custom connectors
         json_data: Request body as JSON dict
         params: Query parameters
         headers: Additional headers
         data: Raw request body
-        auth_type: "oauth" (Bearer token) or "api_key"
+        auth_type: "oauth" (Bearer token) or "api_key" — overridden automatically
+                   for custom connectors that have CUSTOM_*_AUTH_TYPE set
         api_key_header: Header name for API key auth
-    
+
     Returns:
         API response as dict
     """
+    slug = provider.upper()
     base_url = PROVIDER_BASE_URLS.get(provider.lower(), "")
-    
-    # Check for instance-specific URL from env
-    env_url = os.environ.get(f"{provider.upper()}_BASE_URL", "")
+
+    # Check for instance-specific URL from env (covers custom connectors and
+    # instance-based ones like Salesforce, Zendesk, Jira)
+    env_url = os.environ.get(f"{slug}_BASE_URL", "")
     if env_url:
         base_url = env_url
-    
+
     url = f"{base_url}{endpoint}" if base_url else endpoint
-    
+
+    # For custom connectors, read auth type and header from env vars injected
+    # by the platform so agents don't need to hardcode connection details.
+    if provider.lower().startswith("custom_"):
+        token = os.environ.get(f"{slug}_ACCESS_TOKEN", "")
+        if not token:
+            from ._core import _signal_missing_permission
+            _signal_missing_permission(provider)
+            raise PermissionError(
+                f"Custom connector '{provider}' is not connected. "
+                f"Add it on the Connectors page (API key required)."
+            )
+        resolved_auth_type = os.environ.get(f"{slug}_AUTH_TYPE", "bearer").lower()
+        custom_header_name  = os.environ.get(f"{slug}_AUTH_HEADER", "")
+        import base64 as _b64mod
+        if custom_header_name:
+            auth_headers = {custom_header_name: token}
+        elif resolved_auth_type == "apikey":
+            auth_headers = {"X-API-Key": token}
+        elif resolved_auth_type == "basic":
+            auth_headers = {"Authorization": f"Basic {_b64mod.b64encode(token.encode()).decode()}"}
+        elif resolved_auth_type == "token":
+            auth_headers = {"Authorization": f"Token {token}"}
+        else:
+            auth_headers = {"Authorization": f"Bearer {token}"}
+        if headers:
+            auth_headers.update(headers)
+        return _request(method, url, headers=auth_headers,
+                        json_data=json_data, params=params, data=data,
+                        provider=provider)
+
     if auth_type == "api_key":
-        key_env = f"{provider.upper()}_API_KEY"
+        key_env = f"{slug}_API_KEY"
         api_key = os.environ.get(key_env, "")
         if not api_key:
             from ._core import _signal_missing_permission
             _signal_missing_permission(provider)
             raise PermissionError(f"API key not found: {key_env}")
-        
+
         extra_headers = {api_key_header: f"Bearer {api_key}"}
         if headers:
             extra_headers.update(headers)
-        
+
         return _request(
             method, url, headers=extra_headers,
             json_data=json_data, params=params, data=data,

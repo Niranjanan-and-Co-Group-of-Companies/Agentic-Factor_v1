@@ -123,19 +123,30 @@ export async function executeMission(
     return;
   }
 
-  // Fetch OAuth tokens for this tenant
+  // Fetch OAuth tokens and metadata for this tenant
   const { data: userTokensRow } = await supabase
     .from('tenant_permissions')
-    .select('provider')
+    .select('provider, scopes, metadata')
     .eq('tenant_id', tenantId);
 
   const { getValidTokens } = await import('@/lib/services/oauth-refresher');
   const tokens: any[] = [];
+  const extraEnvs: Record<string, string> = {};
 
   if (userTokensRow) {
     for (const t of userTokensRow) {
       const validToken = await getValidTokens(tenantId, t.provider);
       if (validToken) tokens.push(validToken);
+
+      // For custom connectors, inject base_url, auth_type, auth_header as env vars
+      // so agents can call unlisted services without hardcoding connection details.
+      if (t.provider?.startsWith('custom_') && t.metadata) {
+        const slug = t.provider.toUpperCase();
+        const meta = t.metadata as Record<string, string | null>;
+        if (meta.base_url)    extraEnvs[`${slug}_BASE_URL`]    = meta.base_url;
+        if (meta.auth_type)   extraEnvs[`${slug}_AUTH_TYPE`]   = meta.auth_type;
+        if (meta.auth_header) extraEnvs[`${slug}_AUTH_HEADER`] = meta.auth_header;
+      }
     }
   }
 
@@ -238,7 +249,7 @@ export async function executeMission(
         }
 
         const result = await executeAgent(
-          tenantId, missionId, agent, currentContext, tokens, isFinalAgent, mission.expectedOutputFormat, runId
+          tenantId, missionId, agent, currentContext, tokens, isFinalAgent, mission.expectedOutputFormat, runId, extraEnvs
         );
         output = result.output;
 
@@ -380,7 +391,7 @@ export async function executeMission(
               const pOutEdges = orchestration.edges?.filter((e: any) => e.from === parallelAgent.id) || [];
               const pIsFinalAgent = pOutEdges.length === 0;
               const result = await executeAgent(
-                tenantId, missionId, parallelAgent, output, tokens, pIsFinalAgent, mission.expectedOutputFormat, runId
+                tenantId, missionId, parallelAgent, output, tokens, pIsFinalAgent, mission.expectedOutputFormat, runId, extraEnvs
               );
               await transitionAgentStatus(parallelAgent.id, missionId, tenantId, 'completed').catch((err) =>
                 console.warn(`[Executor] [Parallel] Failed to mark agent ${parallelAgent.id} completed (non-fatal):`, err)

@@ -478,7 +478,8 @@ export async function executeAgent(
   tokens: { provider: string, access_token: string }[] = [],
   isFinalAgent: boolean = false,
   expectedOutputFormat?: string,
-  runId?: string
+  runId?: string,
+  extraEnvs?: Record<string, string>
 ): Promise<AgentResult> {
   const supabase = createServiceClient();
 
@@ -581,6 +582,7 @@ export async function executeAgent(
         if (process.env.SENDGRID_API_KEY) resumeEnvs['SENDGRID_API_KEY'] = process.env.SENDGRID_API_KEY;
         if (process.env.TWITTER_BEARER_TOKEN) resumeEnvs['TWITTER_BEARER_TOKEN'] = process.env.TWITTER_BEARER_TOKEN;
         if (process.env.FACEBOOK_APP_ID) resumeEnvs['FACEBOOK_APP_ID'] = process.env.FACEBOOK_APP_ID;
+        if (extraEnvs) Object.assign(resumeEnvs, extraEnvs);
 
         const realOutput = await runRealSideEffects(approvedCode, resumeEnvs, existingAction.payload.output, agent.id, tenantId);
         return { output: realOutput, finalCode: approvedCode };
@@ -946,6 +948,8 @@ CRITICAL FIX RULES (follow these EXACTLY):
       if (process.env.SENDGRID_API_KEY) sandboxEnvs['SENDGRID_API_KEY'] = process.env.SENDGRID_API_KEY;
       if (process.env.TWITTER_BEARER_TOKEN) sandboxEnvs['TWITTER_BEARER_TOKEN'] = process.env.TWITTER_BEARER_TOKEN;
       if (process.env.FACEBOOK_APP_ID) sandboxEnvs['FACEBOOK_APP_ID'] = process.env.FACEBOOK_APP_ID;
+      // Inject custom connector metadata (base_url, auth_type, auth_header) from executor
+      if (extraEnvs) Object.assign(sandboxEnvs, extraEnvs);
 
       // Only apply dry-run guard for write-op agents — read-only agents run directly
       if (hasWriteOps) {
