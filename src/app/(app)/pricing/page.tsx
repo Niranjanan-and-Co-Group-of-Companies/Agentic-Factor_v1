@@ -202,7 +202,7 @@ export default function PricingPage() {
       <script src="https://checkout.razorpay.com/v1/checkout.js" async />
 
       <div className="page-header" style={{ textAlign: "center" }}>
-        <h1 className="page-title" style={{ fontSize: "2.2rem" }}>
+        <h1 className="page-title">
           Credit-Based Pricing
         </h1>
         <p className="page-subtitle" style={{ maxWidth: 640, margin: "0 auto", lineHeight: 1.7 }}>
