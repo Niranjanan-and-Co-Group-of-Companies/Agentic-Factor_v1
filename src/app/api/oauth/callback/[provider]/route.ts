@@ -434,6 +434,17 @@ export async function GET(
         console.log(`[OAuth ${provider}] ✅ VERIFIED — token exists in DB. provider=${verifyRow.provider}, tokenLength=${verifyRow.access_token?.length || 0}`);
       }
 
+      // Auto-grant all mission permissions that require this provider
+      try {
+        await supabase
+          .from('permissions')
+          .update({ granted: true })
+          .eq('tenant_id', tenantId)
+          .eq('service', provider);
+      } catch (permErr) {
+        console.warn(`[OAuth ${provider}] permissions.granted update failed (non-fatal):`, permErr);
+      }
+
       // For Slack: also store user token separately if present
       if (provider === 'slack' && tokenData.authed_user?.access_token) {
         const { error: slackUserError } = await supabase

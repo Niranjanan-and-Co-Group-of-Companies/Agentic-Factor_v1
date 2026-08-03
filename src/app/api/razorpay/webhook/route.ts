@@ -66,13 +66,33 @@ export async function POST(request: NextRequest) {
         const creditsToGive = config.credits * (isAnnual ? 12 : 1) * seatCount;
 
         if (tenantId) {
-          // Get existing top-up credits (for resubscribe — return frozen credits)
+          // Get existing billing record — covers resubscribe (frozen top-up credits)
+          // and the edge case where the user paid before ever opening the app
+          // (no billing row yet), in which case .update() would silently do nothing.
           const { data: existingBilling } = await supabase
             .from('tenant_billing')
             .select('credits_topup')
             .eq('tenant_id', tenantId)
             .single();
           const frozenTopup = existingBilling?.credits_topup ?? 0;
+
+          // Create a bare free-tier record so the update below has a row to land on
+          if (!existingBilling) {
+            await supabase.from('tenant_billing').insert({
+              tenant_id: tenantId,
+              plan: 'free',
+              billing_status: 'inactive',
+              credits_remaining: 0,
+              credits_total: 0,
+              credits_topup: 0,
+              credits_used_this_month: 0,
+              max_active_missions: 1,
+              model_tier: 'flash',
+              max_storage_mb: 100,
+              governance: 'none',
+              is_trial: false,
+            });
+          }
 
           await supabase
             .from('tenant_billing')
@@ -167,6 +187,22 @@ export async function POST(request: NextRequest) {
         const freeConfig = PLAN_CONFIGS['free'];
 
         if (tenantId) {
+          // Guard against upgrade race: if the tenant has already switched to a
+          // new subscription, this cancel event is for the OLD plan. Skip the
+          // downgrade so the new plan's subscription.activated webhook wins.
+          const { data: currentBilling } = await supabase
+            .from('tenant_billing')
+            .select('razorpay_subscription_id')
+            .eq('tenant_id', tenantId)
+            .single();
+
+          if (
+            currentBilling?.razorpay_subscription_id &&
+            currentBilling.razorpay_subscription_id !== subscription.id
+          ) {
+            console.log(`[Razorpay Webhook] Skipping cancel for old sub ${subscription.id} — tenant already upgraded to ${currentBilling.razorpay_subscription_id}`);
+            break;
+          }
           await supabase
             .from('tenant_billing')
             .update({

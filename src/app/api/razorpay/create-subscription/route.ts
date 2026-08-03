@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
-import { createSubscription } from '@/lib/services/razorpay';
+import { createSubscription, cancelSubscription } from '@/lib/services/razorpay';
 import { createServiceClient } from '@/lib/supabase/server';
 
 // ============================================================
@@ -39,10 +39,29 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (billing?.billing_status === 'active' && billing.plan !== 'free') {
-      return NextResponse.json(
-        { error: 'Active subscription exists. Cancel current plan before subscribing to a new one.' },
-        { status: 409 }
-      );
+      const planRank: Record<string, number> = {
+        free: 0, individual: 1, individual_annual: 1, pro: 2, pro_annual: 2, enterprise: 3,
+      };
+      const isUpgrade = (planRank[resolvedPlanId] ?? 0) > (planRank[billing.plan] ?? 0);
+
+      if (!isUpgrade) {
+        return NextResponse.json(
+          { error: 'Active subscription exists. Cancel current plan before subscribing to a new one.' },
+          { status: 409 }
+        );
+      }
+
+      // Upgrade path: cancel existing subscription now.
+      // The subscription.cancelled webhook checks whether the cancelled sub ID
+      // still matches the stored one — once we store the new ID below, the
+      // webhook will skip the downgrade, so plan continuity is preserved.
+      if (billing.razorpay_subscription_id) {
+        try {
+          await cancelSubscription(billing.razorpay_subscription_id);
+        } catch (cancelErr) {
+          console.warn('[Razorpay] Could not cancel old subscription during upgrade (non-fatal):', cancelErr);
+        }
+      }
     }
 
     // Create the Razorpay subscription (annual plans use resolvedPlanId)

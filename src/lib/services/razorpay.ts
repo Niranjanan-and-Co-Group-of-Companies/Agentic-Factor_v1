@@ -162,7 +162,7 @@ export async function createOrder(
   const order = await razorpay.orders.create({
     amount: pack.amountPaisa,
     currency: 'INR',
-    receipt: `topup_${tenantId}_${packId}_${Date.now()}`,
+    receipt: `tp_${packId}_${Date.now()}`,
     notes: {
       tenant_id: tenantId,
       pack_id: packId,

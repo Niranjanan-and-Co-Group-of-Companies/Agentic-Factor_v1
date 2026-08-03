@@ -64,6 +64,21 @@ export async function GET(request: NextRequest) {
 
     const supabase = createServiceClient();
 
+    // Preserve existing refresh_token if Google didn't return a new one.
+    // With access_type=offline&prompt=consent in the initiation URL Google
+    // should always return one, but guard against edge cases so we never
+    // overwrite a valid stored token with null.
+    let effectiveRefreshToken = refresh_token || null;
+    if (!refresh_token) {
+      const { data: existing } = await supabase
+        .from('tenant_permissions')
+        .select('refresh_token')
+        .eq('tenant_id', tenantId)
+        .eq('provider', 'google')
+        .single();
+      effectiveRefreshToken = existing?.refresh_token ?? null;
+    }
+
     // Upsert into tenant_permissions
     const { error: upsertError } = await supabase
       .from('tenant_permissions')
@@ -71,7 +86,7 @@ export async function GET(request: NextRequest) {
         tenant_id: tenantId,
         provider: 'google',
         access_token,
-        refresh_token: refresh_token || null, // Might not be returned if not first authorization
+        refresh_token: effectiveRefreshToken,
         expires_at: new Date(Date.now() + expires_in * 1000).toISOString(),
         scopes: scope ? scope.split(' ') : [],
         updated_at: new Date().toISOString()
@@ -81,6 +96,17 @@ export async function GET(request: NextRequest) {
 
     if (upsertError) {
       throw new Error('Failed to save permissions: ' + upsertError.message);
+    }
+
+    // Auto-grant all mission permissions that require Google
+    try {
+      await supabase
+        .from('permissions')
+        .update({ granted: true })
+        .eq('tenant_id', tenantId)
+        .eq('service', 'google');
+    } catch (permErr) {
+      console.warn('[Google OAuth] permissions.granted update failed (non-fatal):', permErr);
     }
 
     // Success! Send message to opener window and close

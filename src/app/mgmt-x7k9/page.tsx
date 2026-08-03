@@ -341,7 +341,8 @@ export default function AdminPage() {
               <table style={{ width: "100%", fontSize: "0.78rem", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: "2px solid var(--border)", textAlign: "left" }}>
-                    <th style={{ padding: "8px 12px" }}>Tenant ID</th>
+                    <th style={{ padding: "8px 12px" }}>Email</th>
+                    <th style={{ padding: "8px 12px" }}>Customer ID</th>
                     <th style={{ padding: "8px 12px" }}>Plan</th>
                     <th style={{ padding: "8px 12px" }}>Credits</th>
                     <th style={{ padding: "8px 12px" }}>Model Tier</th>
@@ -352,8 +353,9 @@ export default function AdminPage() {
                 <tbody>
                   {(data.tenants || []).map((t: any) => (
                     <tr key={t.tenant_id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "8px 12px", fontWeight: 500 }}>{t.email || <span style={{ color: "var(--text-muted)" }}>—</span>}</td>
                       <td style={{ padding: "8px 12px" }}><code style={{ fontSize: "0.7rem" }}>{t.tenant_id?.slice(0, 8)}...</code></td>
-                      <td style={{ padding: "8px 12px" }}><span className={`badge ${t.plan === 'enterprise' ? 'badge-purple' : t.plan === 'pro' ? 'badge-blue' : t.plan === 'individual' ? 'badge-green' : 'badge-amber'}`}>{t.plan}</span></td>
+                      <td style={{ padding: "8px 12px" }}><span className={`badge ${t.plan === 'enterprise' ? 'badge-purple' : t.plan === 'pro' || t.plan === 'pro_annual' ? 'badge-blue' : t.plan === 'individual' || t.plan === 'individual_annual' ? 'badge-green' : 'badge-amber'}`}>{t.plan}</span></td>
                       <td style={{ padding: "8px 12px" }}>{t.credits_remaining}/{t.credits_total}</td>
                       <td style={{ padding: "8px 12px" }}>{t.model_tier}</td>
                       <td style={{ padding: "8px 12px" }}><span className={`badge ${t.billing_status === 'active' ? 'badge-green' : 'badge-amber'}`}>{t.billing_status || 'trial'}</span></td>

@@ -68,13 +68,27 @@ export async function GET(request: NextRequest) {
     }
 
     case 'tenants': {
-      const { data } = await supabase
+      const { data: billingRows } = await supabase
         .from('tenant_billing')
         .select('tenant_id, plan, credits_remaining, credits_total, credits_used_this_month, max_active_missions, model_tier, billing_status, is_trial, created_at, updated_at')
         .order('created_at', { ascending: false })
         .limit(100);
 
-      return NextResponse.json({ tenants: data || [] });
+      // Fetch all auth users in one call and build a tenantId → email map
+      const emailMap: Record<string, string> = {};
+      try {
+        const { data: { users } } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+        for (const u of users) emailMap[u.id] = u.email || '';
+      } catch (e) {
+        console.warn('[Admin] Could not fetch user emails:', e);
+      }
+
+      const tenants = (billingRows || []).map(t => ({
+        ...t,
+        email: emailMap[t.tenant_id] || '',
+      }));
+
+      return NextResponse.json({ tenants });
     }
 
     case 'missions': {
