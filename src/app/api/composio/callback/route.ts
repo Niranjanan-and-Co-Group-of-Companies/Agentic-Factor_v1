@@ -1,20 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { getComposioToken } from '@/lib/services/composio';
 
 // ============================================================
 // GET /api/composio/callback
 // Composio redirects here after the user grants OAuth access.
-// Query params: tenantId, provider (set by us in the redirectUri)
-// Composio may also append: connectedAccountId
+// Query params: tenantId, provider (encoded in the callback_url we pass to link.create)
 //
-// 1. Get token from Composio for this tenant+provider
-// 2. Write minimal row to tenant_permissions so executor
-//    knows this provider is connected (executor reads this
-//    table to build the provider list, then calls Composio
-//    for fresh tokens at mission time)
-// 3. Auto-grant mission permissions for this service
-// 4. Send OAUTH_SUCCESS postMessage to close the popup
+// 1. Write minimal row to tenant_permissions so executor knows
+//    this provider is connected (Composio manages tokens internally)
+// 2. Auto-grant mission permissions for this service
+// 3. Send OAUTH_SUCCESS postMessage to close the popup
 // ============================================================
 
 const successHtml = (provider: string) => `
@@ -47,16 +42,12 @@ export async function GET(request: NextRequest) {
   try {
     const supabase = createServiceClient();
 
-    // Get the fresh token from Composio (confirms connection worked)
-    const token = await getComposioToken(tenantId, provider);
-
     // Write to tenant_permissions so executor knows this provider is connected.
-    // The executor will call Composio for a fresh token at mission runtime —
-    // this row is just a "connected provider" registry entry.
+    // Composio manages tokens internally — we just record the connection.
     await supabase.from('tenant_permissions').upsert({
       tenant_id: tenantId,
       provider,
-      access_token: token || 'composio_managed',
+      access_token: 'composio_managed',
       refresh_token: null,
       expires_at: null,
       scopes: [],
@@ -70,7 +61,7 @@ export async function GET(request: NextRequest) {
       .eq('tenant_id', tenantId)
       .eq('service', provider);
 
-    console.log(`[Composio Callback] Connected ${provider} for tenant ${tenantId} (token: ${token ? 'received' : 'pending'})`);
+    console.log(`[Composio Callback] Connected ${provider} for tenant ${tenantId}`);
 
     return new NextResponse(successHtml(provider), { headers: { 'Content-Type': 'text/html' } });
   } catch (err) {

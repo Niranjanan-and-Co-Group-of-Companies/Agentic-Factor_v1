@@ -303,9 +303,9 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
         )
 
     resp = requests.post(
-        f"https://backend.composio.dev/api/v2/actions/{action_name}/execute",
+        f"https://backend.composio.dev/api/v3.1/tools/execute/{action_name}",
         headers={"x-api-key": api_key, "Content-Type": "application/json"},
-        json={"entityId": entity_id, "input": params},
+        json={"user_id": entity_id, "arguments": params},
         timeout=60,
     )
 
@@ -317,5 +317,7 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
         raise APIError(resp.status_code, str(err_body), action_name)
 
     data = resp.json()
-    # Composio wraps responses — unwrap to the actual data
-    return data.get("response", {}).get("data", data)
+    # v3.1 response: { successful: bool, data: {...}, error: str|null }
+    if not data.get("successful", True):
+        raise APIError(resp.status_code, data.get("error") or "Tool execution failed", action_name)
+    return data.get("data", data)

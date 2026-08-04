@@ -36,31 +36,26 @@ export const AF_TO_COMPOSIO_APP: Record<string, string> = {
   zendesk: 'zendesk',
 };
 
-interface ComposioAction {
-  name: string;
-  displayName: string;
+// v3.1 tools API response shape
+interface ComposioTool {
+  slug: string;        // action name, e.g. "GMAIL_SEND_EMAIL"
+  name: string;        // human-readable, e.g. "Send Email"
   description: string;
-  parameters?: {
-    properties?: Record<string, { type: string; description?: string; title?: string }>;
+  input_parameters?: {
+    properties?: Record<string, { type?: string; description?: string; title?: string }>;
     required?: string[];
   };
-}
-
-interface ComposioActionsResponse {
-  items: ComposioAction[];
-  totalPages?: number;
 }
 
 // Cache schemas in-process for 10 minutes to avoid redundant API calls
 const schemaCache: Map<string, { data: string; expiresAt: number }> = new Map();
 
-async function fetchActionsForApp(appName: string, apiKey: string): Promise<ComposioAction[]> {
-  const cacheKey = appName;
-  const cached = schemaCache.get(cacheKey);
+async function fetchActionsForApp(appName: string, apiKey: string): Promise<ComposioTool[]> {
+  const cached = schemaCache.get(appName);
   if (cached && cached.expiresAt > Date.now()) return JSON.parse(cached.data);
 
   try {
-    const url = `${COMPOSIO_API_BASE}/api/v2/actions?appNames=${appName}&limit=30&filterImportantActions=true`;
+    const url = `${COMPOSIO_API_BASE}/api/v3.1/tools?toolkit_slug=${appName}&limit=30&filter_important_actions=true`;
     const res = await fetch(url, {
       headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(8000),
@@ -71,10 +66,10 @@ async function fetchActionsForApp(appName: string, apiKey: string): Promise<Comp
       return [];
     }
 
-    const data = (await res.json()) as ComposioActionsResponse;
+    const data = await res.json() as { items?: ComposioTool[] };
     const items = data.items ?? [];
 
-    schemaCache.set(cacheKey, {
+    schemaCache.set(appName, {
       data: JSON.stringify(items),
       expiresAt: Date.now() + 10 * 60 * 1000,
     });
@@ -86,19 +81,20 @@ async function fetchActionsForApp(appName: string, apiKey: string): Promise<Comp
   }
 }
 
-function formatActionSchema(action: ComposioAction): string {
-  const props = action.parameters?.properties ?? {};
-  const required = new Set(action.parameters?.required ?? []);
+function formatActionSchema(action: ComposioTool): string {
+  const props = action.input_parameters?.properties ?? {};
+  const required = new Set(action.input_parameters?.required ?? []);
   const params = Object.entries(props)
-    .slice(0, 6) // cap at 6 params to keep prompt lean
+    .slice(0, 6)
     .map(([key, schema]) => {
+      const s = schema as { type?: string; description?: string; title?: string };
       const req = required.has(key) ? '' : '?';
-      const desc = schema.description || schema.title || '';
-      return `      ${key}${req}: ${schema.type}${desc ? ` — ${desc}` : ''}`;
+      const desc = s.description || s.title || '';
+      return `      ${key}${req}: ${s.type ?? 'any'}${desc ? ` — ${desc}` : ''}`;
     })
     .join('\n');
 
-  return `  ${action.name} — ${action.description || action.displayName}\n${params ? params + '\n' : ''}`;
+  return `  ${action.slug} — ${action.description || action.name}\n${params ? params + '\n' : ''}`;
 }
 
 /**

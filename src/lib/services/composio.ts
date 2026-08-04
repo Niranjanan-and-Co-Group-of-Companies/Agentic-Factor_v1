@@ -1,15 +1,12 @@
-import { Composio } from 'composio-core';
+import Composio from '@composio/client';
 
 // ============================================================
-// Composio Service — OAuth Connection Management
-// Composio stores and auto-refreshes tokens for all providers.
-// AgenticFactor injects fresh tokens into E2B sandboxes at
-// mission runtime via getComposioToken().
+// Composio Service — OAuth Connection Management (v3.1 SDK)
 // ============================================================
 
-let _client: InstanceType<typeof Composio> | null = null;
+let _client: Composio | null = null;
 
-function getClient(): InstanceType<typeof Composio> {
+function getClient(): Composio {
   if (!_client) {
     const apiKey = process.env.COMPOSIO_API_KEY;
     if (!apiKey) throw new Error('COMPOSIO_API_KEY is not configured');
@@ -18,8 +15,7 @@ function getClient(): InstanceType<typeof Composio> {
   return _client;
 }
 
-// Map our internal provider keys → Composio app unique keys.
-// These are Composio's canonical names from their app catalog.
+// Map our internal provider keys → Composio toolkit slugs.
 export const PROVIDER_TO_COMPOSIO: Record<string, string> = {
   google:        'gmail',
   github:        'github',
@@ -44,9 +40,13 @@ export const PROVIDER_TO_COMPOSIO: Record<string, string> = {
   paypal:        'paypal',
   mailchimp:     'mailchimp',
   reddit:        'reddit',
+  shopify:       'shopify',
+  stripe:        'stripe',
+  zendesk:       'zendesk',
+  box:           'box',
+  square:        'squareapp',
 };
 
-// Reverse map: Composio app name → our provider key
 const COMPOSIO_TO_PROVIDER: Record<string, string> = Object.fromEntries(
   Object.entries(PROVIDER_TO_COMPOSIO).map(([k, v]) => [v, k])
 );
@@ -55,82 +55,89 @@ export function toComposioApp(provider: string): string {
   return PROVIDER_TO_COMPOSIO[provider] || provider;
 }
 
-export function fromComposioApp(appName: string): string {
-  return COMPOSIO_TO_PROVIDER[appName] || appName;
+export function fromComposioApp(slug: string): string {
+  return COMPOSIO_TO_PROVIDER[slug] || slug;
+}
+
+// Cache auth_config_id per toolkit slug — permanent per project, created once.
+const authConfigCache = new Map<string, string>();
+
+async function getOrCreateAuthConfig(toolkitSlug: string): Promise<string> {
+  const cached = authConfigCache.get(toolkitSlug);
+  if (cached) return cached;
+
+  const client = getClient();
+
+  // Check if one already exists for this project
+  const existing = await client.authConfigs.list({ toolkit_slug: toolkitSlug, limit: 1 } as any);
+  const existingItems = (existing as any).items ?? [];
+  if (existingItems.length > 0) {
+    const id = existingItems[0].id as string;
+    authConfigCache.set(toolkitSlug, id);
+    return id;
+  }
+
+  // Create a Composio-managed auth config (Composio's verified OAuth app)
+  const created = await client.authConfigs.create({
+    toolkit: { slug: toolkitSlug },
+    auth_config: { type: 'use_composio_managed_auth' },
+  });
+
+  const id = created.auth_config.id;
+  authConfigCache.set(toolkitSlug, id);
+  return id;
 }
 
 /**
  * Initiate a Composio OAuth connection for a tenant.
- * Returns the URL to redirect the user to (Composio-managed OAuth flow).
- * After OAuth, Composio redirects to redirectUri.
+ * Returns the Composio redirect URL — users complete OAuth there.
+ * After OAuth, Composio redirects to callbackUrl.
  */
 export async function initiateComposioConnection(
   tenantId: string,
   provider: string,
-  redirectUri: string
+  callbackUrl: string
 ): Promise<string> {
+  const toolkitSlug = toComposioApp(provider);
+  const authConfigId = await getOrCreateAuthConfig(toolkitSlug);
+
   const client = getClient();
-  const entity = client.getEntity(tenantId);
-  const appName = toComposioApp(provider);
+  const link = await client.link.create({
+    auth_config_id: authConfigId,
+    user_id: tenantId,
+    callback_url: callbackUrl,
+  });
 
-  const req = await entity.initiateConnection({ appName, redirectUri });
-  const authUrl = (req as any).redirectUrl;
-  if (!authUrl) throw new Error(`Composio did not return a redirect URL for ${provider}`);
-  return authUrl;
-}
-
-/**
- * Get a fresh access token for a tenant + provider pair from Composio.
- * Composio auto-refreshes expired tokens, so this always returns a valid token.
- * Returns null if no connection exists or if the provider is not supported.
- */
-export async function getComposioToken(
-  tenantId: string,
-  provider: string
-): Promise<string | null> {
-  try {
-    const client = getClient();
-    const entity = client.getEntity(tenantId);
-    const appName = toComposioApp(provider);
-
-    const connection = await entity.getConnection({ appName });
-    if (!connection) return null;
-
-    const params = (connection as any).connectionParams;
-    if (!params) return null;
-
-    // OAuth2: token is in the Authorization header
-    const authHeader = params.headers?.Authorization || params.headers?.authorization;
-    if (authHeader) {
-      return authHeader.replace(/^Bearer\s+/i, '').trim();
-    }
-
-    // Some providers store it directly
-    const directToken = params.access_token || params.token;
-    if (directToken) return directToken;
-
-    return null;
-  } catch {
-    return null;
+  if (!link.redirect_url) {
+    throw new Error(`Composio did not return a redirect URL for ${provider}`);
   }
+  return link.redirect_url;
 }
 
 /**
- * Get all providers a tenant has connected via Composio.
- * Used to merge with tenant_permissions for full connection status.
+ * Get all AF provider keys a tenant has active connections for.
  */
 export async function getComposioConnectedProviders(tenantId: string): Promise<string[]> {
   try {
     const client = getClient();
-    const entity = client.getEntity(tenantId);
-    const connections = await entity.getConnections();
-    if (!connections || !Array.isArray(connections)) return [];
-
-    return connections
-      .filter((c: any) => c.status === 'ACTIVE')
-      .map((c: any) => fromComposioApp(c.appName || c.appUniqueKey || ''))
+    const result = await client.connectedAccounts.list({
+      user_id: tenantId,
+      status: 'ACTIVE',
+      limit: 50,
+    } as any);
+    const items = (result as any).items ?? [];
+    return items
+      .map((c: any) => fromComposioApp(c.toolkit?.slug ?? c.toolkit_slug ?? ''))
       .filter(Boolean);
   } catch {
     return [];
   }
+}
+
+// Kept for interface compat — not used; Composio manages tokens internally via user_id.
+export async function getComposioToken(
+  _tenantId: string,
+  _provider: string
+): Promise<string | null> {
+  return null;
 }
