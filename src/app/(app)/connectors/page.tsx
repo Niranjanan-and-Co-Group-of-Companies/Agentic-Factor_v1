@@ -310,9 +310,34 @@ export default function ConnectorsPage() {
     if (!connector.provider) return;
     setConnecting(connector.id);
 
+    // Try Composio OAuth flow first; fall back to direct OAuth if Composio errors
+    try {
+      const res = await fetch('/api/composio/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ provider: connector.provider }),
+      });
+      const data = await res.json() as { authUrl?: string; error?: string };
+
+      if (res.ok && data.authUrl) {
+        const popup = window.open(data.authUrl, 'oauth_window', 'width=500,height=700,scrollbars=yes');
+        const pollTimer = setInterval(() => {
+          if (popup && popup.closed) {
+            clearInterval(pollTimer);
+            setConnecting(null);
+            setTimeout(() => checkConnectionStatus(), 1500);
+          }
+        }, 500);
+        return;
+      }
+    } catch {
+      // Composio unavailable — fall through to direct OAuth
+    }
+
+    // Fallback: direct OAuth via our own credentials
     const oauthRoute = OAUTH_ROUTE_MAP[connector.id] || connector.provider || connector.id;
     const popup = window.open(`/api/oauth/${oauthRoute}`, 'oauth_window', 'width=500,height=600,scrollbars=yes');
-
     const pollTimer = setInterval(() => {
       if (popup && popup.closed) {
         clearInterval(pollTimer);

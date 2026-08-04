@@ -130,11 +130,19 @@ export async function executeMission(
     .eq('tenant_id', tenantId);
 
   const { getValidTokens } = await import('@/lib/services/oauth-refresher');
+  const { getComposioToken } = await import('@/lib/services/composio');
   const tokens: any[] = [];
   const extraEnvs: Record<string, string> = {};
 
   if (userTokensRow) {
     for (const t of userTokensRow) {
+      // Try Composio first — it auto-refreshes expired tokens
+      const composioToken = await getComposioToken(tenantId, t.provider);
+      if (composioToken) {
+        tokens.push({ provider: t.provider, access_token: composioToken });
+        continue;
+      }
+      // Fall back to our own token store + refresher
       const validToken = await getValidTokens(tenantId, t.provider);
       if (validToken) tokens.push(validToken);
 
