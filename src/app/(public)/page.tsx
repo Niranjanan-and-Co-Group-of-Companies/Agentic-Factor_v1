@@ -10,9 +10,9 @@ import { useEffect, useRef } from "react";
 const FEATURES = [
   { icon: "🤖", title: "AI Agent Teams", desc: "Autonomous multi-agent systems that decompose and execute complex goals" },
   { icon: "🧠", title: "Powered by Claude", desc: "Claude Sonnet 4 for best code generation, with Gemini & GPT fallback" },
-  { icon: "🔌", title: "850+ Connectors", desc: "Google, Slack, GitHub, Notion, HubSpot, Salesforce and 844 more — powered by Composio" },
+  { icon: "🔌", title: "850+ Integrations", desc: "Google, Slack, GitHub, Notion, HubSpot, Salesforce and 844 more — OAuth or API key, no code required" },
   { icon: "📚", title: "RAG Memory", desc: "Vector-powered knowledge base with PDF/DOCX ingestion" },
-  { icon: "⚡", title: "E2B Sandboxing", desc: "Secure code execution in isolated cloud environments" },
+  { icon: "⚡", title: "Secure Sandbox Execution", desc: "Every agent runs in an isolated, ephemeral cloud environment — no cross-tenant access, no residual data" },
   { icon: "💳", title: "Credit-Based Billing", desc: "Pay only for what your agents consume — no waste" },
   { icon: "🔒", title: "Enterprise Security", desc: "AES-256 encryption, RLS, OAuth 2.0, RBAC governance" },
   { icon: "⏸️", title: "Human In The Loop (HITL)", desc: "Agents automatically pause and wait for your manual approval before performing any high-risk actions or sending emails." },
@@ -38,8 +38,8 @@ const TESTIMONIALS = [
 const FAQS = [
   { q: "What is Agentic Factor?", a: "Agentic Factor is a SaaS platform that lets you design, deploy, and manage autonomous AI agent teams. You describe a mission in plain English, and our AI builds a team of specialized agents to execute it." },
   { q: "How do credits work?", a: "Every agent action (LLM call, code execution, file processing) costs credits from your pool. Free trial gives you 30 credits. Paid plans refill monthly. You only pay for what your agents consume." },
-  { q: "Is my data secure?", a: "Absolutely. All credentials are AES-256-GCM encrypted. We use Supabase Row Level Security, OAuth 2.0, and isolated E2B sandboxes for code execution. Your data never leaves your tenant." },
-  { q: "Can I connect my own tools?", a: "Yes! We support 850+ connectors powered by Composio — including Google, Slack, GitHub, Notion, HubSpot, Salesforce, Airtable, and hundreds more. OAuth is handled automatically, and API key connectors are encrypted at rest." },
+  { q: "Is my data secure?", a: "Absolutely. All credentials are AES-256-GCM encrypted. We use enterprise-grade Row Level Security, OAuth 2.0, and isolated cloud sandboxes for every agent execution. Your data never leaves your tenant." },
+  { q: "Can I connect my own tools?", a: "Yes! We support 850+ integrations including Google, Slack, GitHub, Notion, HubSpot, Salesforce, Airtable, and hundreds more. OAuth is handled automatically with zero configuration, and API key connectors are encrypted at rest." },
   { q: "What happens when I run out of credits?", a: "Agents will pause and notify you. You can upgrade your plan or wait for the monthly refill. No data is lost." },
   { q: "Do you offer refunds?", a: "All sales are final. Credits are non-refundable. Cancelling your plan stops future billing but doesn't refund the current period." },
 ];

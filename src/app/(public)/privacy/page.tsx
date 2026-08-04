@@ -53,7 +53,7 @@ export default function PrivacyPage() {
           <p><strong>Credential Data:</strong> OAuth access tokens and refresh tokens for third-party services you connect (e.g., Google, Slack, LinkedIn), and API keys you supply for services such as Stripe or SendGrid. All tokens and keys are encrypted at rest using AES-256-GCM with per-tenant derived keys and are never logged or transmitted in plaintext.</p>
           <p><strong>Usage Data:</strong> Credit consumption, API call counts, agent execution logs (stdout/stderr from sandboxed environments), and session information.</p>
           <p><strong>Payment Data:</strong> Subscription plan and payment status. Payment card details are processed exclusively by Razorpay under their PCI-DSS compliance and are never stored on our servers.</p>
-          <p><strong>Third-Party API Data (Limited Use):</strong> When your agents execute tasks, they may transiently access data from your connected accounts (e.g., email threads from Gmail, calendar events, LinkedIn profile information). This data is processed only within isolated E2B sandboxes during the task run and is not retained after the task completes unless you explicitly save the agent&apos;s output.</p>
+          <p><strong>Third-Party API Data (Limited Use):</strong> When your agents execute tasks, they may transiently access data from your connected accounts (e.g., email threads from Gmail, calendar events, LinkedIn profile information). This data is processed only within isolated cloud sandboxes during the task run and is not retained after the task completes unless you explicitly save the agent&apos;s output.</p>
         </section>
 
         <section>
@@ -93,18 +93,18 @@ export default function PrivacyPage() {
             <li><strong>Apollo.io:</strong> Lead enrichment and contact lookup if used within a user&apos;s mission. Data accessed is limited to publicly available business contact information.</li>
             <li><strong>Hunter.io:</strong> Email address lookup and verification if used within a user&apos;s mission.</li>
             <li><strong>OpenAI / Anthropic Claude / Google Gemini:</strong> LLM API calls for code generation and reasoning within agent steps. Only the minimum prompt context needed for the specific task is sent. No raw personal data from connected accounts is sent to LLM providers.</li>
-            <li><strong>E2B:</strong> Sandboxed Python execution environments for running agent code. Sandboxes are ephemeral and destroyed after each task.</li>
-            <li><strong>Supabase (Inngest):</strong> Background job orchestration and database hosting.</li>
+            <li><strong>Cloud Sandbox Infrastructure:</strong> Sandboxed execution environments for running agent code. Sandboxes are ephemeral and destroyed immediately after each task completes.</li>
+            <li><strong>Cloud Database &amp; Job Processing:</strong> Enterprise-grade database hosting and background job orchestration for mission execution.</li>
             <li><strong>SMTP2GO:</strong> Outbound email delivery for certain notification types.</li>
           </ul>
         </section>
 
         <section>
           <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>5. Data Storage &amp; Security</h2>
-          <p><strong>Database:</strong> All data is stored in Supabase (PostgreSQL) hosted on AWS, with Row Level Security (RLS) ensuring complete tenant isolation — no tenant can access another&apos;s data.</p>
+          <p><strong>Database:</strong> All data is stored in an enterprise-grade PostgreSQL database hosted on AWS, with Row Level Security (RLS) ensuring complete tenant isolation — no tenant can access another&apos;s data.</p>
           <p><strong>Credential Encryption:</strong> OAuth tokens and API keys are encrypted with AES-256-GCM using per-tenant derived keys before storage. Keys are never logged.</p>
           <p><strong>Data in Transit:</strong> All communications between your browser, our servers, and third-party APIs are protected by TLS 1.3.</p>
-          <p><strong>Code Execution Isolation:</strong> Agent code runs in ephemeral E2B sandboxes — isolated containers with no filesystem or network access beyond what the task requires and no access to other tenants&apos; data or the host system. Sandboxes are destroyed after each agent step completes.</p>
+          <p><strong>Code Execution Isolation:</strong> Agent code runs in ephemeral cloud sandboxes — isolated containers with no filesystem or network access beyond what the task requires and no access to other tenants&apos; data or the host system. Sandboxes are destroyed after each agent step completes.</p>
           <p><strong>Embeddings:</strong> If you use the knowledge-base feature, document content is vectorised using OpenAI embeddings and stored in pgvector. Original uploaded files are not retained after processing unless explicitly saved by you.</p>
           <p><strong>Access Controls:</strong> Production database and infrastructure access is restricted to authorised personnel only and is protected by MFA.</p>
         </section>
@@ -160,7 +160,7 @@ export default function PrivacyPage() {
 
         <section>
           <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>10. Cookies</h2>
-          <p>We use only strictly necessary cookies for authentication (Supabase session token) and CSRF protection. We do not use advertising cookies, tracking pixels, or third-party analytics cookies. No cookie consent banner is required as only essential cookies are used.</p>
+          <p>We use only strictly necessary cookies for authentication (session token) and CSRF protection. We do not use advertising cookies, tracking pixels, or third-party analytics cookies. No cookie consent banner is required as only essential cookies are used.</p>
         </section>
 
         <section>

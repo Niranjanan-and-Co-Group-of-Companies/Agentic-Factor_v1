@@ -69,7 +69,7 @@ export default function LoginPage() {
 
   const handleOAuth = async (provider: string, enabled: boolean) => {
     if (!enabled) {
-      showToast(`🔧 ${provider.replace("_oidc", "").replace("azure", "AWS/Azure")} is in maintenance mode. Enable it in Supabase Dashboard → Authentication → Providers.`);
+      showToast(`🔧 ${provider.replace("_oidc", "").replace("azure", "AWS/Azure")} login is temporarily unavailable. Please try another method or contact support.`);
       return;
     }
 
@@ -172,7 +172,7 @@ export default function LoginPage() {
 
         {/* Security note */}
         <div style={{ textAlign: "center", marginTop: "var(--space-lg)", fontSize: "0.75rem", color: "var(--text-muted)" }}>
-          🔒 Secured by Supabase Auth · Row Level Security enforced · AES-256-GCM vault
+          🔒 Enterprise-grade security · Row Level Security enforced · AES-256-GCM vault
         </div>
       </div>
 

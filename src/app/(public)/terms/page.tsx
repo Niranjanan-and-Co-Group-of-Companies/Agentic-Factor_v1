@@ -18,7 +18,7 @@ export default function TermsPage() {
 
         <section>
           <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>2. Description of Service</h2>
-          <p>Agentic Factor is a SaaS platform that enables users to design, deploy, and manage autonomous AI agent teams. The Platform provides AI-powered mission planning, code execution in sandboxed E2B environments, third-party service integrations via OAuth, a credit-based billing model, and a suite of pre-built integrations with external APIs.</p>
+          <p>Agentic Factor is a SaaS platform that enables users to design, deploy, and manage autonomous AI agent teams. The Platform provides AI-powered mission planning, code execution in secure isolated cloud sandboxes, 850+ third-party service integrations via OAuth, a credit-based billing model, and a suite of pre-built integrations with external APIs.</p>
         </section>
 
         <section>

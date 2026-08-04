@@ -67,7 +67,7 @@ const plans = [
       { label: "50 active missions", detail: "concurrent" },
       { label: "All models", detail: "Claude Sonnet 4, Gemini Pro, GPT-4o + Premium" },
       { label: "100GB storage", detail: "for RAG documents" },
-      { label: "100+ connectors", detail: "all available integrations" },
+      { label: "850+ integrations", detail: "all available connectors" },
       { label: "✓ Scheduling", detail: "cron, daily, weekly (1 cr/day)" },
       { label: "Unlimited parallel roles", detail: "multi-role fan-out missions" },
       { label: "✓ Credit top-ups", detail: "buy more when needed" },

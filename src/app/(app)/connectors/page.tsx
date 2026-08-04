@@ -445,7 +445,7 @@ export default function ConnectorsPage() {
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <div>
             <h1 className="page-title">🔗 Connector Marketplace</h1>
-            <p className="page-subtitle">850+ integrations powered by Composio — OAuth popup or API key, no code required</p>
+            <p className="page-subtitle">850+ integrations — OAuth popup or API key, no code required</p>
           </div>
           <div className="row">
             <span className="badge badge-green">{connectedCount} Connected</span>
@@ -460,9 +460,9 @@ export default function ConnectorsPage() {
         <div className="row">
           <span style={{ fontSize: '1.3rem' }}>🛡️</span>
           <div>
-            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--emerald)' }}>Secure · OAuth 2.0 + PKCE · 850+ integrations via Composio · API Keys encrypted at rest</p>
+            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--emerald)' }}>Secure · OAuth 2.0 + PKCE · 850+ integrations · API Keys encrypted at rest</p>
             <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-              OAuth tokens managed &amp; auto-refreshed by Composio · API keys stored in Supabase vault · No secrets in the browser
+              OAuth tokens auto-refreshed · API keys stored in encrypted vault · No secrets stored in the browser
             </p>
           </div>
         </div>
@@ -656,14 +656,14 @@ export default function ConnectorsPage() {
         </div>
       )}
 
-      {/* ── Composio Catalog Banner ── */}
+      {/* ── Extended Catalog Banner ── */}
       <div style={{ marginTop: 'var(--space-2xl)', borderRadius: 'var(--radius)', background: 'linear-gradient(135deg, hsla(217,91%,60%,0.06), hsla(270,70%,60%,0.04))', border: '1px solid hsla(217,91%,60%,0.15)', padding: 'var(--space-xl)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-lg)', flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 6 }}>
-            🌐 850+ Integrations Available via Composio
+            🌐 850+ Integrations — All Built In
           </div>
           <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: 520, margin: 0 }}>
-            Every OAuth connector above is powered by Composio — which gives your agents access to 850+ tools including HubSpot, Salesforce, Notion, Jira, Airtable, Monday.com, Intercom, and hundreds more. When you describe a mission, our AI automatically selects the exact Composio action names so agents call the right API every time.
+            Your agents have access to 850+ tools including HubSpot, Salesforce, Notion, Jira, Airtable, Monday.com, Intercom, and hundreds more. When you describe a mission, our AI automatically knows the exact actions and parameters for each service — no manual configuration needed.
           </p>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
