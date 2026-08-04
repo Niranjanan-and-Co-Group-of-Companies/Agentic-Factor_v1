@@ -44,7 +44,25 @@ export default function Sidebar() {
   const [loadingAuth, setLoadingAuth]         = useState(true);
   const [loadingMissions, setLoadingMissions] = useState(false);
   const [mobileOpen, setMobileOpen]           = useState(false);
+  const [isDark, setIsDark]                   = useState(true);
   const pathname = usePathname();
+
+  useEffect(() => {
+    const saved = localStorage.getItem('af-theme');
+    setIsDark(saved !== 'light');
+  }, []);
+
+  const toggleTheme = () => {
+    const next = isDark ? 'light' : 'dark';
+    setIsDark(!isDark);
+    if (next === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+      localStorage.setItem('af-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('af-theme', 'dark');
+    }
+  };
 
   useEffect(() => { setMobileOpen(false); }, [pathname]);
 
@@ -190,9 +208,18 @@ export default function Sidebar() {
           <span className="icon">👤</span> Login / Sign Up
         </Link>
       )}
-      <div className="sidebar-status">
-        <span className="status-dot active" style={{ display: "inline-block", marginRight: 6 }} />
-        System Online &nbsp;·&nbsp; v7.1
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "var(--space-xs) var(--space-md)" }}>
+        <div className="sidebar-status" style={{ margin: 0 }}>
+          <span className="status-dot active" style={{ display: "inline-block", marginRight: 6 }} />
+          System Online &nbsp;·&nbsp; v7.1
+        </div>
+        <button
+          onClick={toggleTheme}
+          title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          style={{ background: "var(--bg-glass)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "3px 8px", cursor: "pointer", fontSize: "0.82rem", color: "var(--text-secondary)", transition: "all 0.2s" }}
+        >
+          {isDark ? "☀️" : "🌙"}
+        </button>
       </div>
     </div>
   );

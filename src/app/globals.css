@@ -8,7 +8,7 @@
 /* ── Reset ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* ── Design Tokens ── */
+/* ── Design Tokens — Dark (default) ── */
 :root {
   /* Colors — Dark Slate + Electric Blue */
   --bg-primary: hsl(222, 47%, 5%);
@@ -59,6 +59,36 @@
   /* Transitions */
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --duration: 200ms;
+}
+
+/* ── Light Theme ── */
+[data-theme="light"] {
+  --bg-primary: hsl(220, 20%, 97%);
+  --bg-secondary: hsl(220, 18%, 93%);
+  --bg-card: hsla(0, 0%, 100%, 0.92);
+  --bg-card-hover: hsla(220, 15%, 96%, 0.95);
+  --bg-glass: hsla(220, 15%, 94%, 0.8);
+  --bg-input: hsl(0, 0%, 100%);
+  --bg-nav: hsla(220, 20%, 99%, 0.95);
+
+  --accent-glow: hsla(217, 91%, 60%, 0.15);
+  --accent-subtle: hsla(217, 91%, 60%, 0.08);
+
+  --emerald-bg: hsla(152, 69%, 45%, 0.1);
+  --amber-bg: hsla(38, 92%, 50%, 0.1);
+  --rose-bg: hsla(0, 84%, 60%, 0.1);
+  --purple-bg: hsla(270, 70%, 60%, 0.1);
+
+  --text-primary: hsl(222, 40%, 12%);
+  --text-secondary: hsl(215, 18%, 38%);
+  --text-muted: hsl(215, 14%, 56%);
+
+  --border: hsla(215, 20%, 78%, 0.65);
+  --border-hover: hsla(217, 91%, 60%, 0.35);
+
+  --shadow-sm: 0 1px 3px hsla(0,0%,0%,0.08);
+  --shadow-md: 0 4px 16px hsla(0,0%,0%,0.1);
+  --shadow-glow: 0 0 20px var(--accent-glow);
 }
 
 /* ── Base ── */

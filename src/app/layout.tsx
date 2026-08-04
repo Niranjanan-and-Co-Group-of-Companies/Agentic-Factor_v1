@@ -11,9 +11,16 @@ export const metadata: Metadata = {
 
 import { AuthPopupProvider } from "@/components/providers/AuthProvider";
 
+// Inline script runs before first paint — reads localStorage and sets data-theme
+// on <html> to prevent flash of wrong theme.
+const themeScript = `(function(){try{var t=localStorage.getItem('af-theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body>
         <AuthPopupProvider>
           {children}

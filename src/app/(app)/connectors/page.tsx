@@ -1,131 +1,50 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
-interface CustomConnector { provider: string; metadata: { display_name: string; base_url: string | null; auth_type: string } | null; updated_at: string; }
-import ConnectorLogo from "@/components/ConnectorLogos";
-
 // ============================================================
-// Connector Marketplace — 50 SaaS Platforms
-// OAuth popup flow + API key modal flow, categorized.
+// Connector Marketplace — 850+ integrations via Composio
 // ============================================================
 
-type ConnectorStatus = "connected" | "available" | "coming_soon" | "request_access" | "verification_pending";
-type ConnectorCategory = "communication" | "crm" | "payments" | "ecommerce" | "devtools" | "cloud" | "analytics" | "productivity" | "social" | "ai" | "storage" | "marketing" | "hr" | "research";
-
-interface ApiKeyField {
-  key: string;
-  label: string;
-  placeholder: string;
-  type?: "text" | "password";
-}
-
-interface ConnectorDef {
-  id: string;
-  label: string;
-  icon: string;
+interface Toolkit {
+  slug: string;
+  name: string;
+  logo: string;
   description: string;
-  category: ConnectorCategory;
-  status: ConnectorStatus;
-  provider?: string;
-  scopes?: string[];
-  connectionType?: "oauth" | "apikey";
-  apiKeyFields?: ApiKeyField[];
-  apiKeyHelpText?: string;
+  categories: string[];
+  tools_count: number;
+  auth_schemes: string[];
+  no_auth: boolean;
 }
 
-const CATEGORIES: { key: ConnectorCategory | "all"; label: string; icon: string }[] = [
-  { key: "all", label: "All", icon: "🌐" },
-  { key: "communication", label: "Communication", icon: "💬" },
-  { key: "crm", label: "CRM", icon: "👥" },
-  { key: "payments", label: "Payments", icon: "💳" },
-  { key: "ecommerce", label: "E-Commerce", icon: "🛒" },
-  { key: "devtools", label: "Dev Tools", icon: "🔧" },
-  { key: "cloud", label: "Cloud", icon: "☁️" },
-  { key: "analytics", label: "Analytics", icon: "📊" },
-  { key: "productivity", label: "Productivity", icon: "📋" },
-  { key: "social", label: "Social", icon: "📱" },
-  { key: "ai", label: "AI / ML", icon: "🤖" },
-  { key: "storage", label: "Storage", icon: "💾" },
-  { key: "marketing", label: "Marketing", icon: "📣" },
-  { key: "hr", label: "HR", icon: "🏢" },
-  { key: "research", label: "Research", icon: "🔍" },
-];
+interface CustomConnector {
+  provider: string;
+  metadata: { display_name: string; base_url: string | null; auth_type: string } | null;
+  updated_at: string;
+}
 
-const CONNECTORS: ConnectorDef[] = [
-  // ── OAuth connectors ──
-  { id: "google", label: "Google Workspace", icon: "📧", description: "Gmail, Calendar, Drive, Sheets — email, scheduling, and file access in one connection.", category: "communication", status: "available", provider: "google", connectionType: "oauth", scopes: ["gmail", "calendar", "drive", "sheets"] },
-  { id: "slack", label: "Slack", icon: "💬", description: "Post messages, read channels, DMs, and manage workflows. The backbone of agent notifications.", category: "communication", status: "available", provider: "slack", connectionType: "oauth", scopes: ["channels:read", "chat:write", "files:write"] },
-  { id: "discord", label: "Discord", icon: "🎮", description: "Bot management, channel messaging, and community engagement automation.", category: "communication", status: "available", provider: "discord", connectionType: "oauth" },
-  { id: "microsoft", label: "Microsoft 365", icon: "🪟", description: "Azure AD, Teams messaging, OneDrive, and enterprise workflow automation.", category: "communication", status: "available", provider: "microsoft", connectionType: "oauth", scopes: ["Teams", "OneDrive", "Azure AD"] },
-  { id: "intercom", label: "Intercom", icon: "💬", description: "Customer messaging, product tours, and support ticket routing.", category: "crm", status: "available", provider: "intercom", connectionType: "oauth" },
-  { id: "github", label: "GitHub", icon: "🐙", description: "Repository access, issues, PRs, and CI/CD — for code-gen and DevOps agents.", category: "devtools", status: "available", provider: "github", connectionType: "oauth" },
-  { id: "notion", label: "Notion", icon: "📝", description: "Read/write pages, databases, and comments — for documentation and knowledge agents.", category: "productivity", status: "available", provider: "notion", connectionType: "oauth" },
-  { id: "airtable", label: "Airtable", icon: "📊", description: "Spreadsheet-database hybrid for structured data management and automation.", category: "productivity", status: "available", provider: "airtable", connectionType: "oauth" },
-  { id: "monday", label: "Monday.com", icon: "📅", description: "Work management, project tracking, and team collaboration.", category: "productivity", status: "available", provider: "monday", connectionType: "oauth" },
-  { id: "asana", label: "Asana", icon: "🎯", description: "Task management, project timelines, and team workload planning.", category: "productivity", status: "available", provider: "asana", connectionType: "oauth" },
-  { id: "dropbox", label: "Dropbox", icon: "📦", description: "File storage, sharing, and sync — for document management agents.", category: "storage", status: "available", provider: "dropbox", connectionType: "oauth" },
-  { id: "box", label: "Box", icon: "📁", description: "Enterprise content management, secure file sharing, and collaboration.", category: "storage", status: "available", provider: "box", connectionType: "oauth" },
-  { id: "zoho", label: "Zoho", icon: "📊", description: "Zoho CRM, Mail, Sheets, and 40+ Zoho apps — complete business suite integration.", category: "crm", status: "available", provider: "zoho", connectionType: "oauth", scopes: ["ZohoCRM.modules.ALL", "ZohoMail.messages.ALL"] },
-  { id: "salesforce", label: "Salesforce", icon: "☁️", description: "CRM data, lead management, opportunity tracking, and sales pipeline automation.", category: "crm", status: "available", provider: "salesforce", connectionType: "oauth" },
-  { id: "hubspot", label: "HubSpot", icon: "🧲", description: "Marketing automation, CRM contacts, deal tracking, and email campaigns.", category: "crm", status: "available", provider: "hubspot", connectionType: "oauth" },
-  { id: "mailchimp", label: "Mailchimp", icon: "🐒", description: "Email campaigns, audience segmentation, and marketing automation.", category: "marketing", status: "available", provider: "mailchimp", connectionType: "oauth" },
-  { id: "paypal", label: "PayPal", icon: "💰", description: "Payment processing, invoicing, and financial transaction management.", category: "payments", status: "available", provider: "paypal", connectionType: "oauth" },
-  { id: "square", label: "Square", icon: "🟦", description: "POS payments, invoicing, and commerce solutions.", category: "payments", status: "available", provider: "square", connectionType: "oauth" },
-  { id: "reddit", label: "Reddit", icon: "🤖", description: "Subreddit monitoring, comment analysis, and sentiment tracking.", category: "social", status: "available", provider: "reddit", connectionType: "oauth" },
-  { id: "twitter", label: "X (Twitter)", icon: "🐦", description: "Post tweets, monitor mentions, analyze sentiment, and automate social presence.", category: "social", status: "available", provider: "twitter", connectionType: "oauth", scopes: ["tweet.read", "tweet.write", "users.read"] },
-  { id: "linkedin", label: "LinkedIn", icon: "💼", description: "Profile data, messaging, and social selling for recruitment and networking agents.", category: "social", status: "verification_pending", provider: "linkedin_oidc", connectionType: "oauth", scopes: ["openid", "profile", "email", "w_member_social"] },
-  { id: "facebook", label: "Facebook", icon: "📘", description: "Post to Pages, manage content, track engagement, and automate marketing.", category: "social", status: "verification_pending", provider: "facebook", connectionType: "oauth", scopes: ["pages_manage_posts", "pages_read_engagement"] },
-  { id: "instagram", label: "Instagram", icon: "📸", description: "Post scheduling, analytics, and content automation.", category: "social", status: "verification_pending", provider: "instagram", connectionType: "oauth", scopes: ["instagram_basic", "instagram_content_publish"] },
-  // Atlassian OAuth covers Jira + Confluence + Trello with one app connection
-  { id: "jira", label: "Jira", icon: "📋", description: "Issue tracking, sprint management, and Agile workflow automation.", category: "devtools", status: "available", provider: "atlassian", connectionType: "oauth" },
-  { id: "confluence", label: "Confluence", icon: "📖", description: "Wiki pages, knowledge base, and team documentation management.", category: "productivity", status: "available", provider: "atlassian", connectionType: "oauth" },
-  { id: "trello", label: "Trello", icon: "📌", description: "Kanban boards, task cards, and visual project management.", category: "productivity", status: "available", provider: "atlassian", connectionType: "oauth" },
+// Legacy AF provider key → Composio slug (so old connected rows still show as connected)
+const LEGACY_TO_SLUG: Record<string, string> = {
+  google: "gmail",
+  microsoft: "outlook",
+  monday: "mondaydotcom",
+  linkedin_oidc: "linkedin",
+  atlassian: "jira",
+};
 
-  // ── API key connectors (customers provide their own keys) ──
-  { id: "stripe", label: "Stripe", icon: "💳", description: "Payment processing, subscription management, invoice generation, and financial reporting.", category: "payments", status: "available", provider: "stripe", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "Secret Key", placeholder: "sk_live_..." }], apiKeyHelpText: "Find in Stripe Dashboard → Developers → API Keys" },
-  { id: "twilio", label: "Twilio", icon: "📞", description: "SMS, voice, video, and WhatsApp messaging for customer communication agents.", category: "communication", status: "available", provider: "twilio", connectionType: "apikey", apiKeyFields: [{ key: "accountSid", label: "Account SID", placeholder: "AC..." }, { key: "authToken", label: "Auth Token", placeholder: "Your auth token" }], apiKeyHelpText: "Find in Twilio Console → Account Info" },
-  { id: "sendgrid", label: "SendGrid", icon: "✉️", description: "Transactional and marketing email at scale with delivery tracking.", category: "marketing", status: "available", provider: "sendgrid", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "SG..." }], apiKeyHelpText: "Find in SendGrid → Settings → API Keys" },
-  { id: "aws", label: "Amazon Web Services", icon: "🟧", description: "S3, Lambda, CloudWatch, SES — full cloud infrastructure management.", category: "cloud", status: "available", provider: "aws", connectionType: "apikey", apiKeyFields: [{ key: "accessKeyId", label: "Access Key ID", placeholder: "AKIA..." }, { key: "secretAccessKey", label: "Secret Access Key", placeholder: "Your secret key" }], apiKeyHelpText: "Find in AWS Console → IAM → Security Credentials" },
-  { id: "vercel", label: "Vercel", icon: "▲", description: "Deployment management, serverless functions, and edge network control.", category: "devtools", status: "available", provider: "vercel", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Token", placeholder: "Your Vercel token" }], apiKeyHelpText: "Find in Vercel → Settings → Tokens" },
-  { id: "supabase_ext", label: "Supabase", icon: "⚡", description: "Direct database access, realtime subscriptions, and storage management.", category: "devtools", status: "available", provider: "supabase_ext", connectionType: "apikey", apiKeyFields: [{ key: "url", label: "Project URL", placeholder: "https://xxx.supabase.co" }, { key: "apiKey", label: "Service Role Key", placeholder: "eyJ..." }], apiKeyHelpText: "Find in Supabase → Settings → API" },
-  { id: "firebase", label: "Firebase", icon: "🔥", description: "Firestore, Auth, Cloud Messaging, and hosting for mobile/web agents.", category: "cloud", status: "available", provider: "firebase", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "Web API Key", placeholder: "AIzaSy..." }], apiKeyHelpText: "Find in Firebase Console → Project Settings → General" },
-  { id: "openai_api", label: "OpenAI", icon: "🤖", description: "GPT-4o, DALL-E, Whisper, and Embeddings for AI-powered agent reasoning.", category: "ai", status: "available", provider: "openai_api", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "sk-..." }], apiKeyHelpText: "Find in OpenAI Platform → API Keys" },
-  { id: "anthropic_api", label: "Anthropic", icon: "🧠", description: "Claude for long-context reasoning, analysis, and safe AI decision-making.", category: "ai", status: "available", provider: "anthropic_api", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "sk-ant-..." }], apiKeyHelpText: "Find in Anthropic Console → API Keys" },
-  { id: "replicate", label: "Replicate", icon: "🔬", description: "Run open-source ML models (Stable Diffusion, LLaMA, Whisper) via API.", category: "ai", status: "available", provider: "replicate", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Token", placeholder: "r8_..." }], apiKeyHelpText: "Find in Replicate → Account → API Tokens" },
-  { id: "segment", label: "Segment", icon: "📡", description: "Customer data platform — unify, clean, and route analytics events.", category: "analytics", status: "available", provider: "segment", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "Write Key", placeholder: "Your write key" }], apiKeyHelpText: "Find in Segment → Sources → Your Source → Settings" },
-  { id: "mixpanel", label: "Mixpanel", icon: "📈", description: "Product analytics, user flows, retention, and A/B test analysis.", category: "analytics", status: "available", provider: "mixpanel", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "Project Token", placeholder: "Your project token" }], apiKeyHelpText: "Find in Mixpanel → Project Settings → Access Keys" },
-  { id: "make", label: "Make (Integromat)", icon: "🔄", description: "Visual automation builder with advanced data transformation.", category: "productivity", status: "available", provider: "make", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Token", placeholder: "Your Make API token" }], apiKeyHelpText: "Find in Make → Profile → API Access" },
-  { id: "woocommerce", label: "WooCommerce", icon: "🛒", description: "WordPress e-commerce — products, orders, and inventory.", category: "ecommerce", status: "available", provider: "woocommerce", connectionType: "apikey", apiKeyFields: [{ key: "storeUrl", label: "Store URL", placeholder: "https://yourstore.com" }, { key: "consumerKey", label: "Consumer Key", placeholder: "ck_..." }, { key: "consumerSecret", label: "Consumer Secret", placeholder: "cs_..." }], apiKeyHelpText: "WordPress → WooCommerce → Settings → Advanced → REST API" },
-  { id: "bamboohr", label: "BambooHR", icon: "🎋", description: "HR management, employee data, time-off, and onboarding.", category: "hr", status: "available", provider: "bamboohr", connectionType: "apikey", apiKeyFields: [{ key: "subdomain", label: "Subdomain", placeholder: "yourcompany" }, { key: "apiKey", label: "API Key", placeholder: "Your BambooHR API key" }], apiKeyHelpText: "Your BambooHR URL is yourcompany.bamboohr.com" },
-  { id: "heygen", label: "HeyGen", icon: "🎬", description: "AI video generation — create talking avatar videos at scale.", category: "ai", status: "available", provider: "heygen", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "Your HeyGen API key" }], apiKeyHelpText: "Find in HeyGen → Settings → API" },
-  { id: "langsmith", label: "LangSmith", icon: "🔗", description: "LLM tracing, evaluation, and debugging for AI agent pipelines.", category: "ai", status: "available", provider: "langsmith", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "ls__..." }], apiKeyHelpText: "Find in LangSmith → Settings → API Keys" },
-  { id: "shiprocket", label: "Shiprocket", icon: "🚀", description: "Shipping and logistics automation — orders, tracking, and fulfillment.", category: "ecommerce", status: "available", provider: "shiprocket", connectionType: "apikey", apiKeyFields: [{ key: "email", label: "Email", placeholder: "your@email.com" }, { key: "password", label: "Password", placeholder: "Your Shiprocket password", type: "password" }], apiKeyHelpText: "Use your Shiprocket account credentials" },
-  { id: "razorpay", label: "Razorpay", icon: "💸", description: "Indian payment gateway — orders, subscriptions, and payouts.", category: "payments", status: "available", provider: "razorpay", connectionType: "apikey", apiKeyFields: [{ key: "keyId", label: "Key ID", placeholder: "rzp_live_..." }, { key: "keySecret", label: "Key Secret", placeholder: "Your Razorpay key secret" }], apiKeyHelpText: "Find in Razorpay Dashboard → Settings → API Keys" },
-  { id: "apollo", label: "Apollo.io", icon: "🔭", description: "Search 275M+ verified B2B contacts by title, company size, industry, and location. Powers fully autonomous prospect research and outreach pipelines.", category: "research", status: "available", provider: "apollo", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "Your Apollo.io API key" }], apiKeyHelpText: "Find in Apollo.io → Settings → Integrations → API" },
-  { id: "calendly", label: "Calendly", icon: "📅", description: "List event types, view upcoming meetings, and generate personalised one-off booking links for outreach emails — fully automated.", category: "productivity", status: "available", provider: "calendly", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "Personal Access Token", placeholder: "Your Calendly token" }], apiKeyHelpText: "Find in Calendly → Integrations → API & Webhooks → Personal Access Tokens" },
-  { id: "typeform", label: "Typeform", icon: "📝", description: "Fetch form responses and trigger agent workflows when new submissions arrive — turns form data into automated actions.", category: "productivity", status: "available", provider: "typeform", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "Personal Access Token", placeholder: "Your Typeform token" }], apiKeyHelpText: "Find in Typeform → Account → Personal Tokens" },
-  { id: "hunter", label: "Hunter.io", icon: "🎯", description: "Find verified professional email addresses by company domain — powers outreach and lead generation agents.", category: "research", status: "available", provider: "hunter", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "Your Hunter.io API key" }], apiKeyHelpText: "Find in Hunter.io → Dashboard → API (free plan: 25 searches/month)" },
-
-  // ── New API key connectors ──
-  { id: "vapi", label: "Vapi.ai", icon: "📞", description: "AI-powered voice calls — inbound reception agents, outbound feedback calls, appointment reminders, and lead qualification via phone.", category: "communication", status: "available", provider: "vapi", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "Your Vapi API key" }], apiKeyHelpText: "Find in Vapi Dashboard → Account → API Keys. Also configure your phone number webhook URL to: https://agenticfactor.io/api/voice/inbound/[missionId]" },
-  { id: "elevenlabs", label: "ElevenLabs", icon: "🎙️", description: "Ultra-realistic AI voice generation — create branded voices for your reception agent or any text-to-speech use case.", category: "ai", status: "available", provider: "elevenlabs", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "Your ElevenLabs API key" }], apiKeyHelpText: "Find in ElevenLabs → Profile → API Key" },
-  { id: "deepgram", label: "Deepgram", icon: "🎤", description: "Real-time and batch speech-to-text transcription. Transcribe call recordings, voicemails, and meeting audio.", category: "ai", status: "available", provider: "deepgram", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "Your Deepgram API key" }], apiKeyHelpText: "Find in Deepgram Console → Settings → API Keys" },
-  { id: "linear", label: "Linear", icon: "⚡", description: "Modern issue tracking for engineering teams — create issues, manage sprints, and triage bugs automatically.", category: "devtools", status: "available", provider: "linear", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "API Key", placeholder: "lin_api_..." }], apiKeyHelpText: "Find in Linear → Settings → API → Personal API Keys" },
-  { id: "zendesk", label: "Zendesk", icon: "🎧", description: "Customer support tickets, live chat, and help center management — auto-respond and triage support requests.", category: "crm", status: "available", provider: "zendesk", connectionType: "apikey", apiKeyFields: [{ key: "email", label: "Agent Email", placeholder: "you@company.com" }, { key: "token", label: "API Token", placeholder: "Your Zendesk API token" }, { key: "subdomain", label: "Subdomain", placeholder: "yourcompany" }], apiKeyHelpText: "Zendesk Admin → Apps and Integrations → Zendesk API → API Token" },
-  { id: "shopify", label: "Shopify", icon: "🛍️", description: "Store management, product listings, order fulfillment, inventory tracking, and customer management.", category: "ecommerce", status: "available", provider: "shopify", connectionType: "apikey", apiKeyFields: [{ key: "apiKey", label: "Access Token", placeholder: "shpat_..." }, { key: "shop", label: "Shop Domain", placeholder: "mystore.myshopify.com" }], apiKeyHelpText: "Shopify Admin → Settings → Apps → Develop apps → Create app → Admin API access token" },
-  // ── Coming Soon ──
-  { id: "gcp", label: "Google Cloud", icon: "🔵", description: "BigQuery, Cloud Functions, Pub/Sub, and GCS for data engineering agents.", category: "cloud", status: "coming_soon" },
-  { id: "workday", label: "Workday", icon: "🏢", description: "Enterprise HCM, payroll, and workforce management.", category: "hr", status: "coming_soon" },
-  { id: "tiktok", label: "TikTok", icon: "🎵", description: "Content analytics, ad management, and engagement tracking.", category: "social", status: "coming_soon" },
-];
-
-const STATUS_BADGES: Record<ConnectorStatus, { label: string; class: string; icon: string }> = {
-  connected: { label: "Connected", class: "badge-green", icon: "✓" },
-  available: { label: "Available", class: "badge-blue", icon: "→" },
-  coming_soon: { label: "Coming Soon", class: "badge-amber", icon: "🔧" },
-  request_access: { label: "Request Access", class: "badge-purple", icon: "✨" },
-  verification_pending: { label: "Verification Pending", class: "badge-amber", icon: "🔒" },
+// Specific API key fields for popular connectors (slug → label)
+const API_KEY_LABELS: Record<string, string> = {
+  stripe: "Secret Key (sk_live_...)",
+  twilio: "Auth Token",
+  sendgrid: "API Key (SG...)",
+  openai: "API Key (sk-...)",
+  anthropic: "API Key (sk-ant-...)",
+  razorpay: "Key Secret",
+  apollo: "API Key",
+  shopify: "Access Token",
+  zendesk: "API Token",
+  bamboohr: "API Key",
+  firebase: "Web API Key",
 };
 
 function getSupabase() {
@@ -135,515 +54,428 @@ function getSupabase() {
   );
 }
 
+function isOAuthApp(tk: Toolkit): boolean {
+  return tk.auth_schemes.some(s => s === "OAUTH2" || s === "OAUTH1" || s === "DCR_OAUTH");
+}
+
+function isApiKeyApp(tk: Toolkit): boolean {
+  if (tk.no_auth) return false;
+  if (isOAuthApp(tk)) return false;
+  return tk.auth_schemes.some(s => ["API_KEY", "BEARER_TOKEN", "BASIC", "BASIC_WITH_JWT"].includes(s));
+}
+
 export default function ConnectorsPage() {
-  const [search, setSearch] = useState("");
-  const [category, setCategory] = useState<ConnectorCategory | "all">("all");
-  const [connectedProviders, setConnectedProviders] = useState<Set<string>>(new Set());
-  const [connecting, setConnecting] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [connectorDefs] = useState<ConnectorDef[]>(CONNECTORS);
-  const [apiKeyModal, setApiKeyModal] = useState<ConnectorDef | null>(null);
-  const [apiKeyValues, setApiKeyValues] = useState<Record<string, string>>({});
-  const [submittingApiKey, setSubmittingApiKey] = useState(false);
-  const [requestSending, setRequestSending] = useState(false);
-  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
-  const [apiKeyVerified, setApiKeyVerified] = useState(false);
-  // Custom connector state
+  const [toolkits, setToolkits]               = useState<Toolkit[]>([]);
+  const [nextCursor, setNextCursor]           = useState<string | null>(null);
+  const [totalItems, setTotalItems]           = useState(0);
+  const [loadingCatalog, setLoadingCatalog]   = useState(true);
+  const [loadingMore, setLoadingMore]         = useState(false);
+  const [connectedSlugs, setConnectedSlugs]   = useState<Set<string>>(new Set());
+  const [connecting, setConnecting]           = useState<string | null>(null);
+  const [userEmail, setUserEmail]             = useState<string | null>(null);
+  const [search, setSearch]                   = useState("");
+  const [activeCategory, setActiveCategory]   = useState("all");
+  const [toast, setToast]                     = useState<string | null>(null);
+  const [apiKeyModal, setApiKeyModal]         = useState<Toolkit | null>(null);
+  const [apiKeyValue, setApiKeyValue]         = useState("");
+  const [savingKey, setSavingKey]             = useState(false);
+  const [keyError, setKeyError]               = useState<string | null>(null);
+  const [keySuccess, setKeySuccess]           = useState(false);
   const [customConnectors, setCustomConnectors] = useState<CustomConnector[]>([]);
   const [showCustomModal, setShowCustomModal] = useState(false);
-  const [customForm, setCustomForm] = useState({ name: '', api_key: '', base_url: '', auth_type: 'bearer' });
-  const [savingCustom, setSavingCustom] = useState(false);
-  const [customError, setCustomError] = useState<string | null>(null);
+  const [customForm, setCustomForm]           = useState({ name: "", api_key: "", base_url: "", auth_type: "bearer" });
+  const [savingCustom, setSavingCustom]       = useState(false);
+  const [customError, setCustomError]         = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 4000);
   };
 
-  useEffect(() => { checkConnectionStatus(); fetchCustomConnectors(); }, []);
-
-  const fetchCustomConnectors = async () => {
+  // ── Load catalog ──────────────────────────────────────────
+  const loadCatalog = useCallback(async (cursor?: string) => {
+    if (!cursor) setLoadingCatalog(true); else setLoadingMore(true);
     try {
-      const res = await fetch('/api/connectors/custom', { credentials: 'include' });
+      const params = new URLSearchParams({ limit: "100" });
+      if (cursor) params.set("cursor", cursor);
+      const res = await fetch(`/api/composio/apps?${params}`);
+      if (!res.ok) throw new Error("Failed to load");
+      const data = await res.json() as { items: Toolkit[]; next_cursor: string | null; total_items: number };
+      setToolkits(prev => cursor ? [...prev, ...data.items] : data.items);
+      setNextCursor(data.next_cursor);
+      setTotalItems(data.total_items);
+    } catch {
+      showToast("⚠️ Could not load integrations. Please refresh.");
+    }
+    setLoadingCatalog(false);
+    setLoadingMore(false);
+  }, []);
+
+  // ── Load connected status ─────────────────────────────────
+  const checkConnectionStatus = useCallback(async () => {
+    const supabase = getSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    setUserEmail(user?.email ?? null);
+    if (!user) return;
+
+    const { data: perms } = await supabase
+      .from("tenant_permissions")
+      .select("provider")
+      .eq("tenant_id", user.id);
+
+    const slugs = new Set<string>();
+    (perms ?? []).forEach(p => {
+      slugs.add(p.provider);
+      // Also map legacy AF keys (e.g. "google" → "gmail") so old rows still show connected
+      const mapped = LEGACY_TO_SLUG[p.provider];
+      if (mapped) slugs.add(mapped);
+    });
+    setConnectedSlugs(slugs);
+  }, []);
+
+  const fetchCustomConnectors = useCallback(async () => {
+    try {
+      const res = await fetch("/api/connectors/custom", { credentials: "include" });
       if (res.ok) {
         const data = await res.json() as { connectors: CustomConnector[] };
         setCustomConnectors(data.connectors ?? []);
       }
     } catch { /* silent */ }
-  };
-
-  const checkConnectionStatus = async () => {
-    const supabase = getSupabase();
-    const { data: { user } } = await supabase.auth.getUser();
-    setUserEmail(user?.email || null);
-
-    if (!user) { setLoading(false); return; }
-
-    const providers = new Set<string>();
-    try {
-      const { data: perms } = await supabase
-        .from('tenant_permissions')
-        .select('provider')
-        .eq('tenant_id', user.id);
-      if (perms) perms.forEach(p => providers.add(p.provider));
-    } catch (e) {
-      console.warn('Failed to fetch tenant permissions:', e);
-    }
-
-    setConnectedProviders(providers);
-    setLoading(false);
-  };
-
-  const handleSaveCustomConnector = async () => {
-    if (!customForm.name.trim()) { setCustomError('Name is required'); return; }
-    if (!customForm.api_key.trim()) { setCustomError('API Key is required'); return; }
-    setSavingCustom(true);
-    setCustomError(null);
-    try {
-      const res = await fetch('/api/connectors/custom', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(customForm),
-      });
-      const data = await res.json() as { success?: boolean; error?: string };
-      if (!res.ok || !data.success) { setCustomError(data.error ?? 'Failed to save'); setSavingCustom(false); return; }
-      showToast(`✅ ${customForm.name} connected!`);
-      setShowCustomModal(false);
-      setCustomForm({ name: '', api_key: '', base_url: '', auth_type: 'bearer' });
-      fetchCustomConnectors();
-      checkConnectionStatus();
-    } catch { setCustomError('Network error'); }
-    setSavingCustom(false);
-  };
-
-  const handleDeleteCustomConnector = async (provider: string, name: string) => {
-    try {
-      await fetch(`/api/connectors/custom?provider=${provider}`, { method: 'DELETE', credentials: 'include' });
-      showToast(`✓ ${name} removed`);
-      fetchCustomConnectors();
-      checkConnectionStatus();
-    } catch { /* silent */ }
-  };
-
-  const filtered = useMemo(() => {
-    let list = connectorDefs.map(c => ({
-      ...c,
-      status: connectedProviders.has(c.provider || '') ? 'connected' as ConnectorStatus : c.status,
-    }));
-    if (category !== 'all') list = list.filter(c => c.category === category);
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(c =>
-        c.label.toLowerCase().includes(q) ||
-        c.description.toLowerCase().includes(q) ||
-        c.category.includes(q)
-      );
-    }
-    const order: Record<ConnectorStatus, number> = { connected: 0, available: 1, verification_pending: 2, coming_soon: 3, request_access: 4 };
-    list.sort((a, b) => order[a.status] - order[b.status]);
-    return list;
-  }, [search, category, connectedProviders, connectorDefs]);
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'OAUTH_SUCCESS') {
-        showToast(`✅ ${event.data.provider || 'Provider'} connected successfully!`);
-        checkConnectionStatus();
-      } else if (event.data?.type === 'OAUTH_ERROR') {
-        showToast('❌ Connection failed. Please try again.');
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  const handleConnect = async (connector: ConnectorDef) => {
-    if (connector.status === 'coming_soon') {
-      showToast(`🔧 ${connector.label} is coming soon. We'll notify you when it's ready.`);
-      return;
-    }
-    if (connector.status === 'request_access') {
-      handleRequestAccess(connector);
-      return;
-    }
+  useEffect(() => {
+    loadCatalog();
+    checkConnectionStatus();
+    fetchCustomConnectors();
+  }, [loadCatalog, checkConnectionStatus, fetchCustomConnectors]);
 
-    if (connector.connectionType === 'apikey') {
-      setApiKeyValues({});
-      setApiKeyModal(connector);
-      return;
+  // ── OAuth popup listener ───────────────────────────────────
+  useEffect(() => {
+    const handle = (e: MessageEvent) => {
+      if (e.data?.type === "OAUTH_SUCCESS") {
+        showToast(`✅ ${e.data.provider || "App"} connected!`);
+        checkConnectionStatus();
+      } else if (e.data?.type === "OAUTH_ERROR") {
+        showToast("❌ Connection failed. Please try again.");
+      }
+    };
+    window.addEventListener("message", handle);
+    return () => window.removeEventListener("message", handle);
+  }, [checkConnectionStatus]);
+
+  // ── Derived categories from loaded toolkits ───────────────
+  const categories = useMemo(() => {
+    const cats = new Set<string>();
+    toolkits.forEach(tk => tk.categories.forEach(c => cats.add(c)));
+    const sorted = Array.from(cats).sort();
+    return [{ key: "all", label: "All" }, ...sorted.map(c => ({ key: c, label: c.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase()) }))];
+  }, [toolkits]);
+
+  // ── Filtered list ─────────────────────────────────────────
+  const filtered = useMemo(() => {
+    let list = toolkits;
+    if (activeCategory !== "all") list = list.filter(tk => tk.categories.includes(activeCategory));
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(tk =>
+        tk.name.toLowerCase().includes(q) ||
+        tk.slug.toLowerCase().includes(q) ||
+        tk.description.toLowerCase().includes(q) ||
+        tk.categories.some(c => c.includes(q))
+      );
     }
+    // Connected apps float to top
+    return [...list].sort((a, b) => {
+      const ac = connectedSlugs.has(a.slug) ? 0 : 1;
+      const bc = connectedSlugs.has(b.slug) ? 0 : 1;
+      return ac - bc;
+    });
+  }, [toolkits, activeCategory, search, connectedSlugs]);
 
-    if (!connector.provider) return;
-    setConnecting(connector.id);
+  const connectedCount = toolkits.filter(tk => connectedSlugs.has(tk.slug)).length;
 
+  // ── Handlers ──────────────────────────────────────────────
+  const handleConnect = async (tk: Toolkit) => {
+    setConnecting(tk.slug);
     try {
-      const res = await fetch('/api/composio/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ provider: connector.provider }),
+      const res = await fetch("/api/composio/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ provider: tk.slug }),
       });
       const data = await res.json() as { authUrl?: string; error?: string };
-
       if (!res.ok || !data.authUrl) {
-        showToast(`❌ Could not start OAuth for ${connector.label}. Please try again.`);
+        showToast(`❌ Could not start connection for ${tk.name}. Try again.`);
         setConnecting(null);
         return;
       }
-
-      const popup = window.open(data.authUrl, 'oauth_window', 'width=500,height=700,scrollbars=yes');
-      const pollTimer = setInterval(() => {
-        if (popup && popup.closed) {
-          clearInterval(pollTimer);
+      const popup = window.open(data.authUrl, "oauth_window", "width=500,height=700,scrollbars=yes");
+      const poll = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(poll);
           setConnecting(null);
           setTimeout(() => checkConnectionStatus(), 1500);
         }
       }, 500);
     } catch {
-      showToast(`❌ Connection failed for ${connector.label}. Please try again.`);
+      showToast(`❌ Connection failed for ${tk.name}.`);
       setConnecting(null);
     }
   };
 
-  const handleApiKeySubmit = async () => {
-    if (!apiKeyModal) return;
-    setSubmittingApiKey(true);
-    setApiKeyError(null);
-    setApiKeyVerified(false);
+  const handleDisconnect = async (tk: Toolkit) => {
     try {
-      // Step 1: Verify against the real API
-      const verifyRes = await fetch('/api/connectors/apikey/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ provider: apiKeyModal.id, fields: apiKeyValues }),
-      });
-      const verifyData = await verifyRes.json();
-      if (!verifyData.verified) {
-        setApiKeyError(verifyData.error || 'Invalid credentials. Please check and try again.');
-        setSubmittingApiKey(false);
-        return;
-      }
-      // Step 2: Save to tenant_permissions
-      const saveRes = await fetch('/api/connectors/apikey', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ provider: apiKeyModal.id, fields: apiKeyValues }),
-      });
-      if (saveRes.ok) {
-        setApiKeyVerified(true);
-        setTimeout(() => {
-          showToast(`✅ ${apiKeyModal.label} connected!`);
-          setApiKeyModal(null);
-          setApiKeyValues({});
-          setApiKeyVerified(false);
-          checkConnectionStatus();
-        }, 1500);
-      } else {
-        const data = await saveRes.json();
-        setApiKeyError(data.error || 'Failed to save credentials');
-      }
+      await fetch(`/api/connectors/apikey?provider=${tk.slug}`, { method: "DELETE", credentials: "include" });
+      setConnectedSlugs(prev => { const s = new Set(prev); s.delete(tk.slug); return s; });
+      showToast(`✓ ${tk.name} disconnected.`);
     } catch {
-      setApiKeyError('Connection failed. Please try again.');
+      showToast("❌ Could not disconnect. Please try again.");
     }
-    setSubmittingApiKey(false);
   };
 
-  const handleRequestAccess = async (connector: ConnectorDef) => {
-    setRequestSending(true);
+  const handleApiKeyOpen = (tk: Toolkit) => {
+    setApiKeyValue("");
+    setKeyError(null);
+    setKeySuccess(false);
+    setApiKeyModal(tk);
+  };
+
+  const handleApiKeySave = async () => {
+    if (!apiKeyModal || !apiKeyValue.trim()) { setKeyError("API key is required"); return; }
+    setSavingKey(true);
+    setKeyError(null);
     try {
-      const res = await fetch('/api/request-connector', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ connectorId: connector.id, connectorLabel: connector.label, userEmail }),
+      const res = await fetch("/api/connectors/apikey", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ provider: apiKeyModal.slug, fields: { apiKey: apiKeyValue.trim() } }),
       });
-      showToast(res.ok
-        ? `✅ Request sent for ${connector.label}! We'll notify you when it's available.`
-        : `📧 Request noted for ${connector.label}. We'll reach out when it's ready.`
-      );
+      const data = await res.json() as { success?: boolean; error?: string };
+      if (!res.ok || !data.success) { setKeyError(data.error ?? "Failed to save"); setSavingKey(false); return; }
+      setKeySuccess(true);
+      setTimeout(() => {
+        showToast(`✅ ${apiKeyModal.name} connected!`);
+        setApiKeyModal(null);
+        checkConnectionStatus();
+      }, 1200);
     } catch {
-      showToast(`📧 Request noted for ${connector.label}. We'll reach out when it's ready.`);
+      setKeyError("Network error. Please try again.");
     }
-    setRequestSending(false);
+    setSavingKey(false);
   };
 
-  const handleDisconnect = (id: string) => {
-    const conn = connectorDefs.find(c => c.id === id);
-    if (conn?.provider) {
-      setConnectedProviders(prev => { const s = new Set(prev); s.delete(conn.provider!); return s; });
-    }
-    showToast(`✓ ${id} disconnected.`);
+  const handleSaveCustom = async () => {
+    if (!customForm.name.trim()) { setCustomError("Name is required"); return; }
+    if (!customForm.api_key.trim()) { setCustomError("API Key is required"); return; }
+    setSavingCustom(true); setCustomError(null);
+    try {
+      const res = await fetch("/api/connectors/custom", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        credentials: "include", body: JSON.stringify(customForm),
+      });
+      const data = await res.json() as { success?: boolean; error?: string };
+      if (!res.ok || !data.success) { setCustomError(data.error ?? "Failed"); setSavingCustom(false); return; }
+      showToast(`✅ ${customForm.name} connected!`);
+      setShowCustomModal(false);
+      setCustomForm({ name: "", api_key: "", base_url: "", auth_type: "bearer" });
+      fetchCustomConnectors();
+    } catch { setCustomError("Network error"); }
+    setSavingCustom(false);
   };
 
-  const connectedCount = connectorDefs.filter(c => connectedProviders.has(c.provider || '')).length;
-  const availableCount = connectorDefs.filter(c => c.status === 'available').length;
-
-  if (loading) {
-    return (
-      <>
-        <div className="page-header"><h1 className="page-title">🔗 Connector Marketplace</h1></div>
-        <div className="grid-2" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-          {[1, 2, 3, 4, 5, 6].map(i => (
-            <div key={i} className="card" style={{ padding: 'var(--space-lg)' }}>
-              <div className="animate-glow" style={{ width: 40, height: 40, borderRadius: 8, background: 'var(--border)', marginBottom: 12 }} />
-              <div className="animate-glow" style={{ width: `${50 + i * 8}%`, height: 16, borderRadius: 4, background: 'var(--border)', marginBottom: 8 }} />
-              <div className="animate-glow" style={{ width: '80%', height: 12, borderRadius: 4, background: 'var(--border)' }} />
+  // ── Skeleton ──────────────────────────────────────────────
+  if (loadingCatalog) return (
+    <>
+      <div className="page-header">
+        <h1 className="page-title">🔗 850+ Integrations — connect anything</h1>
+        <p className="page-subtitle">OAuth or API key · no code required · enterprise-grade encryption</p>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "var(--space-md)" }}>
+        {Array.from({ length: 18 }).map((_, i) => (
+          <div key={i} className="card" style={{ padding: "var(--space-lg)" }}>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+              <div className="animate-glow" style={{ width: 36, height: 36, borderRadius: 8, background: "var(--border)" }} />
+              <div className="animate-glow" style={{ width: "55%", height: 14, borderRadius: 4, background: "var(--border)" }} />
             </div>
-          ))}
-        </div>
-      </>
-    );
-  }
+            <div className="animate-glow" style={{ width: "90%", height: 11, borderRadius: 4, background: "var(--border)", marginBottom: 6 }} />
+            <div className="animate-glow" style={{ width: "70%", height: 11, borderRadius: 4, background: "var(--border)", marginBottom: 16 }} />
+            <div className="animate-glow" style={{ width: "100%", height: 30, borderRadius: 6, background: "var(--border)" }} />
+          </div>
+        ))}
+      </div>
+    </>
+  );
 
   return (
     <>
-      <div className="page-header">
-        <div className="row" style={{ justifyContent: 'space-between' }}>
+      {/* ── Hero Header ── */}
+      <div className="page-header" style={{ marginBottom: "var(--space-lg)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "var(--space-md)" }}>
           <div>
-            <h1 className="page-title">🔗 Connector Marketplace</h1>
-            <p className="page-subtitle">850+ integrations — OAuth popup or API key, no code required</p>
+            <h1 className="page-title">🔗 850+ Integrations — connect anything</h1>
+            <p className="page-subtitle">OAuth or API key · no code required · enterprise-grade encryption</p>
           </div>
-          <div className="row">
+          <div style={{ display: "flex", gap: "var(--space-sm)", alignItems: "center" }}>
             <span className="badge badge-green">{connectedCount} Connected</span>
-            <span className="badge badge-blue">{availableCount} Available</span>
-            <span className="badge badge-purple">850+ Total</span>
+            <span className="badge badge-purple">{totalItems || "850+"}  Total</span>
           </div>
         </div>
       </div>
 
-      {/* Security Banner */}
-      <div className="card" style={{ marginBottom: 'var(--space-lg)', borderColor: 'hsla(152,69%,50%,0.2)', background: 'var(--emerald-bg)' }}>
+      {/* ── Security Banner ── */}
+      <div className="card" style={{ marginBottom: "var(--space-lg)", borderColor: "hsla(152,69%,50%,0.2)", background: "var(--emerald-bg)" }}>
         <div className="row">
-          <span style={{ fontSize: '1.3rem' }}>🛡️</span>
+          <span style={{ fontSize: "1.2rem" }}>🛡️</span>
           <div>
-            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--emerald)' }}>Secure · OAuth 2.0 + PKCE · 850+ integrations · API Keys encrypted at rest</p>
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+            <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--emerald)" }}>Secure · OAuth 2.0 + PKCE · 850+ integrations · API Keys encrypted at rest</p>
+            <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", marginTop: 2 }}>
               OAuth tokens auto-refreshed · API keys stored in encrypted vault · No secrets stored in the browser
             </p>
           </div>
         </div>
       </div>
 
-      {/* Search + Category Filters */}
-      <div style={{ marginBottom: 'var(--space-lg)' }}>
-        <div className="row" style={{ gap: 'var(--space-md)', marginBottom: 'var(--space-md)' }}>
-          <div style={{ flex: 1 }}>
-            <input
-              className="input" type="text"
-              placeholder="🔍 Search connectors (e.g. Stripe, Slack, CRM...)"
-              value={search} onChange={(e) => setSearch(e.target.value)}
-              style={{ fontSize: '0.9rem' }}
-            />
-          </div>
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-          {CATEGORIES.map(cat => (
-            <button key={cat.key} className={`btn btn-sm ${category === cat.key ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => setCategory(cat.key)} style={{ fontSize: '0.75rem' }}>
-              {cat.icon} {cat.label}
-            </button>
-          ))}
-        </div>
+      {/* ── Search ── */}
+      <div style={{ marginBottom: "var(--space-md)" }}>
+        <input
+          className="input" type="text"
+          placeholder={`🔍 Search ${totalItems || "850+"}  integrations (e.g. Gmail, Stripe, CRM...)`}
+          value={search} onChange={e => setSearch(e.target.value)}
+          style={{ fontSize: "0.9rem" }}
+        />
       </div>
 
-      {filtered.length === 0 && (
-        <div className="card" style={{ textAlign: 'center', padding: 'var(--space-2xl)' }}>
-          <div style={{ fontSize: '3rem', marginBottom: 'var(--space-md)' }}>🔍</div>
-          <h2 style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: 'var(--space-sm)' }}>
-            No connector found for &ldquo;{search}&rdquo;
-          </h2>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-lg)', maxWidth: 400, margin: '0 auto var(--space-lg)' }}>
-            Can&apos;t find what you need? Request it and we&apos;ll prioritize building it.
-          </p>
-          <button className="btn btn-primary btn-lg"
-            onClick={() => handleRequestAccess({ id: search.toLowerCase().replace(/\s+/g, '_'), label: search, icon: '🔌', description: `User-requested: ${search}`, category: 'productivity', status: 'request_access' })}
-            disabled={requestSending}>
-            {requestSending ? '📧 Sending...' : `✨ Request "${search}" Connector`}
+      {/* ── Category Filter ── */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: "var(--space-xl)" }}>
+        {categories.map(cat => (
+          <button key={cat.key}
+            className={`btn btn-sm ${activeCategory === cat.key ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => setActiveCategory(cat.key)}
+            style={{ fontSize: "0.73rem", textTransform: "capitalize" }}>
+            {cat.label}
           </button>
+        ))}
+      </div>
+
+      {/* ── No results ── */}
+      {filtered.length === 0 && (
+        <div className="card" style={{ textAlign: "center", padding: "var(--space-2xl)" }}>
+          <div style={{ fontSize: "2.5rem", marginBottom: "var(--space-md)" }}>🔍</div>
+          <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}>No results for &ldquo;{search}&rdquo;</h2>
+          <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
+            Try a different name or use the custom connector below to add any REST API.
+          </p>
         </div>
       )}
 
-      {/* Connector Grid */}
-      <div className="grid-2" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-        {filtered.map((c) => {
-          const badge = STATUS_BADGES[c.status];
-          const isConnected = c.status === 'connected';
+      {/* ── Toolkit Grid ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "var(--space-md)" }}>
+        {filtered.map(tk => {
+          const connected = connectedSlugs.has(tk.slug);
+          const isConnecting = connecting === tk.slug;
+          const isOAuth = isOAuthApp(tk);
+          const isApiKey = isApiKeyApp(tk);
+          const noAction = tk.no_auth;
 
           return (
-            <div key={c.id} className="card"
-              style={{ padding: 'var(--space-lg)', opacity: c.status === 'request_access' ? 0.75 : 1, transition: 'all 0.2s ease', ...(isConnected ? { borderColor: 'hsla(152,69%,50%,0.3)' } : {}) }}>
-
-              <div className="row" style={{ justifyContent: 'space-between', marginBottom: 'var(--space-sm)' }}>
-                <div className="row" style={{ gap: 'var(--space-sm)' }}>
-                  <ConnectorLogo id={c.id} size={32} />
+            <div key={tk.slug} className="card" style={{
+              padding: "var(--space-lg)",
+              transition: "all 0.2s",
+              ...(connected ? { borderColor: "hsla(152,69%,50%,0.35)" } : {}),
+            }}>
+              {/* Card header */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--space-sm)" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={tk.logo}
+                    alt={tk.name}
+                    width={36} height={36}
+                    style={{ borderRadius: 8, objectFit: "contain", background: "var(--bg-glass)", padding: 2 }}
+                    onError={e => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(tk.name)}&size=36&background=3b82f6&color=fff&bold=true&length=2`; }}
+                  />
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{c.label}</div>
-                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                      <span className="badge" style={{ fontSize: '0.6rem', color: 'var(--text-muted)', padding: '1px 6px' }}>{c.category}</span>
-                      {c.connectionType === 'apikey' && (
-                        <span className="badge" style={{ fontSize: '0.55rem', color: 'var(--text-muted)', padding: '1px 6px', background: 'var(--bg-glass)' }}>🔑 API Key</span>
-                      )}
-                    </div>
+                    <div style={{ fontWeight: 700, fontSize: "0.9rem", lineHeight: 1.2 }}>{tk.name}</div>
+                    {tk.categories[0] && (
+                      <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px", marginTop: 2 }}>{tk.categories[0].replace(/-/g, " ")}</div>
+                    )}
                   </div>
                 </div>
-                <span className={`badge ${badge.class}`} style={{ fontSize: '0.6rem' }}>{badge.icon} {badge.label}</span>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                  {connected && <span className="badge badge-green" style={{ fontSize: "0.6rem" }}>✓ Connected</span>}
+                  {isOAuth && !connected && <span className="badge" style={{ fontSize: "0.55rem", color: "var(--accent)", borderColor: "var(--accent)", padding: "1px 5px" }}>OAuth</span>}
+                  {isApiKey && !connected && <span className="badge" style={{ fontSize: "0.55rem", color: "var(--amber)", borderColor: "var(--amber)", padding: "1px 5px" }}>API Key</span>}
+                </div>
               </div>
 
-              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 'var(--space-md)', minHeight: 36 }}>
-                {c.description}
+              {/* Description */}
+              <p style={{ fontSize: "0.77rem", color: "var(--text-secondary)", lineHeight: 1.5, minHeight: 34, marginBottom: "var(--space-md)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                {tk.description || `Connect to ${tk.name} — ${tk.tools_count} actions available.`}
               </p>
 
-              {isConnected && (
-                <div style={{ padding: 'var(--space-xs) var(--space-sm)', background: 'var(--emerald-bg)', borderRadius: 'var(--radius-sm)', fontSize: '0.72rem', marginBottom: 'var(--space-sm)', color: 'var(--emerald)' }}>
-                  🔒 {userEmail || 'Connected'}
+              {/* Connected email */}
+              {connected && userEmail && (
+                <div style={{ padding: "4px 10px", background: "var(--emerald-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.7rem", color: "var(--emerald)", marginBottom: "var(--space-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  🔒 {userEmail}
                 </div>
               )}
 
-              {c.scopes && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginBottom: 'var(--space-sm)' }}>
-                  {c.scopes.map(scope => (
-                    <span key={scope} className="badge badge-purple" style={{ fontSize: '0.55rem' }}>{scope}</span>
-                  ))}
+              {/* Tools count badge */}
+              {tk.tools_count > 0 && (
+                <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginBottom: "var(--space-sm)" }}>
+                  {tk.tools_count} actions available
                 </div>
               )}
 
-              {isConnected ? (
-                <button className="btn btn-ghost btn-sm" style={{ width: '100%' }} onClick={() => handleDisconnect(c.id)}>
+              {/* Action button */}
+              {connected ? (
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "hsla(0,84%,60%,0.25)" }}
+                  onClick={() => handleDisconnect(tk)}>
                   Disconnect
                 </button>
-              ) : c.status === 'available' ? (
-                <button className="btn btn-primary btn-sm" style={{ width: '100%' }} onClick={() => handleConnect(c)} disabled={connecting === c.id}>
-                  {connecting === c.id ? (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
-                      <span className="animate-glow" style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: 'white' }} />
-                      Connecting...
-                    </span>
-                  ) : c.connectionType === 'apikey' ? '🔑 Add API Key →' : 'Connect →'}
-                </button>
-              ) : c.status === 'verification_pending' ? (
-                <div style={{ padding: '8px 12px', background: 'hsla(38,92%,50%,0.08)', border: '1px solid hsla(38,92%,50%,0.25)', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem', color: 'var(--amber)', textAlign: 'center', lineHeight: 1.4 }}>
-                  🔒 Business verification required<br />
-                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Coming once approved by the platform</span>
+              ) : noAction ? (
+                <div style={{ padding: "6px 12px", textAlign: "center", fontSize: "0.75rem", color: "var(--text-muted)", border: "1px dashed var(--border)", borderRadius: "var(--radius-sm)" }}>
+                  No auth required
                 </div>
-              ) : c.status === 'coming_soon' ? (
-                <button className="btn btn-ghost btn-sm" style={{ width: '100%', color: 'var(--amber)' }} onClick={() => handleConnect(c)}>
-                  🔧 Coming Soon
+              ) : isOAuth ? (
+                <button className="btn btn-primary btn-sm" style={{ width: "100%" }}
+                  onClick={() => handleConnect(tk)} disabled={isConnecting}>
+                  {isConnecting
+                    ? <span style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}>
+                        <span className="animate-glow" style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "white" }} />
+                        Connecting...
+                      </span>
+                    : "Connect →"}
                 </button>
-              ) : (
-                <button className="btn btn-ghost btn-sm" style={{ width: '100%', color: 'var(--purple)' }} onClick={() => handleConnect(c)} disabled={requestSending}>
-                  ✨ Request Access
+              ) : isApiKey ? (
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--amber)", borderColor: "hsla(38,92%,55%,0.3)" }}
+                  onClick={() => handleApiKeyOpen(tk)}>
+                  🔑 Add API Key →
                 </button>
-              )}
+              ) : null}
             </div>
           );
         })}
       </div>
 
-      {/* API Key Modal */}
-      {apiKeyModal && (
-        <div
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}
-          onClick={() => { setApiKeyModal(null); setApiKeyValues({}); }}
-        >
-          <div className="card" style={{ width: '100%', maxWidth: 480, padding: 'var(--space-xl)' }} onClick={e => e.stopPropagation()}>
-            {/* Modal Header */}
-            <div className="row" style={{ justifyContent: 'space-between', marginBottom: 'var(--space-lg)' }}>
-              <div className="row" style={{ gap: 'var(--space-sm)' }}>
-                <ConnectorLogo id={apiKeyModal.id} size={40} />
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>Connect {apiKeyModal.label}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>🔑 API Key Setup — credentials stored securely</div>
-                </div>
-              </div>
-              <button className="btn btn-ghost btn-sm" onClick={() => { setApiKeyModal(null); setApiKeyValues({}); }} style={{ flexShrink: 0 }}>✕</button>
-            </div>
-
-            {/* Help Text */}
-            {apiKeyModal.apiKeyHelpText && (
-              <div style={{ padding: 'var(--space-sm) var(--space-md)', background: 'var(--bg-glass)', borderRadius: 'var(--radius-sm)', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: 'var(--space-lg)', borderLeft: '3px solid var(--accent)' }}>
-                ℹ️ {apiKeyModal.apiKeyHelpText}
-              </div>
-            )}
-
-            {/* Verified success state */}
-            {apiKeyVerified ? (
-              <div style={{ padding: 'var(--space-lg)', textAlign: 'center' }}>
-                <div style={{ fontSize: '2.5rem', marginBottom: 'var(--space-sm)' }}>✅</div>
-                <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--emerald)' }}>{apiKeyModal.label} Connected!</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>Credentials saved securely.</div>
-              </div>
-            ) : (
-              <>
-                {/* Fields */}
-                {apiKeyModal.apiKeyFields?.map(field => (
-                  <div key={field.key} style={{ marginBottom: 'var(--space-md)' }}>
-                    <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>{field.label}</label>
-                    <input
-                      className="input"
-                      type={field.type || 'text'}
-                      placeholder={field.placeholder}
-                      value={apiKeyValues[field.key] || ''}
-                      onChange={e => setApiKeyValues(prev => ({ ...prev, [field.key]: e.target.value }))}
-                      onKeyDown={e => e.key === 'Enter' && !submittingApiKey && handleApiKeySubmit()}
-                      style={{ fontSize: '0.85rem', fontFamily: field.type === 'password' ? 'inherit' : 'monospace' }}
-                      autoComplete="off"
-                      disabled={submittingApiKey}
-                    />
-                  </div>
-                ))}
-
-                {/* Error */}
-                {apiKeyError && (
-                  <div style={{ padding: 'var(--space-sm) var(--space-md)', background: 'hsla(0,84%,60%,0.1)', borderRadius: 'var(--radius-sm)', border: '1px solid hsla(0,84%,60%,0.3)', fontSize: '0.8rem', color: 'hsl(0,84%,70%)', marginBottom: 'var(--space-md)' }}>
-                    ❌ {apiKeyError}
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div className="row" style={{ gap: 'var(--space-sm)', justifyContent: 'flex-end', marginTop: 'var(--space-md)' }}>
-                  <button className="btn btn-ghost" onClick={() => { setApiKeyModal(null); setApiKeyValues({}); setApiKeyError(null); }} disabled={submittingApiKey}>Cancel</button>
-                  <button className="btn btn-primary" onClick={handleApiKeySubmit} disabled={submittingApiKey}>
-                    {submittingApiKey ? 'Verifying…' : 'Verify & Save →'}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
+      {/* ── Load More ── */}
+      {nextCursor && (
+        <div style={{ textAlign: "center", marginTop: "var(--space-xl)" }}>
+          <button className="btn btn-ghost" onClick={() => loadCatalog(nextCursor)} disabled={loadingMore}>
+            {loadingMore ? "Loading..." : `Load more integrations`}
+          </button>
         </div>
       )}
 
-      {/* ── Extended Catalog Banner ── */}
-      <div style={{ marginTop: 'var(--space-2xl)', borderRadius: 'var(--radius)', background: 'linear-gradient(135deg, hsla(217,91%,60%,0.06), hsla(270,70%,60%,0.04))', border: '1px solid hsla(217,91%,60%,0.15)', padding: 'var(--space-xl)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-lg)', flexWrap: 'wrap' }}>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 6 }}>
-            🌐 850+ Integrations — All Built In
-          </div>
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: 520, margin: 0 }}>
-            Your agents have access to 850+ tools including HubSpot, Salesforce, Notion, Jira, Airtable, Monday.com, Intercom, and hundreds more. When you describe a mission, our AI automatically knows the exact actions and parameters for each service — no manual configuration needed.
-          </p>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {['HubSpot', 'Salesforce', 'Jira', 'Notion', 'Monday', 'Airtable', 'Intercom', 'Shopify'].map(app => (
-              <span key={app} className="badge badge-blue" style={{ fontSize: '0.65rem' }}>{app}</span>
-            ))}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textAlign: 'center' }}>+ 842 more apps</div>
-        </div>
-      </div>
-
-      {/* ── Custom Connectors Section ── */}
-      <div style={{ marginTop: 'var(--space-2xl)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-xl)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
+      {/* ── Custom API Connectors ── */}
+      <div style={{ marginTop: "var(--space-2xl)", borderTop: "1px solid var(--border)", paddingTop: "var(--space-xl)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-lg)" }}>
           <div>
-            <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>🔌 Custom API Connectors</div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
-              Connect any REST API not listed above — agents can call it using the <code>custom_api_call</code> tool.
+            <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>🔌 Custom API Connectors</div>
+            <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: 2 }}>
+              Connect any REST API not listed above — agents call it using the <code>custom_api_call</code> tool.
             </div>
           </div>
           <button className="btn btn-primary btn-sm" onClick={() => { setShowCustomModal(true); setCustomError(null); }}>
@@ -652,27 +484,31 @@ export default function ConnectorsPage() {
         </div>
 
         {customConnectors.length === 0 ? (
-          <div style={{ padding: 'var(--space-lg)', background: 'var(--surface)', border: '1px dashed var(--border)', borderRadius: 'var(--radius)', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          <div style={{ padding: "var(--space-lg)", background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: "var(--radius)", textAlign: "center", color: "var(--text-muted)", fontSize: "0.85rem" }}>
             No custom APIs added yet. Click <strong>+ Add Any API</strong> to connect Vapi, your internal CRM, hotel PMS, or any REST service.
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 'var(--space-md)' }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "var(--space-md)" }}>
             {customConnectors.map(c => (
-              <div key={c.provider} className="card" style={{ padding: 'var(--space-md)', borderColor: 'hsla(152,69%,50%,0.3)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div key={c.provider} className="card" style={{ padding: "var(--space-md)", borderColor: "hsla(152,69%,50%,0.3)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{c.metadata?.display_name ?? c.provider}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                      {c.metadata?.base_url ?? 'No base URL'} · {c.metadata?.auth_type ?? 'bearer'}
+                    <div style={{ fontWeight: 700, fontSize: "0.9rem" }}>{c.metadata?.display_name ?? c.provider}</div>
+                    <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 2 }}>
+                      {c.metadata?.base_url ?? "No base URL"} · {c.metadata?.auth_type ?? "bearer"}
                     </div>
                   </div>
-                  <span className="badge badge-green" style={{ fontSize: '0.6rem' }}>✓ Connected</span>
+                  <span className="badge badge-green" style={{ fontSize: "0.6rem" }}>✓ Connected</span>
                 </div>
-                <div style={{ marginTop: 'var(--space-sm)', fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-                  tool: custom_api_call · connector_name: &quot;{c.metadata?.display_name ?? c.provider}&quot;
+                <div style={{ marginTop: "var(--space-sm)", fontSize: "0.7rem", color: "var(--text-muted)", fontFamily: "monospace" }}>
+                  tool: custom_api_call · name: &quot;{c.metadata?.display_name ?? c.provider}&quot;
                 </div>
-                <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 'var(--space-sm)', fontSize: '0.75rem' }}
-                  onClick={() => handleDeleteCustomConnector(c.provider, c.metadata?.display_name ?? c.provider)}>
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", marginTop: "var(--space-sm)", fontSize: "0.75rem", color: "var(--rose)" }}
+                  onClick={async () => {
+                    await fetch(`/api/connectors/custom?provider=${c.provider}`, { method: "DELETE", credentials: "include" });
+                    showToast(`✓ ${c.metadata?.display_name ?? c.provider} removed`);
+                    fetchCustomConnectors();
+                  }}>
                   Remove
                 </button>
               </div>
@@ -681,58 +517,103 @@ export default function ConnectorsPage() {
         )}
       </div>
 
+      {/* ── API Key Modal ── */}
+      {apiKeyModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "1rem" }}
+          onClick={() => setApiKeyModal(null)}>
+          <div className="card" style={{ width: "100%", maxWidth: 440, padding: "var(--space-xl)" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-lg)" }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={apiKeyModal.logo} alt={apiKeyModal.name} width={36} height={36}
+                  style={{ borderRadius: 8, objectFit: "contain", background: "var(--bg-glass)", padding: 2 }}
+                  onError={e => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(apiKeyModal.name)}&size=36&background=3b82f6&color=fff&bold=true&length=2`; }} />
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: "1rem" }}>Connect {apiKeyModal.name}</div>
+                  <div style={{ fontSize: "0.72rem", color: "var(--text-secondary)" }}>API Key · encrypted at rest</div>
+                </div>
+              </div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setApiKeyModal(null)}>✕</button>
+            </div>
+
+            {keySuccess ? (
+              <div style={{ padding: "var(--space-lg)", textAlign: "center" }}>
+                <div style={{ fontSize: "2rem", marginBottom: 8 }}>✅</div>
+                <div style={{ fontWeight: 700, color: "var(--emerald)" }}>{apiKeyModal.name} Connected!</div>
+              </div>
+            ) : (
+              <>
+                <label style={{ fontSize: "0.78rem", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                  {API_KEY_LABELS[apiKeyModal.slug] ?? "API Key"}
+                </label>
+                <input className="input" type="password" autoComplete="off"
+                  placeholder={`Paste your ${apiKeyModal.name} API key`}
+                  value={apiKeyValue} onChange={e => setApiKeyValue(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && !savingKey && handleApiKeySave()}
+                  style={{ fontFamily: "monospace", fontSize: "0.85rem", marginBottom: "var(--space-md)" }}
+                  disabled={savingKey} />
+                {keyError && (
+                  <div style={{ padding: "var(--space-sm) var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.8rem", color: "var(--rose)", marginBottom: "var(--space-md)" }}>
+                    ❌ {keyError}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: "var(--space-sm)", justifyContent: "flex-end" }}>
+                  <button className="btn btn-ghost" onClick={() => setApiKeyModal(null)} disabled={savingKey}>Cancel</button>
+                  <button className="btn btn-primary" onClick={handleApiKeySave} disabled={savingKey || !apiKeyValue.trim()}>
+                    {savingKey ? "Saving…" : "Save & Connect →"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Custom Connector Modal ── */}
       {showCustomModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "1rem" }}
           onClick={() => setShowCustomModal(false)}>
-          <div className="card" style={{ width: '100%', maxWidth: 460, padding: 'var(--space-xl)' }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
+          <div className="card" style={{ width: "100%", maxWidth: 460, padding: "var(--space-xl)" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-lg)" }}>
               <div>
-                <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>🔌 Add Custom API Connector</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>Connect any REST API — Vapi, hotel PMS, internal tools, anything</div>
+                <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>🔌 Add Custom API Connector</div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 2 }}>Connect any REST API — Vapi, hotel PMS, internal tools</div>
               </div>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowCustomModal(false)}>✕</button>
             </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
               {[
-                { key: 'name', label: 'Connector Name', placeholder: 'e.g. Vapi, My Hotel PMS, Pipedrive', type: 'text' },
-                { key: 'api_key', label: 'API Key / Token', placeholder: 'Your secret key or bearer token', type: 'password' },
-                { key: 'base_url', label: 'Base URL (optional)', placeholder: 'https://api.vapi.ai', type: 'text' },
-              ].map(field => (
-                <div key={field.key}>
-                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>{field.label}</label>
-                  <input className="input" type={field.type} placeholder={field.placeholder}
-                    value={customForm[field.key as keyof typeof customForm]}
-                    onChange={e => setCustomForm(prev => ({ ...prev, [field.key]: e.target.value }))}
-                    style={{ fontSize: '0.85rem' }} autoComplete="off" />
+                { key: "name", label: "Connector Name", placeholder: "e.g. My Hotel PMS", type: "text" },
+                { key: "api_key", label: "API Key / Token", placeholder: "Your secret key", type: "password" },
+                { key: "base_url", label: "Base URL (optional)", placeholder: "https://api.example.com", type: "text" },
+              ].map(f => (
+                <div key={f.key}>
+                  <label style={{ fontSize: "0.78rem", fontWeight: 600, display: "block", marginBottom: 4 }}>{f.label}</label>
+                  <input className="input" type={f.type} placeholder={f.placeholder}
+                    value={customForm[f.key as keyof typeof customForm]}
+                    onChange={e => setCustomForm(p => ({ ...p, [f.key]: e.target.value }))}
+                    style={{ fontSize: "0.85rem" }} autoComplete="off" />
                 </div>
               ))}
               <div>
-                <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Auth Type</label>
-                <select className="input" value={customForm.auth_type} onChange={e => setCustomForm(prev => ({ ...prev, auth_type: e.target.value }))} style={{ fontSize: '0.85rem' }}>
-                  <option value="bearer">Bearer Token (Authorization: Bearer ...)</option>
-                  <option value="apikey">API Key Header (X-API-Key: ...)</option>
-                  <option value="basic">Basic Auth (base64 encoded)</option>
-                  <option value="token">Token (Authorization: Token ...)</option>
+                <label style={{ fontSize: "0.78rem", fontWeight: 600, display: "block", marginBottom: 4 }}>Auth Type</label>
+                <select className="input" value={customForm.auth_type} onChange={e => setCustomForm(p => ({ ...p, auth_type: e.target.value }))} style={{ fontSize: "0.85rem" }}>
+                  <option value="bearer">Bearer Token</option>
+                  <option value="apikey">API Key Header (X-API-Key)</option>
+                  <option value="basic">Basic Auth</option>
+                  <option value="token">Token</option>
                 </select>
               </div>
             </div>
-
-            <div style={{ marginTop: 'var(--space-sm)', padding: 'var(--space-sm) var(--space-md)', background: 'var(--bg-glass)', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem', color: 'var(--text-muted)', borderLeft: '3px solid var(--accent)' }}>
-              💡 Agents use this via: <code>custom_api_call</code> tool with <code>connector_name: &quot;{customForm.name || 'YourName'}&quot;</code>
-            </div>
-
             {customError && (
-              <div style={{ padding: 'var(--space-sm)', background: 'hsla(0,84%,60%,0.1)', border: '1px solid hsla(0,84%,60%,0.3)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: 'hsl(0,84%,70%)', marginTop: 'var(--space-md)' }}>
+              <div style={{ padding: "var(--space-sm)", background: "var(--rose-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.8rem", color: "var(--rose)", marginTop: "var(--space-md)" }}>
                 ❌ {customError}
               </div>
             )}
-
-            <div style={{ display: 'flex', gap: 'var(--space-sm)', justifyContent: 'flex-end', marginTop: 'var(--space-lg)' }}>
+            <div style={{ display: "flex", gap: "var(--space-sm)", justifyContent: "flex-end", marginTop: "var(--space-lg)" }}>
               <button className="btn btn-ghost" onClick={() => setShowCustomModal(false)} disabled={savingCustom}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSaveCustomConnector} disabled={savingCustom}>
-                {savingCustom ? 'Saving…' : 'Save Connector →'}
+              <button className="btn btn-primary" onClick={handleSaveCustom} disabled={savingCustom}>
+                {savingCustom ? "Saving…" : "Save Connector →"}
               </button>
             </div>
           </div>
@@ -740,7 +621,7 @@ export default function ConnectorsPage() {
       )}
 
       {toast && (
-        <div className="approval-toast" style={{ background: 'var(--accent)', color: 'white' }}>{toast}</div>
+        <div className="approval-toast" style={{ background: "var(--accent)", color: "white" }}>{toast}</div>
       )}
     </>
   );
