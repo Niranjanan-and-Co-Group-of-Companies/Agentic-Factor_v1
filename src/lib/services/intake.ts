@@ -179,6 +179,7 @@ You must decompose the user's intent into:
        - \`api.slack_send(channel, text)\` — Send Slack message
        - \`api.github_create_issue(owner, repo, title, body)\` — Create GitHub issue
        - \`api.notion_create_page(parent_id, title, content)\` — Create Notion page
+     - \`from agenticfactor._core import composio_execute\` — **COMPOSIO (PREFERRED for 850+ integrations)**: When a Composio action is listed in the COMPOSIO ACTIONS section of this prompt, use this instead of \`api.call()\`. It handles OAuth token refresh automatically. Usage: \`result = composio_execute("GMAIL_SEND_EMAIL", {"recipient_email": "...", "subject": "...", "body": "..."})\`. The action name MUST exactly match the name from the COMPOSIO ACTIONS list (ALL_CAPS_WITH_UNDERSCORES). NEVER invent Composio action names — only use names explicitly listed.
      - \`from agenticfactor._core import ask_user, notify_user, schedule_check\` — Interactive signals. schedule_check(delay, context=None, reason="") pauses the mission and re-runs this agent after \`delay\` seconds (e.g. 1800 for "30 minutes before"); whatever you pass in \`context\` (a dict) is handed back to you unchanged when it resumes — store anything you'll need then (event id, recipient list, meet link) in it now.
 7. **Orchestration Pattern**: Choose the optimal pattern for reliability — each sequential hop multiplies failure probability:
    - "sequential" — linear pipeline (A → B → C). Use ONLY when each agent's output is the required input of the next.
@@ -545,15 +546,34 @@ export async function generateMissionJSON(
 
   // ── LLM Path (always used — template hint gives it a head start) ──
   const { getPlanConfig } = await import('@/lib/middleware/billing');
-  
+
+  // Fetch connected providers for this tenant (for Composio action schemas)
+  async function getConnectedProviders(): Promise<string[]> {
+    try {
+      const supabase = createServiceClient();
+      const { data } = await supabase
+        .from('tenant_permissions')
+        .select('provider')
+        .eq('tenant_id', tenantId);
+      return (data ?? []).map((r: { provider: string }) => r.provider);
+    } catch {
+      return [];
+    }
+  }
+
   // Run ALL pre-checks in parallel instead of sequentially
-  const [memoryContext, agentTemplateContext, feedbackContext, globalMemory, planConfig] = await Promise.all([
+  const [memoryContext, agentTemplateContext, feedbackContext, globalMemory, planConfig, connectedProviders] = await Promise.all([
     searchSimilarMissions(intent, tenantId),
     searchAgentTemplates(intent, tenantId),
     searchFeedbackExamples(intent, tenantId),
     retrieveTenantMemory(tenantId),
     getPlanConfig(tenantId),
+    getConnectedProviders(),
   ]);
+
+  // Fetch Composio action schemas for connected providers (non-blocking — empty string on failure)
+  const { buildComposioActionsContext } = await import('./composio-actions');
+  const composioActionsContext = await buildComposioActionsContext(connectedProviders).catch(() => '');
 
   // Extract facts in the background (fire-and-forget)
   extractAndSaveTenantMemory(intent, tenantId).catch(console.error);
@@ -607,6 +627,11 @@ export async function generateMissionJSON(
   // Inject template hint if matched — gives LLM a structural head start
   if (templateHint) {
     messages.push({ role: 'user', content: templateHint });
+  }
+
+  // Inject Composio action schemas for the tenant's connected providers
+  if (composioActionsContext) {
+    messages.push({ role: 'user', content: composioActionsContext });
   }
 
   messages.push({

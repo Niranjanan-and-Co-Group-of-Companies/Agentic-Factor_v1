@@ -10,7 +10,7 @@ import { useEffect, useRef } from "react";
 const FEATURES = [
   { icon: "🤖", title: "AI Agent Teams", desc: "Autonomous multi-agent systems that decompose and execute complex goals" },
   { icon: "🧠", title: "Powered by Claude", desc: "Claude Sonnet 4 for best code generation, with Gemini & GPT fallback" },
-  { icon: "🔌", title: "100+ Connectors", desc: "Google, Slack, Notion, GitHub, Zoho, Discord and more" },
+  { icon: "🔌", title: "850+ Connectors", desc: "Google, Slack, GitHub, Notion, HubSpot, Salesforce and 844 more — powered by Composio" },
   { icon: "📚", title: "RAG Memory", desc: "Vector-powered knowledge base with PDF/DOCX ingestion" },
   { icon: "⚡", title: "E2B Sandboxing", desc: "Secure code execution in isolated cloud environments" },
   { icon: "💳", title: "Credit-Based Billing", desc: "Pay only for what your agents consume — no waste" },
@@ -39,7 +39,7 @@ const FAQS = [
   { q: "What is Agentic Factor?", a: "Agentic Factor is a SaaS platform that lets you design, deploy, and manage autonomous AI agent teams. You describe a mission in plain English, and our AI builds a team of specialized agents to execute it." },
   { q: "How do credits work?", a: "Every agent action (LLM call, code execution, file processing) costs credits from your pool. Free trial gives you 30 credits. Paid plans refill monthly. You only pay for what your agents consume." },
   { q: "Is my data secure?", a: "Absolutely. All credentials are AES-256-GCM encrypted. We use Supabase Row Level Security, OAuth 2.0, and isolated E2B sandboxes for code execution. Your data never leaves your tenant." },
-  { q: "Can I connect my own tools?", a: "Yes! We support 40+ connectors including Google, Slack, GitHub, Notion, Zoho, and Discord. Need a custom connector? Request it from the dashboard and our team will set it up." },
+  { q: "Can I connect my own tools?", a: "Yes! We support 850+ connectors powered by Composio — including Google, Slack, GitHub, Notion, HubSpot, Salesforce, Airtable, and hundreds more. OAuth is handled automatically, and API key connectors are encrypted at rest." },
   { q: "What happens when I run out of credits?", a: "Agents will pause and notify you. You can upgrade your plan or wait for the monthly refill. No data is lost." },
   { q: "Do you offer refunds?", a: "All sales are final. Credits are non-refundable. Cancelling your plan stops future billing but doesn't refund the current period." },
 ];
@@ -207,7 +207,7 @@ export default function WelcomePage() {
         <div style={{ background: "linear-gradient(135deg, hsla(217,91%,60%,0.1), hsla(270,70%,60%,0.08))", border: "1px solid hsla(217,91%,60%,0.2)", borderRadius: 20, padding: "48px 32px", textAlign: "center" }}>
           <h2 style={{ fontSize: "1.6rem", fontWeight: 800, marginBottom: 12 }}>Ready to Build Your AI Team?</h2>
           <p style={{ color: "hsl(215,15%,60%)", fontSize: "0.95rem", marginBottom: 24, maxWidth: 500, margin: "0 auto 24px" }}>
-            Start with 50 free credits. No credit card required.
+            Start with 30 free credits. No credit card required.
           </p>
           <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
             <a href="/signup" className="btn btn-primary btn-lg" style={{ textDecoration: "none" }}>Create Free Account</a>

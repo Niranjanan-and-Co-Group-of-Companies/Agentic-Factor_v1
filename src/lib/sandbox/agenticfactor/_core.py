@@ -265,3 +265,57 @@ if _custom_urls:
         PROVIDER_BASE_URLS.update(json.loads(_custom_urls))
     except Exception:
         pass
+
+
+# ============================================================
+# COMPOSIO — Preferred tool execution for 850+ integrations
+# ============================================================
+
+def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:
+    """
+    Execute a Composio action for the current tenant entity.
+
+    Use this instead of api.call() for any provider that has a Composio
+    action listed in the blueprint's system prompt. Composio handles token
+    refresh, retries, and API quirks automatically.
+
+    Args:
+        action_name: Exact Composio action name, e.g. "GMAIL_SEND_EMAIL"
+        params: Parameter dict matching the action's schema
+        dry_run_result: Optional mock result for AF_DRY_RUN mode (defaults to {"status": "ok", "dry_run": True})
+
+    Returns:
+        Response data dict from the action execution
+    """
+    dry_run = os.environ.get("AF_DRY_RUN", "0") == "1"
+    if dry_run:
+        sys.stderr.write(f"[DRY_RUN] Skipped composio_execute({action_name}) — write op deferred\n")
+        return dry_run_result or {"status": "ok", "dry_run": True, "action": action_name}
+
+    entity_id = os.environ.get("COMPOSIO_ENTITY_ID", "")
+    api_key = os.environ.get("COMPOSIO_API_KEY", "")
+
+    if not entity_id:
+        _signal_missing_permission("composio")
+        raise PermissionError(
+            f"COMPOSIO_ENTITY_ID is not set — cannot execute {action_name}. "
+            "The tenant's Composio connection is not configured."
+        )
+
+    resp = requests.post(
+        f"https://backend.composio.dev/api/v2/actions/{action_name}/execute",
+        headers={"x-api-key": api_key, "Content-Type": "application/json"},
+        json={"entityId": entity_id, "input": params},
+        timeout=60,
+    )
+
+    if resp.status_code >= 400:
+        try:
+            err_body = resp.json()
+        except Exception:
+            err_body = resp.text
+        raise APIError(resp.status_code, str(err_body), action_name)
+
+    data = resp.json()
+    # Composio wraps responses — unwrap to the actual data
+    return data.get("response", {}).get("data", data)

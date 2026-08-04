@@ -947,6 +947,9 @@ CRITICAL FIX RULES (follow these EXACTLY):
       if (process.env.SENDGRID_API_KEY) sandboxEnvs['SENDGRID_API_KEY'] = process.env.SENDGRID_API_KEY;
       if (process.env.TWITTER_BEARER_TOKEN) sandboxEnvs['TWITTER_BEARER_TOKEN'] = process.env.TWITTER_BEARER_TOKEN;
       if (process.env.FACEBOOK_APP_ID) sandboxEnvs['FACEBOOK_APP_ID'] = process.env.FACEBOOK_APP_ID;
+      // Composio — entity_id is the tenantId, enables composio_execute() in Python SDK
+      if (process.env.COMPOSIO_API_KEY) sandboxEnvs['COMPOSIO_API_KEY'] = process.env.COMPOSIO_API_KEY;
+      sandboxEnvs['COMPOSIO_ENTITY_ID'] = tenantId;
       // Inject custom connector metadata (base_url, auth_type, auth_header) from executor
       if (extraEnvs) Object.assign(sandboxEnvs, extraEnvs);
 
