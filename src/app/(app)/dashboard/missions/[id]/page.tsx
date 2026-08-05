@@ -706,22 +706,22 @@ export default function MissionDetailPage() {
             <span className="badge badge-purple" style={{ textTransform: "capitalize" }}>{mission.status}</span>
             {mission.training_enabled && (
               <>
-                <span className="badge badge-amber" title="Every write action is reviewed and nothing actually fires until this mission graduates to live">
-                  🎓 Training Run {(mission.training_runs_completed ?? 0) + 1} of {mission.training_runs_max ?? 5}
+                <span className="badge badge-amber" title="Preview mode — agents plan but nothing actually executes until you approve and go live">
+                  👁 Preview Run {(mission.training_runs_completed ?? 0) + 1} of {mission.training_runs_max ?? 1}
                 </span>
                 <button
                   className="btn btn-ghost btn-sm"
                   onClick={async () => {
-                    if (!window.confirm("Skip the remaining training runs and go live now? Future actions will run normally based on each agent's trust level instead of always pausing for review.")) return;
+                    if (!window.confirm("Go live now? Future runs will execute real actions based on each agent's trust level.")) return;
                     try {
                       await fetch(`/api/missions/${missionId}/graduate`, { method: "POST" });
                       setRefreshTrigger(t => t + 1);
                     } catch {
-                      alert("Failed to graduate mission. Please try again.");
+                      alert("Failed to go live. Please try again.");
                     }
                   }}
                 >
-                  Skip Remaining & Go Live
+                  Go Live
                 </button>
               </>
             )}
@@ -780,6 +780,30 @@ export default function MissionDetailPage() {
         </div>
       </div>
 
+
+      {/* PREVIEW MODE BANNER */}
+      {mission.training_enabled && (
+        <div style={{
+          background: "hsla(38, 100%, 50%, 0.12)",
+          border: "1.5px solid hsla(38, 100%, 50%, 0.45)",
+          borderRadius: "var(--radius-md)",
+          padding: "var(--space-md) var(--space-lg)",
+          marginBottom: "var(--space-xl)",
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--space-md)",
+        }}>
+          <span style={{ fontSize: "1.4rem", flexShrink: 0 }}>👁</span>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "hsla(38, 100%, 42%, 1)", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+              PREVIEW — Nothing has been sent yet
+            </div>
+            <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginTop: 2 }}>
+              This is a safe dry run. No emails, posts, Trello cards, or any real actions will execute until you approve and go live.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* CONNECTOR REQUEST CARD */}
       <div className="card" style={{ marginBottom: "var(--space-xl)", borderColor: "hsla(270,100%,70%,0.3)", background: "hsla(270,100%,70%,0.04)" }}>
@@ -1407,7 +1431,7 @@ export default function MissionDetailPage() {
                       <div className="row" style={{ justifyContent: "space-between" }}>
                         <div style={{ fontWeight: 600, fontSize: "1rem", marginBottom: 2 }}>{label}</div>
                         {isTraining ? (
-                          <span className="badge badge-amber" style={{ fontSize: "0.62rem" }}>🎓 Training Run {action.payload?.runNumber ?? '?'}</span>
+                          <span className="badge badge-amber" style={{ fontSize: "0.62rem" }}>👁 Preview Run {action.payload?.runNumber ?? '?'}</span>
                         ) : action.reversible === false ? (
                           <span className="badge badge-red" style={{ fontSize: "0.62rem" }}>⚠ Irreversible</span>
                         ) : null}

@@ -188,7 +188,7 @@ export async function transitionMissionStatus(
 
       if (trainingRow?.training_enabled) {
         const newRunCount = (trainingRow.training_runs_completed ?? 0) + 1;
-        const maxRuns = trainingRow.training_runs_max ?? 5;
+        const maxRuns = trainingRow.training_runs_max ?? 1;
         const graduated = newRunCount >= maxRuns;
 
         await supabase

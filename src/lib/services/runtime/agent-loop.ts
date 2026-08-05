@@ -499,16 +499,17 @@ export async function executeAgent(
   let missionTitle = 'Mission';
   let isTrainingMode = false;
   let trainingRunNumber = 0;
+  let tenantPlan = 'free';
   try {
-    const { data: missionRow } = await supabase
-      .from('missions')
-      .select('mission_json, training_enabled, training_runs_completed')
-      .eq('id', missionId)
-      .single();
+    const [{ data: missionRow }, { data: billingRow }] = await Promise.all([
+      supabase.from('missions').select('mission_json, training_enabled, training_runs_completed').eq('id', missionId).single(),
+      supabase.from('tenant_billing').select('plan').eq('tenant_id', tenantId).single(),
+    ]);
     if (missionRow?.mission_json?.title) missionTitle = missionRow.mission_json.title;
     isTrainingMode = missionRow?.training_enabled === true;
     trainingRunNumber = (missionRow?.training_runs_completed ?? 0) + 1;
-  } catch { /* non-fatal — falls back to 'Mission', training mode off */ }
+    tenantPlan = billingRow?.plan ?? 'free';
+  } catch { /* non-fatal — falls back to 'Mission', training mode off, free plan */ }
 
   // Build environment variables from tokens
   const envVars = tokens.reduce((acc, t) => {
@@ -609,7 +610,8 @@ export async function executeAgent(
     // LLM model credit cost is deducted separately after we know which model was used.
     try {
       const { deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
-      await deductCredits(tenantId, CREDIT_COSTS.code_execution, `e2b_execution_attempt_${attempts}:${agent.role}`);
+      const e2bCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(CREDIT_COSTS.code_execution / 2) : CREDIT_COSTS.code_execution;
+      await deductCredits(tenantId, e2bCost, `e2b_execution_attempt_${attempts}:${agent.role}`);
     } catch (err) {
       console.warn(`[Agent ${agent.id}] Insufficient credits for execution, stopping.`, err);
       throw new Error('InsufficientCredits');
@@ -802,9 +804,10 @@ INSTRUCTIONS:
       // ── Deduct LLM credit based on actual model used ──
       // Always deduct — even if later E2B execution fails, we still paid the LLM provider
       try {
-        const { deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
+        const { deductCredits } = await import('@/lib/middleware/billing');
         const { getModelCreditCost } = await import('@/lib/services/llm-router');
-        const llmCost = getModelCreditCost(response.model);
+        const llmCostBase = getModelCreditCost(response.model);
+        const llmCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(llmCostBase / 2) : llmCostBase;
         await deductCredits(tenantId, llmCost, `llm_${response.provider}:${response.model}:${agent.role}`, {
           provider: response.provider,
           model: response.model,
@@ -1295,7 +1298,8 @@ Be a real critic, not a rubber stamp — but don't be pedantic about minor forma
 Respond: {"valid": boolean, "reason": "string if invalid"}`;
           const criticResult = await callLLM([{ role: 'user', content: criticPrompt }], { temperature: 0, jsonMode: true, tier: 3 });
           const { deductCredits: deductCritic, CREDIT_COSTS: CC } = await import('@/lib/middleware/billing');
-          deductCritic(tenantId, CC.llm_call_flash, `critic_llm:${agent.role}`).catch(() => {});
+          const criticCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(CC.llm_call_flash / 2) : CC.llm_call_flash;
+          deductCritic(tenantId, criticCost, `critic_llm:${agent.role}`).catch(() => {});
           const criticParsed = robustJSONParse(criticResult.content);
           if (!criticParsed.valid) {
             // Capture this as a feedback example before retrying — an
