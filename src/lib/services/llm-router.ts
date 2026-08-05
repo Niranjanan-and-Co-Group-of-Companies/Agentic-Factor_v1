@@ -175,7 +175,7 @@ export async function callLLM(
 
   // Circuit breaker gate: check before calling any LLM
   if (budgetContext) {
-    const { checkCircuit, recordFailure } = await import('@/lib/middleware/circuit-breaker');
+    const { checkCircuit } = await import('@/lib/middleware/circuit-breaker');
     const estimatedTokens = messages.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0) + 500;
     const check = checkCircuit(budgetContext.tenantId, budgetContext.missionId, estimatedTokens);
     
@@ -197,10 +197,6 @@ export async function callLLM(
       result = await callAnthropicWithFallback(messages, temperature, tier, jsonMode, maxTokens);
     } catch (err) {
       console.warn('[LLM] All Anthropic models failed, trying Gemini:', (err as Error).message);
-      if (budgetContext) {
-        const { recordFailure } = await import('@/lib/middleware/circuit-breaker');
-        recordFailure(budgetContext.tenantId);
-      }
     }
   }
 
@@ -210,10 +206,6 @@ export async function callLLM(
       result = await callGeminiWithFallback(messages, temperature, jsonMode, tier, maxTokens);
     } catch (err) {
       console.warn('[LLM] All Gemini models failed, trying OpenAI:', (err as Error).message);
-      if (budgetContext) {
-        const { recordFailure } = await import('@/lib/middleware/circuit-breaker');
-        recordFailure(budgetContext.tenantId);
-      }
     }
   }
 
@@ -223,14 +215,15 @@ export async function callLLM(
       result = await callOpenAIWithFallback(messages, temperature, jsonMode, tier, maxTokens);
     } catch (err) {
       console.warn('[LLM] All OpenAI models failed, no more fallbacks:', (err as Error).message);
-      if (budgetContext) {
-        const { recordFailure } = await import('@/lib/middleware/circuit-breaker');
-        recordFailure(budgetContext.tenantId);
-      }
     }
   }
 
   if (!result) {
+    // Only count as a circuit-breaker failure when ALL providers are exhausted — not per-provider.
+    if (budgetContext) {
+      const { recordFailure } = await import('@/lib/middleware/circuit-breaker');
+      recordFailure(budgetContext.tenantId);
+    }
     throw new Error('No LLM provider available. All models in all providers failed. Check API keys and model availability.');
   }
 

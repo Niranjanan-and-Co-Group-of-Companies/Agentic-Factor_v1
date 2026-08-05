@@ -38,8 +38,8 @@ const DEFAULT_CONFIG: CircuitBreakerConfig = {
   maxTokensPerMinute: 100_000,
   maxTokensPerMission: 500_000,
   maxCostPerDay: 50,
-  tripThreshold: 5,
-  cooldownMs: 60_000,
+  tripThreshold: 15,
+  cooldownMs: 120_000,
   costPer1kTokens: 0.005,
   creditMultiplier: 4,           // 4x markup for 80%+ profit margin
   creditsPerDollar: 1000,        // 1 dollar = 1000 base credits

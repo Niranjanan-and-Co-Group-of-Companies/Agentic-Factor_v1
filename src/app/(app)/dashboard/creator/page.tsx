@@ -258,7 +258,14 @@ function MissionCreatorInner() {
       });
       
     } catch (err: any) {
-      setError(err.message);
+      const rawMsg: string = err.message || 'Something went wrong';
+      let displayMsg = rawMsg;
+      if (rawMsg.includes('Circuit breaker OPEN') || rawMsg.includes('Circuit is OPEN')) {
+        displayMsg = "We're briefly managing system load — please wait 30 seconds and try again.";
+      } else if (rawMsg.includes('No LLM provider available')) {
+        displayMsg = 'AI services are temporarily unavailable. Please try again in a moment.';
+      }
+      setError(displayMsg);
     } finally {
       setLoading(false);
       setProgressMessage("");

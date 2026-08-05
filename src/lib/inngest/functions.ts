@@ -478,7 +478,16 @@ export const generateBlueprintBackground = inngest.createFunction(
 
     } catch (error: any) {
       await step.run('save-error', async () => {
-        await updateJobStatus('failed', { error: error.message || 'Unknown error' });
+        const rawMsg: string = error.message || 'Unknown error';
+        let userMsg = rawMsg;
+        if (rawMsg.includes('Circuit breaker OPEN') || rawMsg.includes('Circuit is OPEN')) {
+          userMsg = 'We\'re briefly managing system load — please wait 30 seconds and try again.';
+        } else if (rawMsg.includes('No LLM provider available')) {
+          userMsg = 'AI services are temporarily unavailable. Please try again in a moment.';
+        } else if (rawMsg.toLowerCase().includes('rate limit') || rawMsg.includes('429')) {
+          userMsg = 'Too many requests right now — please wait a moment and try again.';
+        }
+        await updateJobStatus('failed', { error: userMsg });
       });
       throw error;
     }
