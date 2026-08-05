@@ -1,7 +1,9 @@
 /**
- * Fetch Composio action schemas for the tenant's connected providers.
- * Returns a formatted string injected into the LLM system prompt so the
- * LLM knows the exact action names and parameters to use.
+ * Fetch ALL Composio action schemas for the tenant's connected providers.
+ * Paginates until every action is retrieved — no filter, no arbitrary limit.
+ * Returns a formatted string injected into the LLM system prompt so the LLM
+ * knows the exact action names to use, and exports a Set of valid names for
+ * post-generation validation in intake.ts.
  */
 
 const COMPOSIO_API_BASE = 'https://backend.composio.dev';
@@ -38,8 +40,8 @@ export const AF_TO_COMPOSIO_APP: Record<string, string> = {
 
 // v3.1 tools API response shape
 interface ComposioTool {
-  slug: string;        // action name, e.g. "GMAIL_SEND_EMAIL"
-  name: string;        // human-readable, e.g. "Send Email"
+  slug: string;
+  name: string;
   description: string;
   input_parameters?: {
     properties?: Record<string, { type?: string; description?: string; title?: string }>;
@@ -47,81 +49,108 @@ interface ComposioTool {
   };
 }
 
-// Cache schemas in-process for 10 minutes to avoid redundant API calls
+// Cache all actions per app for 30 minutes — action lists rarely change
 const schemaCache: Map<string, { data: string; expiresAt: number }> = new Map();
 
-async function fetchActionsForApp(appName: string, apiKey: string): Promise<ComposioTool[]> {
+/**
+ * Paginate through ALL Composio actions for an app.
+ * No filter_important_actions, no hard limit — fetches every available action.
+ */
+async function fetchAllActionsForApp(appName: string, apiKey: string): Promise<ComposioTool[]> {
   const cached = schemaCache.get(appName);
   if (cached && cached.expiresAt > Date.now()) return JSON.parse(cached.data);
 
-  try {
-    const url = `${COMPOSIO_API_BASE}/api/v3.1/tools?toolkit_slug=${appName}&limit=30&filter_important_actions=true`;
-    const res = await fetch(url, {
-      headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(8000),
-    });
+  const allActions: ComposioTool[] = [];
+  const PAGE_SIZE = 100;
+  let offset = 0;
 
-    if (!res.ok) {
-      console.warn(`[composio-actions] Failed to fetch ${appName}: HTTP ${res.status}`);
-      return [];
+  try {
+    while (true) {
+      const url = `${COMPOSIO_API_BASE}/api/v3.1/tools?toolkit_slug=${appName}&limit=${PAGE_SIZE}&offset=${offset}`;
+      const res = await fetch(url, {
+        headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(20_000),
+      });
+
+      if (!res.ok) {
+        console.warn(`[composio-actions] ${appName} offset=${offset}: HTTP ${res.status}`);
+        break;
+      }
+
+      const data = await res.json() as { items?: ComposioTool[] };
+      const items = data.items ?? [];
+      allActions.push(...items);
+
+      // Last page reached when fewer items returned than requested
+      if (items.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+
+      // Safety ceiling — Composio apps shouldn't exceed this
+      if (allActions.length >= 5000) {
+        console.warn(`[composio-actions] ${appName} hit 5000-action safety limit`);
+        break;
+      }
     }
 
-    const data = await res.json() as { items?: ComposioTool[] };
-    const items = data.items ?? [];
-
     schemaCache.set(appName, {
-      data: JSON.stringify(items),
-      expiresAt: Date.now() + 10 * 60 * 1000,
+      data: JSON.stringify(allActions),
+      expiresAt: Date.now() + 30 * 60 * 1000,
     });
 
-    return items;
+    console.log(`[composio-actions] Fetched ${allActions.length} actions for ${appName}`);
+    return allActions;
   } catch (err) {
     console.warn(`[composio-actions] Error fetching ${appName}:`, err);
     return [];
   }
 }
 
-function formatActionSchema(action: ComposioTool): string {
-  const props = action.input_parameters?.properties ?? {};
-  const required = new Set(action.input_parameters?.required ?? []);
-  const params = Object.entries(props)
-    .slice(0, 6)
-    .map(([key, schema]) => {
-      const s = schema as { type?: string; description?: string; title?: string };
-      const req = required.has(key) ? '' : '?';
-      const desc = s.description || s.title || '';
-      return `      ${key}${req}: ${s.type ?? 'any'}${desc ? ` — ${desc}` : ''}`;
-    })
-    .join('\n');
-
-  return `  ${action.slug} — ${action.description || action.name}\n${params ? params + '\n' : ''}`;
+// Compact format: slug — description [req: param1, param2]
+// Keeps token count manageable while giving LLM everything it needs to pick exact names.
+function formatActionCompact(action: ComposioTool): string {
+  const required = (action.input_parameters?.required ?? []).slice(0, 5).join(', ');
+  const reqHint = required ? ` [req: ${required}]` : '';
+  const desc = (action.description || action.name).slice(0, 90);
+  return `  ${action.slug} — ${desc}${reqHint}\n`;
 }
 
 /**
- * Fetch Composio action schemas for a list of AF provider keys and format
- * them as a concise system-prompt section.
+ * Returns the complete set of valid Composio action names for the given AF providers.
+ * Used by intake.ts to validate action names in generated Python scripts.
+ */
+export async function getValidComposioActionNames(afProviders: string[]): Promise<Set<string>> {
+  const apiKey = process.env.COMPOSIO_API_KEY;
+  if (!apiKey || afProviders.length === 0) return new Set();
+
+  const appNames = [...new Set(afProviders.map(p => AF_TO_COMPOSIO_APP[p] ?? p))];
+  const results = await Promise.allSettled(appNames.map(app => fetchAllActionsForApp(app, apiKey)));
+
+  const names = new Set<string>();
+  for (const res of results) {
+    if (res.status === 'fulfilled') {
+      for (const action of res.value) names.add(action.slug);
+    }
+  }
+  return names;
+}
+
+/**
+ * Fetch all Composio action schemas for the tenant's connected providers and
+ * format them as a concise system-prompt section.
  *
- * Returns '' if COMPOSIO_API_KEY is not set or all fetches fail — the caller
- * should degrade gracefully to existing api.call() instructions.
+ * Returns '' if COMPOSIO_API_KEY is not set or all fetches fail.
  */
 export async function buildComposioActionsContext(afProviders: string[]): Promise<string> {
   const apiKey = process.env.COMPOSIO_API_KEY;
   if (!apiKey || afProviders.length === 0) return '';
 
-  // Map AF provider key → Composio slug. Fall back to using the key directly —
-  // apps connected via the Composio catalog store their slug as-is in tenant_permissions
-  // (e.g. provider="trello", provider="youtube"), so they pass through unchanged.
-  const appNames = [...new Set(
-    afProviders.map(p => AF_TO_COMPOSIO_APP[p] ?? p)
-  )];
-
+  const appNames = [...new Set(afProviders.map(p => AF_TO_COMPOSIO_APP[p] ?? p))];
   if (appNames.length === 0) return '';
 
-  const results = await Promise.allSettled(
-    appNames.map(app => fetchActionsForApp(app, apiKey))
-  );
+  const results = await Promise.allSettled(appNames.map(app => fetchAllActionsForApp(app, apiKey)));
 
   const sections: string[] = [];
+  const connectedSlugs: string[] = [];
 
   for (let i = 0; i < appNames.length; i++) {
     const res = results[i];
@@ -129,32 +158,33 @@ export async function buildComposioActionsContext(afProviders: string[]): Promis
 
     const app = appNames[i];
     const afProvider = Object.entries(AF_TO_COMPOSIO_APP).find(([, v]) => v === app)?.[0] ?? app;
-    const header = `${app.toUpperCase()} (provider: ${afProvider})`;
-    const body = res.value.map(formatActionSchema).join('');
-    sections.push(`${header}:\n${body}`);
+    const header = `${app.toUpperCase()} (provider: ${afProvider}) — ${res.value.length} actions:`;
+    const body = res.value.map(formatActionCompact).join('');
+    sections.push(`${header}\n${body}`);
+    connectedSlugs.push(app);
   }
 
   if (sections.length === 0) return '';
 
-  const connectedSlugs = sections.map((_, i) => appNames[i]).filter(Boolean).join(', ');
+  const slugList = connectedSlugs.join(', ');
 
-  return `\n\nCOMPOSIO ACTIONS (PREFERRED for connected providers — use composio_execute() instead of api.call()):
-RULE: Whenever an agent needs to interact with the services listed below, call composio_execute(action_name, params) from agenticfactor._core. It handles auth automatically via the tenant's Composio connection — no token needed.
+  return `\n\nCOMPOSIO ACTIONS — use composio_execute() for ALL of these providers:
+CRITICAL RULE: The action names below are the ONLY valid names. Copy them EXACTLY (ALL_CAPS_WITH_UNDERSCORES). NEVER invent, shorten, or guess a name — if the exact name is not in this list, it does not exist and will fail at runtime.
 
 Python usage:
   from agenticfactor._core import composio_execute
-  result = composio_execute("GMAIL_SEND_EMAIL", {"recipient_email": "...", "subject": "...", "body": "..."})
+  result = composio_execute("EXACT_ACTION_NAME", {"param": "value"})
 
-Available actions for this tenant's connected apps (? = optional param):
+All available actions for this tenant's connected apps (format: slug — description [req: required_params]):
 ${sections.join('\n')}
-NOTE: Required params have no ?, optional params have ?. Never guess action names — only use names from the list above.
+NOTE: Every action name used in composio_execute() MUST appear verbatim in the list above.
 
-COMPOSIO PERMISSIONS RULE (CRITICAL — overrides the "custom_<slug>" fallback for these services):
-Connected Composio services: ${connectedSlugs}
-For ANY of these services, the permission entry in "permissions" MUST be:
+COMPOSIO PERMISSIONS RULE (CRITICAL — overrides "custom_<slug>" for these services):
+Connected services: ${slugList}
+For ANY of these services, the permission entry MUST be:
   "type": "composio_oauth"
-  "service": "<exact-slug>"  (lowercase slug from the section header above, e.g. "trello", "youtube", "gmail")
-  "scope": "<COMMA_SEPARATED_ACTION_SLUGS>"  (only the specific action slugs this agent actually calls, e.g. "TRELLO_CREATE_TRELLO_CARD,TRELLO_GET_BOARDS")
+  "service": "<exact-slug>"  (lowercase slug, e.g. "trello", "youtube", "gmail")
+  "scope": "<COMMA_SEPARATED_ACTION_SLUGS>"  (only the specific action slugs this agent calls)
   "confidentialityLevel": "internal"
 DO NOT use "api_key", "oauth_token", or "custom_*" for these services.`;
 }

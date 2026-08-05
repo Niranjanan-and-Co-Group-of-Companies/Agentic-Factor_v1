@@ -314,10 +314,16 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
             err_body = resp.json()
         except Exception:
             err_body = resp.text
+        if resp.status_code == 404:
+            sys.stderr.write(f"[COMPOSIO] Action '{action_name}' not found — verify the exact name (ALL_CAPS_WITH_UNDERSCORES).\n")
+            raise APIError(404, f"Composio action '{action_name}' does not exist. Use only action names listed in the mission blueprint.", action_name)
         raise APIError(resp.status_code, str(err_body), action_name)
 
     data = resp.json()
     # v3.1 response: { successful: bool, data: {...}, error: str|null }
     if not data.get("successful", True):
-        raise APIError(resp.status_code, data.get("error") or "Tool execution failed", action_name)
+        err_msg = data.get("error") or "Tool execution failed"
+        if "not found" in str(err_msg).lower() or "invalid action" in str(err_msg).lower():
+            sys.stderr.write(f"[COMPOSIO] Action '{action_name}' rejected — {err_msg}\n")
+        raise APIError(resp.status_code, err_msg, action_name)
     return data.get("data", data)

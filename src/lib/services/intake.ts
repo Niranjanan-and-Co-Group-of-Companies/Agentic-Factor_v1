@@ -732,6 +732,73 @@ export async function generateMissionJSON(
     llmOutput.permissions = normalizePermissions(llmOutput.permissions as any) as any;
   }
 
+  // 4.6 Validate composio_execute action names against Composio's live action list.
+  // If the LLM invented a name (e.g. "TRELLO_ADD_CARDS" instead of "TRELLO_CREATE_TRELLO_CARD"),
+  // we catch it here and fix the script before the blueprint is saved — not at runtime after
+  // credits are burned on 5 failed retries.
+  if (connectedProviders.length > 0) {
+    try {
+      const { getValidComposioActionNames } = await import('./composio-actions');
+      const validActions = await getValidComposioActionNames(connectedProviders);
+
+      if (validActions.size > 0) {
+        const invalidActions = new Set<string>();
+        const actionRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
+
+        for (const agent of llmOutput.agents) {
+          if (!agent.pythonScript) continue;
+          actionRegex.lastIndex = 0;
+          let match;
+          while ((match = actionRegex.exec(agent.pythonScript)) !== null) {
+            if (!validActions.has(match[1])) invalidActions.add(match[1]);
+          }
+        }
+
+        if (invalidActions.size > 0) {
+          console.warn(`[intake] Invalid Composio action names detected: ${[...invalidActions].join(', ')} — auto-correcting`);
+
+          const correctionResponse = await callLLM([
+            {
+              role: 'system',
+              content: `You are a Python script corrector. Fix ONLY composio_execute() action names that do not exist.
+Invalid names found: ${[...invalidActions].join(', ')}
+Valid action names available: ${[...validActions].join(', ')}
+Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected script"}]}
+Include only agents whose scripts were changed. Change nothing else — not logic, not structure, not variable names.`,
+            },
+            {
+              role: 'user',
+              content: JSON.stringify(
+                llmOutput.agents
+                  .filter(a => a.pythonScript)
+                  .map(a => ({ agentIndex: a.agentIndex, pythonScript: a.pythonScript }))
+              ),
+            },
+          ], { temperature: 0, jsonMode: true, tier: 2, budgetContext: { tenantId, missionId: 'composio_action_fix' } });
+
+          try {
+            const corrections = robustJSONParse(correctionResponse.content);
+            if (Array.isArray(corrections?.agents)) {
+              for (const fix of corrections.agents) {
+                const agent = llmOutput.agents.find(a => a.agentIndex === fix.agentIndex);
+                if (agent && fix.pythonScript) {
+                  agent.pythonScript = fix.pythonScript;
+                }
+              }
+              console.log(`[intake] Composio action names auto-corrected for ${corrections.agents.length} agent(s)`);
+            }
+          } catch {
+            console.warn('[intake] Composio action name correction LLM call failed — proceeding with original (non-fatal)');
+          }
+        } else {
+          console.log(`[intake] Composio action name validation passed — all names are valid`);
+        }
+      }
+    } catch (err) {
+      console.warn('[intake] Composio action validation failed (non-fatal):', err);
+    }
+  }
+
   // 4. Hydrate with IDs, tenantId, timestamps
   const now = new Date().toISOString();
   const missionId = uuidv4();
