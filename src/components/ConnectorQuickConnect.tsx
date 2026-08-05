@@ -1,48 +1,77 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
-// Registry of known connectors and their fields — mirrors connectors page definitions
-// Used so the missions page can show the right form per connector without navigating away
+// All OAuth-based providers now connect through Composio.
+// Composio manages token storage, refresh, and retries — no direct OAuth flow needed.
+// Only pure API-key providers (Stripe, Twilio, etc.) bypass Composio.
 
 interface FieldDef { key: string; label: string; placeholder: string; type?: string; }
 
 interface ConnectorInfo {
   label: string;
   icon: string;
-  connectionType: 'oauth' | 'apikey' | 'custom';
+  // 'composio' = OAuth via Composio (covers all major OAuth apps)
+  // 'apikey'   = direct API key stored in our vault (no OAuth involved)
+  // 'custom'   = fully custom REST connector
+  connectionType: 'composio' | 'apikey' | 'custom';
+  composioSlug?: string;   // Composio toolkit slug (required when connectionType='composio')
   fields?: FieldDef[];
   helpText?: string;
-  oauthRoute?: string;
 }
 
+// Maps our AF provider key → Composio toolkit slug for every supported app.
+// ALL of these must connect via Composio OAuth — no legacy direct OAuth.
 const KNOWN_CONNECTORS: Record<string, ConnectorInfo> = {
-  google:      { label: 'Google Workspace', icon: '📧', connectionType: 'oauth', oauthRoute: 'google', helpText: 'Connects Gmail, Calendar, Sheets and Drive.' },
-  slack:       { label: 'Slack', icon: '💬', connectionType: 'oauth', oauthRoute: 'slack' },
-  github:      { label: 'GitHub', icon: '🐙', connectionType: 'oauth', oauthRoute: 'github' },
-  notion:      { label: 'Notion', icon: '📝', connectionType: 'oauth', oauthRoute: 'notion' },
-  hubspot:     { label: 'HubSpot', icon: '🧲', connectionType: 'oauth', oauthRoute: 'hubspot' },
-  salesforce:  { label: 'Salesforce', icon: '☁️', connectionType: 'oauth', oauthRoute: 'salesforce' },
-  zoho:        { label: 'Zoho CRM', icon: '📊', connectionType: 'oauth', oauthRoute: 'zoho' },
-  airtable:    { label: 'Airtable', icon: '📊', connectionType: 'oauth', oauthRoute: 'airtable' },
-  discord:     { label: 'Discord', icon: '🎮', connectionType: 'oauth', oauthRoute: 'discord' },
-  twitter:     { label: 'X (Twitter)', icon: '🐦', connectionType: 'oauth', oauthRoute: 'twitter' },
-  microsoft:   { label: 'Microsoft 365', icon: '🪟', connectionType: 'oauth', oauthRoute: 'microsoft' },
-  atlassian:   { label: 'Jira / Atlassian', icon: '📋', connectionType: 'oauth', oauthRoute: 'atlassian' },
-  monday:      { label: 'Monday.com', icon: '📅', connectionType: 'oauth', oauthRoute: 'monday' },
-  asana:       { label: 'Asana', icon: '🎯', connectionType: 'oauth', oauthRoute: 'asana' },
-  mailchimp:   { label: 'Mailchimp', icon: '🐒', connectionType: 'oauth', oauthRoute: 'mailchimp' },
-  stripe:      { label: 'Stripe', icon: '💳', connectionType: 'apikey', fields: [{ key: 'apiKey', label: 'Secret Key', placeholder: 'sk_live_...' }], helpText: 'Stripe Dashboard → Developers → API Keys' },
-  twilio:      { label: 'Twilio', icon: '📞', connectionType: 'apikey', fields: [{ key: 'accountSid', label: 'Account SID', placeholder: 'AC...' }, { key: 'authToken', label: 'Auth Token', placeholder: 'Your auth token' }], helpText: 'Twilio Console → Account Info' },
-  sendgrid:    { label: 'SendGrid', icon: '✉️', connectionType: 'apikey', fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'SG...' }] },
-  apollo:      { label: 'Apollo.io', icon: '🔭', connectionType: 'apikey', fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'Your Apollo API key' }] },
-  calendly:    { label: 'Calendly', icon: '📅', connectionType: 'apikey', fields: [{ key: 'apiKey', label: 'Personal Access Token', placeholder: 'Your Calendly token' }] },
-  hunter:      { label: 'Hunter.io', icon: '🎯', connectionType: 'apikey', fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'Your Hunter.io API key' }] },
-  vapi:        { label: 'Vapi.ai', icon: '📞', connectionType: 'apikey', fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'Your Vapi API key' }], helpText: 'Vapi Dashboard → Account → API Keys' },
-  elevenlabs:  { label: 'ElevenLabs', icon: '🎙️', connectionType: 'apikey', fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'Your ElevenLabs API key' }] },
-  deepgram:    { label: 'Deepgram', icon: '🎤', connectionType: 'apikey', fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'Your Deepgram API key' }] },
-  linear:      { label: 'Linear', icon: '⚡', connectionType: 'apikey', fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'lin_api_...' }] },
-  zendesk:     { label: 'Zendesk', icon: '🎧', connectionType: 'apikey', fields: [{ key: 'email', label: 'Agent Email', placeholder: 'you@company.com' }, { key: 'token', label: 'API Token', placeholder: 'Your Zendesk API token' }, { key: 'subdomain', label: 'Subdomain', placeholder: 'yourcompany' }] },
-  shopify:     { label: 'Shopify', icon: '🛍️', connectionType: 'apikey', fields: [{ key: 'apiKey', label: 'Access Token', placeholder: 'shpat_...' }, { key: 'shop', label: 'Shop Domain', placeholder: 'mystore.myshopify.com' }] },
+  // ── Google (Gmail, Calendar, Drive, Sheets) ──
+  google:        { label: 'Google Workspace', icon: '📧', connectionType: 'composio', composioSlug: 'gmail',        helpText: 'Connects Gmail, Calendar, Drive, and Sheets.' },
+  gmail:         { label: 'Gmail',            icon: '📧', connectionType: 'composio', composioSlug: 'gmail' },
+  // ── Productivity & Collaboration ──
+  slack:         { label: 'Slack',            icon: '💬', connectionType: 'composio', composioSlug: 'slack' },
+  notion:        { label: 'Notion',           icon: '📝', connectionType: 'composio', composioSlug: 'notion' },
+  discord:       { label: 'Discord',          icon: '🎮', connectionType: 'composio', composioSlug: 'discord' },
+  microsoft:     { label: 'Microsoft 365',    icon: '🪟', connectionType: 'composio', composioSlug: 'outlook',      helpText: 'Connects Outlook, Teams, and OneDrive.' },
+  // ── Project Management ──
+  atlassian:     { label: 'Jira / Atlassian', icon: '📋', connectionType: 'composio', composioSlug: 'jira' },
+  monday:        { label: 'Monday.com',       icon: '📅', connectionType: 'composio', composioSlug: 'mondaydotcom' },
+  asana:         { label: 'Asana',            icon: '🎯', connectionType: 'composio', composioSlug: 'asana' },
+  airtable:      { label: 'Airtable',         icon: '📊', connectionType: 'composio', composioSlug: 'airtable' },
+  // ── Developer ──
+  github:        { label: 'GitHub',           icon: '🐙', connectionType: 'composio', composioSlug: 'github' },
+  linear:        { label: 'Linear',           icon: '⚡', connectionType: 'composio', composioSlug: 'linear' },
+  // ── CRM & Sales ──
+  hubspot:       { label: 'HubSpot',          icon: '🧲', connectionType: 'composio', composioSlug: 'hubspot' },
+  salesforce:    { label: 'Salesforce',       icon: '☁️', connectionType: 'composio', composioSlug: 'salesforce' },
+  zoho:          { label: 'Zoho CRM',         icon: '📊', connectionType: 'composio', composioSlug: 'zoho' },
+  intercom:      { label: 'Intercom',         icon: '💬', connectionType: 'composio', composioSlug: 'intercom' },
+  // ── Marketing ──
+  mailchimp:     { label: 'Mailchimp',        icon: '🐒', connectionType: 'composio', composioSlug: 'mailchimp' },
+  // ── Social Media ──
+  twitter:       { label: 'X (Twitter)',      icon: '🐦', connectionType: 'composio', composioSlug: 'twitter' },
+  facebook:      { label: 'Facebook',         icon: '👥', connectionType: 'composio', composioSlug: 'facebook' },
+  instagram:     { label: 'Instagram',        icon: '📸', connectionType: 'composio', composioSlug: 'instagram' },
+  linkedin_oidc: { label: 'LinkedIn',         icon: '💼', connectionType: 'composio', composioSlug: 'linkedin' },
+  reddit:        { label: 'Reddit',           icon: '🤖', connectionType: 'composio', composioSlug: 'reddit' },
+  // ── Storage ──
+  dropbox:       { label: 'Dropbox',          icon: '📦', connectionType: 'composio', composioSlug: 'dropbox' },
+  // ── E-commerce ──
+  shopify:       { label: 'Shopify',          icon: '🛍️', connectionType: 'composio', composioSlug: 'shopify' },
+  paypal:        { label: 'PayPal',           icon: '💰', connectionType: 'composio', composioSlug: 'paypal' },
+  // ── Customer Support ──
+  zendesk:       { label: 'Zendesk',          icon: '🎧', connectionType: 'composio', composioSlug: 'zendesk' },
+  // ── Payments (API key — no OAuth) ──
+  stripe:        { label: 'Stripe',           icon: '💳', connectionType: 'apikey',   fields: [{ key: 'apiKey', label: 'Secret Key', placeholder: 'sk_live_...' }],   helpText: 'Stripe Dashboard → Developers → API Keys' },
+  // ── Communication (API key) ──
+  twilio:        { label: 'Twilio',           icon: '📞', connectionType: 'apikey',   fields: [{ key: 'accountSid', label: 'Account SID', placeholder: 'AC...' }, { key: 'authToken', label: 'Auth Token', placeholder: 'Your auth token' }], helpText: 'Twilio Console → Account Info' },
+  sendgrid:      { label: 'SendGrid',         icon: '✉️', connectionType: 'apikey',   fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'SG...' }] },
+  // ── Prospecting (API key) ──
+  apollo:        { label: 'Apollo.io',        icon: '🔭', connectionType: 'apikey',   fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'Your Apollo API key' }] },
+  hunter:        { label: 'Hunter.io',        icon: '🎯', connectionType: 'apikey',   fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'Your Hunter.io API key' }] },
+  // ── Voice / AI (API key) ──
+  vapi:          { label: 'Vapi.ai',          icon: '📞', connectionType: 'apikey',   fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'Your Vapi API key' }],      helpText: 'Vapi Dashboard → Account → API Keys' },
+  elevenlabs:    { label: 'ElevenLabs',       icon: '🎙️', connectionType: 'apikey',   fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'Your ElevenLabs API key' }] },
+  deepgram:      { label: 'Deepgram',         icon: '🎤', connectionType: 'apikey',   fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'Your Deepgram API key' }] },
+  // ── Scheduling (API key) ──
+  calendly:      { label: 'Calendly',         icon: '📅', connectionType: 'apikey',   fields: [{ key: 'apiKey', label: 'Personal Access Token', placeholder: 'Your Calendly token' }] },
 };
 
 interface Props {
@@ -65,13 +94,53 @@ export default function ConnectorQuickConnect({ provider, onConnected, onClose }
   const label = info?.label ?? (isCustom ? baseProvider : provider);
   const icon = info?.icon ?? '🔌';
 
-  const handleOAuth = () => {
-    const route = info?.oauthRoute ?? provider;
-    window.open(`/api/oauth/${route}`, 'oauth_window', 'width=500,height=600,scrollbars=yes');
-    const check = setInterval(() => {
-      // Poll — parent will re-check connection status via onConnected after a short delay
-    }, 500);
-    setTimeout(() => { clearInterval(check); onConnected(); }, 3000);
+  // Listen for Composio OAuth popup success/failure
+  useEffect(() => {
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'OAUTH_SUCCESS') {
+        setSaving(false);
+        setDone(true);
+        setTimeout(() => onConnected(), 1000);
+      } else if (e.data?.type === 'OAUTH_ERROR') {
+        setSaving(false);
+        setError('Connection failed. Please try again or use the Connectors page.');
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [onConnected]);
+
+  // All OAuth providers go through Composio — no more direct legacy OAuth
+  const handleComposioOAuth = async () => {
+    setSaving(true);
+    setError(null);
+    const composioSlug = info?.composioSlug ?? baseProvider;
+    try {
+      const res = await fetch('/api/composio/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ provider: composioSlug }),
+      });
+      const data = await res.json() as { authUrl?: string; error?: string };
+      if (!res.ok || !data.authUrl) {
+        setError(data.error ?? 'Could not start connection. Try from the Connectors page.');
+        setSaving(false);
+        return;
+      }
+      const popup = window.open(data.authUrl, 'oauth_window', 'width=500,height=700,scrollbars=yes');
+      // Fallback poll in case postMessage doesn't fire (popup blocked or redirected without opener)
+      const poll = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(poll);
+          setSaving(false);
+          setTimeout(() => onConnected(), 500);
+        }
+      }, 500);
+    } catch {
+      setError('Connection failed. Please try again or go to the Connectors page.');
+      setSaving(false);
+    }
   };
 
   const handleApiKey = async () => {
@@ -95,7 +164,7 @@ export default function ConnectorQuickConnect({ provider, onConnected, onClose }
       });
       if (!saveRes.ok) { setError('Failed to save credentials'); setSaving(false); return; }
       setDone(true);
-      setTimeout(() => { onConnected(); }, 1200);
+      setTimeout(() => onConnected(), 1200);
     } catch { setError('Network error'); }
     setSaving(false);
   };
@@ -114,7 +183,7 @@ export default function ConnectorQuickConnect({ provider, onConnected, onClose }
       const data = await res.json() as { success?: boolean; error?: string };
       if (!data.success) { setError(data.error ?? 'Failed to save'); setSaving(false); return; }
       setDone(true);
-      setTimeout(() => { onConnected(); }, 1200);
+      setTimeout(() => onConnected(), 1200);
     } catch { setError('Network error'); }
     setSaving(false);
   };
@@ -144,21 +213,30 @@ export default function ConnectorQuickConnect({ provider, onConnected, onClose }
             <div style={{ fontWeight: 700, color: 'var(--emerald)' }}>{label} Connected!</div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>You can now re-run the mission.</div>
           </div>
-        ) : info?.connectionType === 'oauth' ? (
+
+        ) : info?.connectionType === 'composio' ? (
+          // ── Composio OAuth ────────────────────────────────────
           <>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 'var(--space-lg)', lineHeight: 1.5 }}>
-              Click below to authorise AgenticFactor to access your {label} account via OAuth. A popup will open.
+              Click below to authorise AgenticFactor to access your {label} account. A popup will open — complete the sign-in and it will close automatically.
             </div>
             {info.helpText && (
               <div style={{ padding: 'var(--space-sm) var(--space-md)', background: 'var(--bg-glass)', borderRadius: 'var(--radius-sm)', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 'var(--space-lg)', borderLeft: '3px solid var(--accent)' }}>
                 ℹ️ {info.helpText}
               </div>
             )}
-            <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleOAuth}>
-              Connect {label} →
+            {error && (
+              <div style={{ padding: 'var(--space-sm) var(--space-md)', background: 'var(--rose-bg)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: 'var(--rose)', marginBottom: 'var(--space-md)' }}>
+                ❌ {error}
+              </div>
+            )}
+            <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleComposioOAuth} disabled={saving}>
+              {saving ? 'Opening sign-in…' : `Connect ${label} →`}
             </button>
           </>
+
         ) : isCustom || !info ? (
+          // ── Custom connector ──────────────────────────────────
           <>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
               {[
@@ -188,7 +266,9 @@ export default function ConnectorQuickConnect({ provider, onConnected, onClose }
               {saving ? 'Saving…' : 'Save & Connect →'}
             </button>
           </>
+
         ) : (
+          // ── API Key provider ──────────────────────────────────
           <>
             {info.helpText && (
               <div style={{ padding: 'var(--space-sm) var(--space-md)', background: 'var(--bg-glass)', borderRadius: 'var(--radius-sm)', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 'var(--space-lg)', borderLeft: '3px solid var(--accent)' }}>
