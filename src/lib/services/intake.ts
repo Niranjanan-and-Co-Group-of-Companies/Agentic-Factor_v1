@@ -182,7 +182,7 @@ You must decompose the user's intent into:
        - \`api.slack_send(channel, text)\` — Send Slack message
        - \`api.github_create_issue(owner, repo, title, body)\` — Create GitHub issue
        - \`api.notion_create_page(parent_id, title, content)\` — Create Notion page
-     - \`from agenticfactor._core import composio_execute\` — **COMPOSIO (PREFERRED for 850+ integrations)**: When a Composio action is listed in the COMPOSIO ACTIONS section of this prompt, use this instead of \`api.call()\`. It handles OAuth token refresh automatically. Usage: \`result = composio_execute("GMAIL_SEND_EMAIL", {"recipient_email": "...", "subject": "...", "body": "..."})\`. The action name MUST exactly match the name from the COMPOSIO ACTIONS list (ALL_CAPS_WITH_UNDERSCORES). NEVER invent Composio action names — only use names explicitly listed.
+     - \`from agenticfactor._core import composio_execute\` — **COMPOSIO — MANDATORY for all listed services (reads AND writes)**: When a service appears in the COMPOSIO ACTIONS section, use composio_execute() for EVERY call to that service — board lookups, list fetches, searches, and writes. There is NO direct Bearer token for Composio services; api.call() and _request() always return 401. Usage: \`result = composio_execute("EXACT_ACTION_NAME", {"param": "value"})\`. The action name MUST exactly match the COMPOSIO ACTIONS list (ALL_CAPS_WITH_UNDERSCORES). NEVER use api.call() or _request() for any Composio-listed service.
      - \`from agenticfactor._core import ask_user, notify_user, schedule_check\` — Interactive signals. schedule_check(delay, context=None, reason="") pauses the mission and re-runs this agent after \`delay\` seconds (e.g. 1800 for "30 minutes before"); whatever you pass in \`context\` (a dict) is handed back to you unchanged when it resumes — store anything you'll need then (event id, recipient list, meet link) in it now.
 7. **Orchestration Pattern**: Choose the optimal pattern for reliability — each sequential hop multiplies failure probability:
    - "sequential" — linear pipeline (A → B → C). Use ONLY when each agent's output is the required input of the next.
@@ -959,6 +959,7 @@ export async function persistMission(
     mission_json: mission, // Will update this after agent IDs are generated
     heartbeat_at: new Date().toISOString(),
     training_enabled: trainingMode,
+    training_runs_max: 1,
   }).select('id').single();
 
   if (missionError || !missionData) {

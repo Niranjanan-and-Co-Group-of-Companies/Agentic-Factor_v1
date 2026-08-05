@@ -271,6 +271,17 @@ if _custom_urls:
 # COMPOSIO — Preferred tool execution for 850+ integrations
 # ============================================================
 
+_READ_VERBS = frozenset({
+    'GET', 'LIST', 'SEARCH', 'FIND', 'FETCH', 'READ', 'CHECK', 'VIEW', 'QUERY',
+    'RETRIEVE', 'SHOW', 'DESCRIBE', 'LOOKUP', 'COUNT',
+})
+
+def _is_composio_read(action_name: str) -> bool:
+    """Return True if the action is a read/lookup (no side effects)."""
+    parts = action_name.upper().split('_')
+    return len(parts) >= 2 and parts[1] in _READ_VERBS
+
+
 def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:
     """
     Execute a Composio action for the current tenant entity.
@@ -288,7 +299,8 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
         Response data dict from the action execution
     """
     dry_run = os.environ.get("AF_DRY_RUN", "0") == "1"
-    if dry_run:
+    if dry_run and not _is_composio_read(action_name):
+        # Skip writes in DRY_RUN — reads still execute so downstream code gets real IDs/data
         sys.stderr.write(f"[DRY_RUN] Skipped composio_execute({action_name}) — write op deferred\n")
         return dry_run_result or {"status": "ok", "dry_run": True, "action": action_name}
 

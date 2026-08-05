@@ -108,13 +108,24 @@ PROVIDER_BASE_URLS = {
   "instagram": "https://graph.facebook.com/v19.0",
 }
 
+_READ_VERBS = frozenset({
+    'GET', 'LIST', 'SEARCH', 'FIND', 'FETCH', 'READ', 'CHECK', 'VIEW', 'QUERY',
+    'RETRIEVE', 'SHOW', 'DESCRIBE', 'LOOKUP', 'COUNT',
+})
+
+def _is_composio_read(action_name: str) -> bool:
+    parts = action_name.upper().split('_')
+    return len(parts) >= 2 and parts[1] in _READ_VERBS
+
 def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:
     """Execute a Composio action for the current tenant entity.
     Use instead of api.call() for any provider connected via Composio OAuth.
     Composio handles token refresh, retries, and API quirks automatically.
+    In DRY_RUN mode: reads execute normally (so downstream code gets real IDs),
+    writes are safely mocked.
     """
     dry_run = os.environ.get("AF_DRY_RUN", "0") == "1"
-    if dry_run:
+    if dry_run and not _is_composio_read(action_name):
         sys.stderr.write(f"[DRY_RUN] Skipped composio_execute({action_name}) — write op deferred\\n")
         return dry_run_result or {"status": "ok", "dry_run": True, "action": action_name}
 

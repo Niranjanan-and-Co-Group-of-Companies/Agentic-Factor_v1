@@ -179,6 +179,23 @@ All available actions for this tenant's connected apps (format: slug — descrip
 ${sections.join('\n')}
 NOTE: Every action name used in composio_execute() MUST appear verbatim in the list above.
 
+COMPOSIO CALL RULE — ABSOLUTE (applies to reads AND writes, every single interaction):
+For ALL services listed above (${slugList}), you MUST use composio_execute() for EVERY call — lookups, searches, reads, and writes.
+There is NO direct Bearer token available for Composio-managed services. Direct HTTP calls ALWAYS return 401.
+
+✅ CORRECT — Trello: read board/list first, then create card (ALL via composio_execute):
+  boards = composio_execute("TRELLO_GET_USER_BOARDS_ALL_BOARDS", {})
+  board_list = boards if isinstance(boards, list) else boards.get("boards", [])
+  board = next((b for b in board_list if "Action Items" in b.get("name", "")), board_list[0] if board_list else None)
+  lists = composio_execute("TRELLO_GET_ALL_LISTS_OF_A_BOARD", {"board_id": board["id"]})
+  list_items = lists if isinstance(lists, list) else lists.get("lists", [])
+  composio_execute("TRELLO_CREATE_TRELLO_CARD", {"idList": list_items[0]["id"], "name": "Card Title", "desc": "..."})
+
+❌ WRONG — direct REST (ALWAYS fails with 401 — no Trello token exists in env):
+  _request("GET", "https://api.trello.com/1/members/me/boards", token=_get_token("trello"))
+  api.call("trello", "GET", "/members/me/boards")
+NEVER use api.call(), _request(), or any direct HTTP for these services: ${slugList}
+
 COMPOSIO PERMISSIONS RULE (CRITICAL — overrides "custom_<slug>" for these services):
 Connected services: ${slugList}
 For ANY of these services, the permission entry MUST be:

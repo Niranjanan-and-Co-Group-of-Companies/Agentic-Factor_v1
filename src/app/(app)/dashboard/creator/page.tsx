@@ -594,12 +594,12 @@ function MissionCreatorInner() {
                 Skip — Go Live Immediately
               </button>
               <button className="btn btn-primary btn-lg" onClick={() => handleConfirmClick(true)} disabled={loading}>
-                {loading ? "🔒 Provisioning..." : "🎓 Start in Training Mode"}
+                {loading ? "🔒 Provisioning..." : "👁 Start in Preview Mode"}
               </button>
             </div>
           </div>
           <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "var(--space-sm)", textAlign: "right" }}>
-            Training Mode rehearses up to 5 runs — every action is previewed for your review, nothing actually sends or fires until you graduate to live.
+            Preview Mode does 1 safe rehearsal run — every action is shown for your review before anything actually sends or fires.
           </p>
         </div>
         {error && (
