@@ -1,191 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
-import { randomBytes, createHash } from 'crypto';
+import { initiateComposioConnection } from '@/lib/services/composio';
 
 // ============================================================
-// Dynamic OAuth Initiation Handler — supports ANY provider
-// URL: /api/oauth/[provider]
+// Legacy OAuth initiation — upgraded to Composio
 //
-// Creates the provider-specific OAuth authorization URL and
-// redirects the user to it. The callback is handled by
-// /api/oauth/callback/[provider].
+// This route used to run a direct OAuth flow per provider.
+// All OAuth connections now go through Composio so that
+// Composio manages token refresh, retries, and action schemas.
+//
+// Any stale link, cached URL, or code path that still hits
+// /api/oauth/[provider] is silently redirected to the Composio
+// OAuth flow and lands in /api/composio/callback instead.
 // ============================================================
 
-interface OAuthProviderConfig {
-  authUrl: string;
-  clientIdEnv: string;
-  scopes: string[];
-  scopeSeparator?: string;
-  additionalParams?: Record<string, string>;
-  // Some providers use a different key in the callback route
-  callbackProviderKey?: string;
-}
-
-const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
-  google: {
-    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
-    clientIdEnv: 'GOOGLE_CLIENT_ID',
-    scopes: [
-      'https://www.googleapis.com/auth/userinfo.email',
-      'https://www.googleapis.com/auth/userinfo.profile',
-      'https://www.googleapis.com/auth/gmail.readonly',
-      'https://www.googleapis.com/auth/gmail.send',
-      'https://www.googleapis.com/auth/gmail.compose',
-      'https://www.googleapis.com/auth/gmail.modify',
-      'https://www.googleapis.com/auth/calendar',
-      'https://www.googleapis.com/auth/drive',
-      'https://www.googleapis.com/auth/spreadsheets',
-      'https://www.googleapis.com/auth/contacts.readonly',
-    ],
-    additionalParams: { access_type: 'offline', prompt: 'consent' },
-  },
-  linkedin: {
-    authUrl: 'https://www.linkedin.com/oauth/v2/authorization',
-    clientIdEnv: 'LINKEDIN_CLIENT_ID',
-    scopes: ['openid', 'profile', 'email', 'w_member_social'],
-    callbackProviderKey: 'linkedin_oidc',
-  },
-  github: {
-    authUrl: 'https://github.com/login/oauth/authorize',
-    clientIdEnv: 'GITHUB_CLIENT_ID',
-    scopes: ['user', 'repo', 'read:org'],
-  },
-  slack: {
-    authUrl: 'https://slack.com/oauth/v2/authorize',
-    clientIdEnv: 'SLACK_CLIENT_ID',
-    scopes: ['channels:read', 'channels:history', 'chat:write', 'users:read', 'users:read.email'],
-    scopeSeparator: ',',
-  },
-  notion: {
-    authUrl: 'https://api.notion.com/v1/oauth/authorize',
-    clientIdEnv: 'NOTION_CLIENT_ID',
-    scopes: [], // Notion handles scopes internally
-    additionalParams: { owner: 'user' },
-  },
-  zoho: {
-    authUrl: 'https://accounts.zoho.com/oauth/v2/auth',
-    clientIdEnv: 'ZOHO_CLIENT_ID',
-    scopes: ['ZohoCRM.modules.ALL', 'ZohoCRM.settings.ALL'],
-    additionalParams: { access_type: 'offline', prompt: 'consent' },
-  },
-  discord: {
-    authUrl: 'https://discord.com/api/oauth2/authorize',
-    clientIdEnv: 'DISCORD_CLIENT_ID',
-    scopes: ['identify', 'guilds', 'bot'],
-  },
-  // ── Social Media Connectors ──
-  twitter: {
-    authUrl: 'https://twitter.com/i/oauth2/authorize',
-    clientIdEnv: 'TWITTER_CLIENT_ID',
-    scopes: ['tweet.read', 'tweet.write', 'users.read', 'offline.access'],
-    additionalParams: { code_challenge_method: 'S256' },
-  },
-  facebook: {
-    authUrl: 'https://www.facebook.com/v19.0/dialog/oauth',
-    clientIdEnv: 'FACEBOOK_APP_ID',
-    scopes: ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'public_profile', 'email'],
-  },
-  instagram: {
-    authUrl: 'https://www.facebook.com/v19.0/dialog/oauth',
-    clientIdEnv: 'FACEBOOK_APP_ID',
-    scopes: ['instagram_basic', 'instagram_content_publish', 'instagram_manage_comments', 'pages_show_list', 'public_profile'],
-    callbackProviderKey: 'instagram',
-  },
-  // Aliases — so /api/oauth/linkedin_oidc also works (returned by verifyMissionPermissions)
-  linkedin_oidc: {
-    authUrl: 'https://www.linkedin.com/oauth/v2/authorization',
-    clientIdEnv: 'LINKEDIN_CLIENT_ID',
-    scopes: ['openid', 'profile', 'email', 'w_member_social'],
-    callbackProviderKey: 'linkedin_oidc',
-  },
-  // ── Atlassian (Jira + Confluence + Trello) ──
-  atlassian: {
-    authUrl: 'https://auth.atlassian.com/authorize',
-    clientIdEnv: 'ATLASSIAN_CLIENT_ID',
-    scopes: ['read:jira-work', 'write:jira-work', 'read:confluence-content.all', 'write:confluence-content', 'read:me', 'offline_access'],
-    additionalParams: { audience: 'api.atlassian.com', prompt: 'consent' },
-  },
-  // ── CRM ──
-  salesforce: {
-    authUrl: 'https://login.salesforce.com/services/oauth2/authorize',
-    clientIdEnv: 'SALESFORCE_CLIENT_ID',
-    scopes: ['full', 'refresh_token', 'offline_access'],
-    additionalParams: { prompt: 'consent' },
-  },
-  hubspot: {
-    authUrl: 'https://app.hubspot.com/oauth/authorize',
-    clientIdEnv: 'HUBSPOT_CLIENT_ID',
-    scopes: ['crm.objects.contacts.read', 'crm.objects.contacts.write', 'crm.objects.deals.read', 'crm.objects.deals.write', 'content'],
-  },
-  // ── Marketing ──
-  mailchimp: {
-    authUrl: 'https://login.mailchimp.com/oauth2/authorize',
-    clientIdEnv: 'MAILCHIMP_CLIENT_ID',
-    scopes: [],
-  },
-  // ── Customer Support ──
-  intercom: {
-    authUrl: 'https://app.intercom.com/oauth',
-    clientIdEnv: 'INTERCOM_CLIENT_ID',
-    scopes: [],
-  },
-  // ── Storage ──
-  dropbox: {
-    authUrl: 'https://www.dropbox.com/oauth2/authorize',
-    clientIdEnv: 'DROPBOX_CLIENT_ID',
-    scopes: ['files.content.read', 'files.content.write', 'account_info.read'],
-    additionalParams: { token_access_type: 'offline' },
-  },
-  box: {
-    authUrl: 'https://account.box.com/api/oauth2/authorize',
-    clientIdEnv: 'BOX_CLIENT_ID',
-    scopes: [],
-  },
-  // ── Project Management ──
-  monday: {
-    authUrl: 'https://auth.monday.com/oauth2/authorize',
-    clientIdEnv: 'MONDAY_CLIENT_ID',
-    scopes: ['me:read', 'boards:read', 'boards:write', 'users:read'],
-  },
-  asana: {
-    authUrl: 'https://app.asana.com/-/oauth_authorize',
-    clientIdEnv: 'ASANA_CLIENT_ID',
-    scopes: ['default'],
-  },
-  // ── Payments ──
-  paypal: {
-    authUrl: 'https://www.paypal.com/signin/authorize',
-    clientIdEnv: 'PAYPAL_CLIENT_ID',
-    scopes: ['openid', 'email', 'profile'],
-    additionalParams: { flowEntry: 'static' },
-  },
-  square: {
-    authUrl: 'https://connect.squareup.com/oauth2/authorize',
-    clientIdEnv: 'SQUARE_CLIENT_ID',
-    scopes: ['MERCHANT_PROFILE_READ', 'ORDERS_READ', 'ORDERS_WRITE', 'PAYMENTS_READ', 'PAYMENTS_WRITE'],
-    scopeSeparator: '+',
-  },
-  // ── Social ──
-  reddit: {
-    authUrl: 'https://www.reddit.com/api/v1/authorize',
-    clientIdEnv: 'REDDIT_CLIENT_ID',
-    scopes: ['identity', 'read', 'submit'],
-    additionalParams: { duration: 'permanent' },
-  },
-  // ── Microsoft (Azure AD + Teams + OneDrive) ──
-  microsoft: {
-    authUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
-    clientIdEnv: 'MICROSOFT_CLIENT_ID',
-    scopes: ['openid', 'profile', 'email', 'offline_access', 'User.Read', 'Files.ReadWrite', 'Teams.ReadBasic.All', 'ChannelMessage.Send'],
-    additionalParams: { prompt: 'consent' },
-  },
-  // ── Airtable (PKCE required) ──
-  airtable: {
-    authUrl: 'https://airtable.com/oauth2/v1/authorize',
-    clientIdEnv: 'AIRTABLE_CLIENT_ID',
-    scopes: ['data.records:read', 'data.records:write', 'schema.bases:read', 'webhook:manage'],
-    additionalParams: { code_challenge_method: 'S256' },
-  },
+const LEGACY_TO_COMPOSIO: Record<string, string> = {
+  google:        'gmail',
+  microsoft:     'outlook',
+  monday:        'mondaydotcom',
+  linkedin_oidc: 'linkedin',
+  linkedin:      'linkedin',
+  atlassian:     'jira',
+  // All others have matching slugs (slack→slack, github→github, etc.)
 };
 
 export async function GET(
@@ -193,75 +29,23 @@ export async function GET(
   { params }: { params: Promise<{ provider: string }> }
 ) {
   const { provider } = await params;
-  const config = OAUTH_PROVIDERS[provider];
 
-  if (!config) {
-    return NextResponse.json(
-      { error: `Unknown OAuth provider: ${provider}. Supported: ${Object.keys(OAUTH_PROVIDERS).join(', ')}` },
-      { status: 400 }
-    );
-  }
-
-  // Authenticate the user
   const authResult = await extractTenantContext(request);
   if (isAuthError(authResult)) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  const clientId = process.env[config.clientIdEnv];
-  if (!clientId) {
-    return NextResponse.json(
-      { error: `${config.clientIdEnv} is not configured. Add it to your environment variables.` },
-      { status: 500 }
-    );
+  const { tenantId } = authResult;
+  const composioSlug = LEGACY_TO_COMPOSIO[provider] ?? provider;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const callbackUrl = `${appUrl}/api/composio/callback?tenantId=${tenantId}&provider=${composioSlug}`;
+
+  try {
+    const authUrl = await initiateComposioConnection(tenantId, composioSlug, callbackUrl);
+    console.log(`[legacy-oauth] Upgraded ${provider} → Composio ${composioSlug} for tenant ${tenantId}`);
+    return NextResponse.redirect(authUrl);
+  } catch (err) {
+    console.error(`[legacy-oauth] Composio redirect failed for ${provider}:`, err);
+    return NextResponse.redirect(new URL('/connectors?error=connection_failed', request.url));
   }
-
-  // Use the callback provider key if different (e.g., linkedin -> linkedin_oidc)
-  const callbackKey = config.callbackProviderKey || provider;
-  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/oauth/callback/${callbackKey}`;
-
-  // Build the authorization URL
-  const authUrl = new URL(config.authUrl);
-  authUrl.searchParams.append('client_id', clientId);
-  authUrl.searchParams.append('redirect_uri', redirectUri);
-  authUrl.searchParams.append('response_type', 'code');
-
-  // Add scopes
-  if (config.scopes.length > 0) {
-    const separator = config.scopeSeparator || ' ';
-    authUrl.searchParams.append('scope', config.scopes.join(separator));
-  }
-
-  // Pass tenant ID as state parameter (used in callback to store tokens)
-  authUrl.searchParams.append('state', authResult.tenantId);
-
-  // Add any provider-specific additional parameters
-  if (config.additionalParams) {
-    for (const [key, value] of Object.entries(config.additionalParams)) {
-      authUrl.searchParams.append(key, value);
-    }
-  }
-
-  // ── PKCE: Generate code_verifier + code_challenge (Twitter and Airtable require this) ──
-  let codeVerifier = '';
-  if (provider === 'twitter' || provider === 'airtable') {
-    codeVerifier = randomBytes(32).toString('base64url');
-    const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
-    authUrl.searchParams.set('code_challenge', codeChallenge);
-  }
-
-  const response = NextResponse.redirect(authUrl.toString());
-
-  // Store code_verifier in a provider-scoped cookie for the callback to use
-  if (codeVerifier) {
-    response.cookies.set(`${provider}_code_verifier`, codeVerifier, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'lax',
-      maxAge: 600, // 10 minutes
-      path: '/api/oauth/callback',
-    });
-  }
-
-  return response;
 }

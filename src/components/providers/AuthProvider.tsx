@@ -228,8 +228,25 @@ export function AuthPopupProvider({ children }: { children: React.ReactNode }) {
 
               <div className="stack" style={{ gap: "var(--space-sm)", marginBottom: "var(--space-lg)" }}>
                 {provider ? (
-                  <button className="oauth-btn" onClick={() => {
-                    window.open(`/api/oauth/${provider}`, 'oauth_window', 'width=500,height=600');
+                  <button className="oauth-btn" onClick={async () => {
+                    // All OAuth providers connect through Composio — no legacy direct OAuth
+                    const LEGACY_TO_COMPOSIO: Record<string, string> = {
+                      google: 'gmail', microsoft: 'outlook', monday: 'mondaydotcom',
+                      linkedin_oidc: 'linkedin', atlassian: 'jira',
+                    };
+                    const slug = LEGACY_TO_COMPOSIO[provider] ?? provider;
+                    try {
+                      const res = await fetch('/api/composio/connect', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ provider: slug }),
+                      });
+                      const data = await res.json() as { authUrl?: string };
+                      if (data.authUrl) {
+                        window.open(data.authUrl, 'oauth_window', 'width=500,height=700,scrollbars=yes');
+                      }
+                    } catch { /* silent — user will see the popup never opened */ }
                   }}>
                     <span className="oauth-name">Connect {displayName} Account</span>
                     <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>→</span>
