@@ -173,17 +173,6 @@ export async function callLLM(
 ): Promise<LLMResponse> {
   const { temperature = 0.3, jsonMode = true, tier = 2, budgetContext, maxTokens = 16384 } = options;
 
-  // Circuit breaker gate: check before calling any LLM
-  if (budgetContext) {
-    const { checkCircuit } = await import('@/lib/middleware/circuit-breaker');
-    const estimatedTokens = messages.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0) + 500;
-    const check = checkCircuit(budgetContext.tenantId, budgetContext.missionId, estimatedTokens);
-    
-    if (!check.allowed) {
-      throw new Error(`Circuit breaker OPEN: ${check.reason}`);
-    }
-  }
-
   let result: LLMResponse | null = null;
 
   // ═══════════════════════════════════════════════════════════
@@ -219,11 +208,6 @@ export async function callLLM(
   }
 
   if (!result) {
-    // Only count as a circuit-breaker failure when ALL providers are exhausted — not per-provider.
-    if (budgetContext) {
-      const { recordFailure } = await import('@/lib/middleware/circuit-breaker');
-      recordFailure(budgetContext.tenantId);
-    }
     throw new Error('No LLM provider available. All models in all providers failed. Check API keys and model availability.');
   }
 
