@@ -226,8 +226,23 @@ export default function ConnectorsPage() {
 
   const handleDisconnect = async (tk: Toolkit) => {
     try {
-      await fetch(`/api/connectors/apikey?provider=${tk.slug}`, { method: "DELETE", credentials: "include" });
-      setConnectedSlugs(prev => { const s = new Set(prev); s.delete(tk.slug); return s; });
+      const res = await fetch("/api/composio/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ provider: tk.slug }),
+      });
+      if (!res.ok) throw new Error("Disconnect failed");
+      // Remove both the slug and any legacy key that maps to it
+      setConnectedSlugs(prev => {
+        const s = new Set(prev);
+        s.delete(tk.slug);
+        // Remove legacy AF key form too (e.g. "gmail" → also remove "google")
+        Object.entries(LEGACY_TO_SLUG).forEach(([afKey, slug]) => {
+          if (slug === tk.slug) s.delete(afKey);
+        });
+        return s;
+      });
       showToast(`✓ ${tk.name} disconnected.`);
     } catch {
       showToast("❌ Could not disconnect. Please try again.");
