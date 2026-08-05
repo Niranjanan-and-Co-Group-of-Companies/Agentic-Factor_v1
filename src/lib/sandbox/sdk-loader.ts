@@ -107,13 +107,52 @@ PROVIDER_BASE_URLS = {
   "twitter": "https://api.twitter.com/2", "facebook": "https://graph.facebook.com/v19.0",
   "instagram": "https://graph.facebook.com/v19.0",
 }
+
+def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:
+    """Execute a Composio action for the current tenant entity.
+    Use instead of api.call() for any provider connected via Composio OAuth.
+    Composio handles token refresh, retries, and API quirks automatically.
+    """
+    dry_run = os.environ.get("AF_DRY_RUN", "0") == "1"
+    if dry_run:
+        sys.stderr.write(f"[DRY_RUN] Skipped composio_execute({action_name}) — write op deferred\\n")
+        return dry_run_result or {"status": "ok", "dry_run": True, "action": action_name}
+
+    entity_id = os.environ.get("COMPOSIO_ENTITY_ID", "")
+    api_key = os.environ.get("COMPOSIO_API_KEY", "")
+
+    if not entity_id:
+        _signal_missing_permission("composio")
+        raise PermissionError(
+            f"COMPOSIO_ENTITY_ID is not set — cannot execute {action_name}. "
+            "The tenant's Composio connection is not configured."
+        )
+
+    resp = requests.post(
+        f"https://backend.composio.dev/api/v3.1/tools/execute/{action_name}",
+        headers={"x-api-key": api_key, "Content-Type": "application/json"},
+        json={"user_id": entity_id, "arguments": params},
+        timeout=60,
+    )
+
+    if resp.status_code >= 400:
+        try:
+            err_body = resp.json()
+        except Exception:
+            err_body = resp.text
+        raise APIError(resp.status_code, str(err_body), action_name)
+
+    data = resp.json()
+    if not data.get("successful", True):
+        raise APIError(resp.status_code, data.get("error") or "Tool execution failed", action_name)
+    return data.get("data", data)
 `;
 
 const INIT_FALLBACK = `
 __version__ = "1.1.0"
 from . import gmail, calendar, drive, sheets, search, files, api, social
-from ._core import ask_user, notify_user, schedule_check
-__all__ = ["gmail","calendar","drive","sheets","search","files","api","social","ask_user","notify_user","schedule_check"]
+from ._core import ask_user, notify_user, schedule_check, composio_execute
+__all__ = ["gmail","calendar","drive","sheets","search","files","api","social","ask_user","notify_user","schedule_check","composio_execute"]
 `;
 
 const GMAIL_FALLBACK = `"""

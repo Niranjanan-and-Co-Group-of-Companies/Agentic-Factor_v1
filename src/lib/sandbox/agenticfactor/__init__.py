@@ -37,7 +37,7 @@ from . import files
 from . import api
 from . import social
 
-from ._core import ask_user, notify_user, schedule_check
+from ._core import ask_user, notify_user, schedule_check, composio_execute
 
 __all__ = [
     "gmail",
@@ -51,4 +51,5 @@ __all__ = [
     "ask_user",
     "notify_user",
     "schedule_check",
+    "composio_execute",
 ]
