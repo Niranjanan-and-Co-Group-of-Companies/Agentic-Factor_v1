@@ -76,7 +76,10 @@ function normalizePermissions(permissions: Array<{ type: string; service: string
 
   for (const perm of permissions) {
     const originalService = perm.service;
-    const normalizedService = normalizeServiceName(perm.service);
+    // composio_oauth permissions already carry the authoritative Composio slug — don't remap them
+    const normalizedService = perm.type === 'composio_oauth'
+      ? perm.service.toLowerCase().trim()
+      : normalizeServiceName(perm.service);
     const dedupeKey = `${perm.type}:${normalizedService}`;
 
     if (originalService !== normalizedService) {
@@ -190,8 +193,8 @@ You must decompose the user's intent into:
 8. **timeoutSeconds**: How long the mission can run before the watchdog declares it stuck (default 900 for complex missions, 300 for simple ones).
 9. **Validation Checklist**: 3-8 specific assertions to verify the mission output quality.
 10. **Permissions**: All credentials the agents will need. Each permission MUST have:
-   - "type": one of "api_key", "oauth_token", "database_credential", "file_access", "service_account", "webhook"
-   - "service": MUST be one of these EXACT provider keys (case-sensitive). OAuth providers: "google", "twitter", "facebook", "instagram", "linkedin_oidc", "slack", "github", "notion", "discord", "zoho", "whatsapp", "messenger", "azure", "teams", "stripe", "shopify", "hubspot", "salesforce", "airtable", "asana". API key providers: "zendesk", "linear", "hunter_io", "apollo", "twilio", "sendgrid", "aws", "openai_api", "anthropic_api", "replicate", "segment", "mixpanel", "heygen", "langsmith", "bamboohr", "woocommerce", "make", "firebase", "vercel", "supabase_ext", "shiprocket", "razorpay". For ANY service not in this list, use type "api_key" and service "custom_<slug>" (e.g., "custom_jira", "custom_freshdesk") — the customer will be prompted to add their API key via the Connectors page. Do NOT use full names like "Hunter.io" or "Apollo.io" — use ONLY the short key.
+   - "type": one of "api_key", "oauth_token", "composio_oauth", "database_credential", "file_access", "service_account", "webhook"
+   - "service": For COMPOSIO services (listed in the COMPOSIO ACTIONS section injected above): use type "composio_oauth" and service = the exact Composio slug (e.g. "trello", "youtube", "gmail"). The scope field must contain only the specific action slugs this agent calls, comma-separated (e.g. "TRELLO_CREATE_TRELLO_CARD,TRELLO_GET_BOARDS"). NEVER use "custom_*" or "api_key" for Composio-connected services. For native OAuth providers: MUST be one of these EXACT keys: "google", "twitter", "facebook", "instagram", "linkedin_oidc", "slack", "github", "notion", "discord", "zoho", "whatsapp", "messenger", "azure", "teams", "stripe", "shopify", "hubspot", "salesforce", "airtable", "asana". For API key services: "zendesk", "linear", "hunter_io", "apollo", "twilio", "sendgrid", "aws", "openai_api", "anthropic_api", "replicate", "segment", "mixpanel", "heygen", "langsmith", "bamboohr", "woocommerce", "make", "firebase", "vercel", "supabase_ext", "shiprocket", "razorpay". For ANY service not in any of these lists, use type "api_key" and service "custom_<slug>" — the customer will be prompted to add their API key. Do NOT use full names like "Hunter.io" or "Apollo.io" — use ONLY the short key.
    - "scope": string (e.g., "tweet.write", "pages_manage_posts", "chat:write")
    - "confidentialityLevel": one of "public", "internal", "confidential", "restricted"
 11. **Discovery Questions**: Generate 3 or more highly specific "discoveryQuestions" to ask the user. These questions must gather missing context or exact preferences needed to refine the agents' system prompts before deployment.

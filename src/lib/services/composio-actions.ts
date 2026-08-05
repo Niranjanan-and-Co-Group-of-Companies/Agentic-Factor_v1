@@ -108,8 +108,11 @@ export async function buildComposioActionsContext(afProviders: string[]): Promis
   const apiKey = process.env.COMPOSIO_API_KEY;
   if (!apiKey || afProviders.length === 0) return '';
 
+  // Map AF provider key → Composio slug. Fall back to using the key directly —
+  // apps connected via the Composio catalog store their slug as-is in tenant_permissions
+  // (e.g. provider="trello", provider="youtube"), so they pass through unchanged.
   const appNames = [...new Set(
-    afProviders.map(p => AF_TO_COMPOSIO_APP[p]).filter(Boolean)
+    afProviders.map(p => AF_TO_COMPOSIO_APP[p] ?? p)
   )];
 
   if (appNames.length === 0) return '';
@@ -133,6 +136,8 @@ export async function buildComposioActionsContext(afProviders: string[]): Promis
 
   if (sections.length === 0) return '';
 
+  const connectedSlugs = sections.map((_, i) => appNames[i]).filter(Boolean).join(', ');
+
   return `\n\nCOMPOSIO ACTIONS (PREFERRED for connected providers — use composio_execute() instead of api.call()):
 RULE: Whenever an agent needs to interact with the services listed below, call composio_execute(action_name, params) from agenticfactor._core. It handles auth automatically via the tenant's Composio connection — no token needed.
 
@@ -142,5 +147,14 @@ Python usage:
 
 Available actions for this tenant's connected apps (? = optional param):
 ${sections.join('\n')}
-NOTE: Required params have no ?, optional params have ?. Never guess action names — only use names from the list above.`;
+NOTE: Required params have no ?, optional params have ?. Never guess action names — only use names from the list above.
+
+COMPOSIO PERMISSIONS RULE (CRITICAL — overrides the "custom_<slug>" fallback for these services):
+Connected Composio services: ${connectedSlugs}
+For ANY of these services, the permission entry in "permissions" MUST be:
+  "type": "composio_oauth"
+  "service": "<exact-slug>"  (lowercase slug from the section header above, e.g. "trello", "youtube", "gmail")
+  "scope": "<COMMA_SEPARATED_ACTION_SLUGS>"  (only the specific action slugs this agent actually calls, e.g. "TRELLO_CREATE_TRELLO_CARD,TRELLO_GET_BOARDS")
+  "confidentialityLevel": "internal"
+DO NOT use "api_key", "oauth_token", or "custom_*" for these services.`;
 }

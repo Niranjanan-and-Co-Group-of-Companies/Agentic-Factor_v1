@@ -796,14 +796,16 @@ function MissionCreatorInner() {
               <div className="stack" style={{ gap: "var(--space-xs)" }}>
                 {blueprint.permissions.filter(p => p.confidentialityLevel !== "internal" && p.confidentialityLevel !== "public").map((perm, idx) => (
                   <div key={idx} className="row" style={{ padding: "var(--space-sm)", background: "var(--bg-glass)", borderRadius: "var(--radius-sm)", fontSize: "0.82rem" }}>
-                    <span title={perm.type === "oauth_token" ? "OAuth" : "API Key"}>{perm.type === "oauth_token" ? "🔗" : "🔑"}</span>
+                    <span>{perm.type === "oauth_token" ? "🔗" : perm.type === "composio_oauth" ? "🔌" : "🔑"}</span>
                     <div style={{ flex: 1 }}>
                       <span style={{ fontWeight: 500 }}>{perm.service}</span>
                       <span style={{ color: "var(--text-muted)" }}> · {perm.scope}</span>
                     </div>
-                    <span className="badge" style={{ fontSize: "0.6rem", background: "var(--bg-glass)", color: "var(--text-muted)" }}>
-                      {perm.type === "oauth_token" ? "OAuth" : "API Key"}
-                    </span>
+                    {perm.type !== "composio_oauth" && (
+                      <span className="badge" style={{ fontSize: "0.6rem", background: "var(--bg-glass)", color: "var(--text-muted)" }}>
+                        {perm.type === "oauth_token" ? "OAUTH" : "API KEY"}
+                      </span>
+                    )}
                   </div>
                 ))}
                 {blueprint.permissions.filter(p => p.confidentialityLevel !== "internal" && p.confidentialityLevel !== "public").length === 0 && (

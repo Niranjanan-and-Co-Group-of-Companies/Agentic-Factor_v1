@@ -254,9 +254,17 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
     'shiprocket': 'shiprocket',
   };
 
+  // composio_oauth permissions are tracked separately — they check tenant_permissions directly
+  // using the Composio slug as stored by the callback route (access_token = 'composio_managed').
+  const missingProviders: string[] = [];
+  const composioProviders = new Set<string>();
   const requiredProviders = new Set<string>();
+
   requiredPermissions.forEach((p: any) => {
-    if (p.type === 'oauth_token') {
+    if (p.type === 'composio_oauth') {
+      // Service IS the Composio slug stored in tenant_permissions (e.g. "trello", "youtube")
+      composioProviders.add(p.service.toLowerCase().trim());
+    } else if (p.type === 'oauth_token') {
       const serviceLower = p.service.toLowerCase();
       for (const [alias, dbKey] of Object.entries(PROVIDER_ALIASES)) {
         if (serviceLower.includes(alias)) {
@@ -282,6 +290,24 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
     }
   });
 
+  // Verify Composio-managed connections: just check the row exists (any access_token is valid —
+  // Composio stores 'composio_managed' as the token placeholder).
+  for (const slug of composioProviders) {
+    const { data: row } = await supabase
+      .from('tenant_permissions')
+      .select('provider')
+      .eq('tenant_id', tenantId)
+      .eq('provider', slug)
+      .maybeSingle();
+
+    if (!row) {
+      console.log(`[VerifyPermissions] ❌ Composio provider "${slug}" — not connected`);
+      missingProviders.push(slug);
+    } else {
+      console.log(`[VerifyPermissions] ✅ Composio provider "${slug}" — connected`);
+    }
+  }
+
   console.log(`[VerifyPermissions] Resolved providers to check: [${[...requiredProviders].join(', ')}]`);
 
   // Also log what's actually in tenant_permissions for this tenant
@@ -297,7 +323,6 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
   }
 
   // 3. Verify each provider
-  const missingProviders: string[] = [];
 
   for (const provider of requiredProviders) {
     const token = await getValidTokens(tenantId, provider);

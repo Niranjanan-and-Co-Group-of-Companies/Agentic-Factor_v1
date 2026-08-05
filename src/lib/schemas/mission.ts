@@ -50,7 +50,7 @@ export const OrchestrationSchema = z.object({
 // Permission Requirement — what credentials are needed
 // ============================================================
 export const PermissionRequirementSchema = z.object({
-  type: z.enum(['api_key', 'oauth_token', 'database_credential', 'file_access', 'service_account', 'webhook']),
+  type: z.enum(['api_key', 'oauth_token', 'composio_oauth', 'database_credential', 'file_access', 'service_account', 'webhook']),
   service: z.string().min(1),
   scope: z.string().min(1),
   confidentialityLevel: z.enum(['public', 'internal', 'confidential', 'restricted']),
