@@ -52,8 +52,10 @@ function MissionCreatorInner() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<{name: string; content: string; size: number}[]>([]);
   const [logEntries, setLogEntries] = useState<Array<{text: string; done: boolean; id: number}>>([]);
+  const [resetLoading, setResetLoading] = useState(false);
   const logCounter = useRef(0);
   const lastSeenStep = useRef('');
+  const lastIntent = useRef('');
   const searchParams = useSearchParams();
 
   // ── Extract text content from File objects ──
@@ -122,6 +124,7 @@ function MissionCreatorInner() {
   const handleGenerate = async (overrideIntent?: string, overrideFiles?: File[]) => {
     const finalIntent = overrideIntent || intent;
     if (!finalIntent.trim() || finalIntent.length < 10) { setError("Describe your mission in at least 10 characters."); return; }
+    lastIntent.current = finalIntent;
     setLoading(true); setError(""); setProgressMessage("Starting blueprint generation...");
     setLogEntries([]); lastSeenStep.current = ''; logCounter.current = 0;
 
@@ -271,6 +274,21 @@ function MissionCreatorInner() {
       setProgressMessage("");
     }
   };
+
+  // Reset the circuit breaker for this tenant then retry the last generation
+  const handleResetAndRetry = async () => {
+    setResetLoading(true);
+    setError("");
+    try {
+      await fetch("/api/circuit", { method: "POST", credentials: "include" });
+    } catch {
+      // best-effort — proceed to retry even if reset call fails
+    } finally {
+      setResetLoading(false);
+    }
+    handleGenerate(lastIntent.current || intent);
+  };
+
   const handleEditBlueprint = async (instruction: string) => {
     if (!blueprint || !instruction.trim()) return;
     setChatLoading(true);
@@ -490,7 +508,27 @@ function MissionCreatorInner() {
                     </div>
                   </div>
                 )}
-                {error && <div style={{ marginTop: "var(--space-md)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem", lineHeight: 1.6 }}>❌ {error}</div>}
+                {error && (
+                  error.includes('managing system load') ? (
+                    <div style={{ marginTop: "var(--space-md)", padding: "var(--space-md) var(--space-lg)", background: "hsla(38,100%,50%,0.10)", border: "1.5px solid hsla(38,100%,50%,0.4)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", gap: "var(--space-md)" }}>
+                      <span style={{ fontSize: "1.2rem", flexShrink: 0 }}>⚡</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: "0.82rem", color: "hsla(38,100%,38%,1)", textTransform: "uppercase", letterSpacing: "0.05em" }}>High Load</div>
+                        <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginTop: 2 }}>{error}</div>
+                      </div>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={handleResetAndRetry}
+                        disabled={resetLoading || loading}
+                        style={{ flexShrink: 0 }}
+                      >
+                        {resetLoading ? "Resetting…" : "Reset & Try Again"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: "var(--space-md)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem", lineHeight: 1.6 }}>❌ {error}</div>
+                  )
+                )}
               </div>
             </div>
           </div>
@@ -564,7 +602,22 @@ function MissionCreatorInner() {
             Training Mode rehearses up to 5 runs — every action is previewed for your review, nothing actually sends or fires until you graduate to live.
           </p>
         </div>
-        {error && <div style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem" }}>❌ {error}</div>}
+        {error && (
+          error.includes('managing system load') ? (
+            <div style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md) var(--space-lg)", background: "hsla(38,100%,50%,0.10)", border: "1.5px solid hsla(38,100%,50%,0.4)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", gap: "var(--space-md)" }}>
+              <span style={{ fontSize: "1.2rem", flexShrink: 0 }}>⚡</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: "0.82rem", color: "hsla(38,100%,38%,1)", textTransform: "uppercase", letterSpacing: "0.05em" }}>High Load</div>
+                <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginTop: 2 }}>{error}</div>
+              </div>
+              <button className="btn btn-primary btn-sm" onClick={handleResetAndRetry} disabled={resetLoading || loading} style={{ flexShrink: 0 }}>
+                {resetLoading ? "Resetting…" : "Reset & Try Again"}
+              </button>
+            </div>
+          ) : (
+            <div style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem" }}>❌ {error}</div>
+          )
+        )}
 
         {/* Mission Header */}
         <div className="card" style={{ marginBottom: "var(--space-lg)" }}>

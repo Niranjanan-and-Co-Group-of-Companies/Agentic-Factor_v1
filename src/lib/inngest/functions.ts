@@ -1,3 +1,4 @@
+import { NonRetriableError } from 'inngest';
 import { inngest } from './client';
 import { createServiceClient } from '@/lib/supabase/server';
 import { executeAgent } from '@/lib/services/runtime/agent-loop';
@@ -379,7 +380,7 @@ export const generateBlueprintBackground = inngest.createFunction(
   {
     id: 'generate-blueprint',
     name: 'Generate Blueprint (Background)',
-    retries: 2,
+    retries: 1,
     triggers: [{ event: 'mission/blueprint.generate' }],
   },
   async ({ event, step }) => {
@@ -477,11 +478,13 @@ export const generateBlueprintBackground = inngest.createFunction(
       return { success: true, jobId, type: 'blueprint' };
 
     } catch (error: any) {
+      const rawMsg: string = error.message || 'Unknown error';
+      const isCircuitOpen = rawMsg.includes('Circuit breaker OPEN') || rawMsg.includes('Circuit is OPEN');
+
       await step.run('save-error', async () => {
-        const rawMsg: string = error.message || 'Unknown error';
         let userMsg = rawMsg;
-        if (rawMsg.includes('Circuit breaker OPEN') || rawMsg.includes('Circuit is OPEN')) {
-          userMsg = 'We\'re briefly managing system load — please wait 30 seconds and try again.';
+        if (isCircuitOpen) {
+          userMsg = "We're briefly managing system load — please wait 30 seconds and try again.";
         } else if (rawMsg.includes('No LLM provider available')) {
           userMsg = 'AI services are temporarily unavailable. Please try again in a moment.';
         } else if (rawMsg.toLowerCase().includes('rate limit') || rawMsg.includes('429')) {
@@ -489,6 +492,9 @@ export const generateBlueprintBackground = inngest.createFunction(
         }
         await updateJobStatus('failed', { error: userMsg });
       });
+
+      // Circuit-open errors must not be retried — each retry re-trips the circuit.
+      if (isCircuitOpen) throw new NonRetriableError(rawMsg);
       throw error;
     }
   }
