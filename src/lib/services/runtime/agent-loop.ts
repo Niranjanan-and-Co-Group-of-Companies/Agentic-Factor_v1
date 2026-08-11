@@ -347,6 +347,7 @@ async function runRealSideEffects(
 try:
     _b64 = os.environ.get('INPUT_CONTEXT_B64', '')
     _input = base64.b64decode(_b64).decode('utf-8') if _b64 else '{}'
+    os.environ['INPUT_CONTEXT'] = _input
     try:
         _input_data = json.loads(_input, strict=False)
     except:
@@ -358,6 +359,7 @@ try:
 except:
     _input = '{}'
     _input_data = {}
+    os.environ['INPUT_CONTEXT'] = '{}'
 
 import matplotlib
 matplotlib.use('Agg')
@@ -1028,10 +1030,13 @@ CRITICAL FIX RULES (follow these EXACTLY):
       }
 
       // Prepend import of input context from env — available as `_input` (raw string) and `_input_data` (parsed JSON)
+      // INPUT_CONTEXT is also set in os.environ so scripts that use os.environ.get('INPUT_CONTEXT', '{}')
+      // instead of _input_data still receive the correct data (LLM code generation inconsistency guard).
       const wrappedCode = `import os, sys, json, base64
 try:
     _b64 = os.environ.get('INPUT_CONTEXT_B64', '')
     _input = base64.b64decode(_b64).decode('utf-8') if _b64 else '{}'
+    os.environ['INPUT_CONTEXT'] = _input
     try:
         _input_data = json.loads(_input, strict=False)
     except:
@@ -1044,6 +1049,7 @@ try:
 except:
     _input = '{}'
     _input_data = {}
+    os.environ['INPUT_CONTEXT'] = '{}'
 
 import matplotlib
 matplotlib.use('Agg')
