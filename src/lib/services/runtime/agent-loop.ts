@@ -636,10 +636,75 @@ export async function executeAgent(
       );
       pythonCode = agent.pythonScript;
     } else {
+      // ── COMPOSIO-AWARE RETRY: if the failing script used composio_execute(),
+      // regenerate with a targeted Composio correction prompt + live action schema
+      // rather than the generic AF SDK prompt. This prevents retries from
+      // silently switching from composio_execute() calls to AF SDK calls, which
+      // breaks Composio-managed providers entirely (no token exists for them).
+      if (lastError && lastPythonCode.includes('composio_execute(')) {
+        try {
+          // Extract which provider prefixes are used (GMAIL_* → gmail, TRELLO_* → trello, etc.)
+          const actionRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
+          const usedPrefixes = new Set<string>();
+          let am;
+          while ((am = actionRegex.exec(lastPythonCode)) !== null) {
+            usedPrefixes.add(am[1].split('_')[0].toLowerCase());
+          }
+
+          let composioHint = '';
+          if (usedPrefixes.size > 0) {
+            const { buildComposioActionsContext } = await import('../composio-actions');
+            composioHint = await buildComposioActionsContext([...usedPrefixes]).catch(() => '');
+          }
+
+          const composioFixPrompt = `You are an expert Python developer fixing a script that uses composio_execute().
+
+FAILED SCRIPT:
+\`\`\`python
+${lastPythonCode}
+\`\`\`
+
+ERROR:
+${lastError}
+
+${composioHint || 'Use composio_execute("EXACT_ACTION_NAME", {params}) for all Composio-managed services.'}
+
+Fix the script. Rules:
+- Keep using composio_execute() — NEVER switch to direct HTTP calls or SDK wrappers
+- If the action name was wrong, use the exact name from the list above
+- If the parameters were wrong, use the exact parameter names from [req: ...] hints above
+- Return the COMPLETE corrected Python script in a \`\`\`python block`;
+
+          const composioFixResponse = await callLLM(
+            [{ role: 'system', content: composioFixPrompt }],
+            { temperature: 0.0, jsonMode: false, tier: 2 }
+          );
+
+          const composioFixMatch = composioFixResponse.content.match(/```\s*python\s*\n([\s\S]*?)```/)
+            || composioFixResponse.content.match(/```\n([\s\S]*?)```/);
+          if (composioFixMatch) {
+            pythonCode = sanitizePythonCode(composioFixMatch[1]);
+            console.log(`[Agent ${agent.id}] Composio-aware correction applied (attempt ${attempts})`);
+            // Deduct LLM credit for this fix call
+            try {
+              const { deductCredits } = await import('@/lib/middleware/billing');
+              const { getModelCreditCost } = await import('@/lib/services/llm-router');
+              const fixCost = getModelCreditCost(composioFixResponse.model);
+              await deductCredits(tenantId, fixCost, `llm_composio_fix:${agent.role}`);
+            } catch { /* non-fatal */ }
+          }
+        } catch (composioFixErr) {
+          console.warn(`[Agent ${agent.id}] Composio-aware fix failed, falling back to full regeneration:`, composioFixErr);
+        }
+      }
+
+      if (pythonCode) {
+        // Composio fix succeeded — skip full AF SDK regeneration
+      } else {
       // Ask the LLM to generate one dynamically
       const toolDescriptions = agent.tools.map(t => `- ${t.name}: ${t.type} tool`).join('\n');
       const envKeys = Object.keys(envVars).join(', ');
-      
+
       let errorContext = '';
       if (lastError) {
         errorContext = `THE PREVIOUS SCRIPT FAILED WITH THIS ERROR:\n${lastError}\n\nBROKEN SCRIPT:\n\`\`\`python\n${lastPythonCode}\n\`\`\`\nPlease fix the bug and write the corrected code.`;
@@ -830,7 +895,8 @@ INSTRUCTIONS:
       }
       
       pythonCode = codeMatch[1];
-    }
+      } // end inner else (full AF SDK regeneration)
+    } // end outer else (composio-aware + full regeneration)
 
     // Sanitize LLM-generated code: fix unterminated strings, etc.
     pythonCode = sanitizePythonCode(pythonCode);

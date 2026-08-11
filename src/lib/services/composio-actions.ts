@@ -105,13 +105,38 @@ async function fetchAllActionsForApp(appName: string, apiKey: string): Promise<C
   }
 }
 
-// Compact format: slug — description [req: param1, param2]
-// Keeps token count manageable while giving LLM everything it needs to pick exact names.
+// Compact format: slug — description [req: param1:type, param2:type]
+// Includes type hints on required params so the LLM passes the right shape, not just the right name.
 function formatActionCompact(action: ComposioTool): string {
-  const required = (action.input_parameters?.required ?? []).slice(0, 5).join(', ');
-  const reqHint = required ? ` [req: ${required}]` : '';
+  const props = action.input_parameters?.properties ?? {};
+  const required = action.input_parameters?.required ?? [];
+  const reqParams = required.slice(0, 6).map(p => {
+    const t = props[p]?.type;
+    return t ? `${p}:${t}` : p;
+  }).join(', ');
+  const reqHint = reqParams ? ` [req: ${reqParams}]` : '';
   const desc = (action.description || action.name).slice(0, 90);
   return `  ${action.slug} — ${desc}${reqHint}\n`;
+}
+
+/**
+ * Returns the full schema map (action slug → ComposioTool) for the given AF providers.
+ * Used by intake.ts for parameter-name validation after blueprint generation.
+ */
+export async function getComposioActionSchemas(afProviders: string[]): Promise<Map<string, ComposioTool>> {
+  const apiKey = process.env.COMPOSIO_API_KEY;
+  if (!apiKey || afProviders.length === 0) return new Map();
+
+  const appNames = [...new Set(afProviders.map(p => AF_TO_COMPOSIO_APP[p] ?? p))];
+  const results = await Promise.allSettled(appNames.map(app => fetchAllActionsForApp(app, apiKey)));
+
+  const schemaMap = new Map<string, ComposioTool>();
+  for (const res of results) {
+    if (res.status === 'fulfilled') {
+      for (const action of res.value) schemaMap.set(action.slug, action);
+    }
+  }
+  return schemaMap;
 }
 
 /**
@@ -195,6 +220,13 @@ There is NO direct Bearer token available for Composio-managed services. Direct 
   _request("GET", "https://api.trello.com/1/members/me/boards", token=_get_token("trello"))
   api.call("trello", "GET", "/members/me/boards")
 NEVER use api.call(), _request(), or any direct HTTP for these services: ${slugList}
+
+PER-AGENT PROVIDER RULE (CRITICAL):
+Each agent in the mission blueprint must handle EXACTLY ONE service.
+- A Gmail agent: ONLY call GMAIL_* actions
+- A Trello agent: ONLY call TRELLO_* actions
+- A Slack agent: ONLY call SLACK_* actions
+NEVER mix providers within a single agent's pythonScript. If data needs to cross services, use separate agents connected by edges.
 
 COMPOSIO PERMISSIONS RULE (CRITICAL — overrides "custom_<slug>" for these services):
 Connected services: ${slugList}

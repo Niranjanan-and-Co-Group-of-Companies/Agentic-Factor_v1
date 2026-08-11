@@ -799,6 +799,92 @@ Include only agents whose scripts were changed. Change nothing else — not logi
     }
   }
 
+  // 4.7 Validate composio_execute() parameter names against live Composio schemas.
+  // The action name correction above (4.6) catches wrong ACTION names.
+  // This catches wrong PARAMETER names — e.g. passing {recipient: ...} when the
+  // schema requires {recipient_email: ...}. Both errors fail silently at runtime,
+  // burning credits. We fix both before the blueprint is ever saved.
+  if (connectedProviders.length > 0) {
+    try {
+      const { getComposioActionSchemas } = await import('./composio-actions');
+      const actionSchemas = await getComposioActionSchemas(connectedProviders);
+
+      if (actionSchemas.size > 0) {
+        // Collect every action name actually used in the generated scripts
+        const usedActions = new Set<string>();
+        const usedActionRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
+        for (const agent of llmOutput.agents) {
+          if (!agent.pythonScript) continue;
+          usedActionRegex.lastIndex = 0;
+          let m;
+          while ((m = usedActionRegex.exec(agent.pythonScript)) !== null) {
+            usedActions.add(m[1]);
+          }
+        }
+
+        // Build a compact schema reference for only the actions that are actually used
+        const schemaRef: Record<string, { required: string[]; properties: Record<string, string> }> = {};
+        for (const actionName of usedActions) {
+          const schema = actionSchemas.get(actionName);
+          if (schema) {
+            const props: Record<string, string> = {};
+            for (const [param, info] of Object.entries(schema.input_parameters?.properties ?? {})) {
+              props[param] = info.type ?? 'any';
+            }
+            schemaRef[actionName] = {
+              required: schema.input_parameters?.required ?? [],
+              properties: props,
+            };
+          }
+        }
+
+        if (Object.keys(schemaRef).length > 0) {
+          const paramReviewResponse = await callLLM([
+            {
+              role: 'system',
+              content: `You are a Python parameter validator. Review each agent's pythonScript for composio_execute() calls.
+For each call, verify:
+1. All REQUIRED parameters are present and spelled EXACTLY as in the schema
+2. No parameter names are invented — they must match the schema exactly
+3. Parameter value types match the expected type (e.g. string vs array)
+
+Composio action schemas (format: {required: [...], properties: {name: type}}):
+${JSON.stringify(schemaRef, null, 2)}
+
+Fix any mismatched or missing required parameter names. Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected script"}]}
+Include ONLY agents whose scripts were changed. Change nothing else — not logic, not variable names, not structure.`,
+            },
+            {
+              role: 'user',
+              content: JSON.stringify(
+                llmOutput.agents
+                  .filter(a => a.pythonScript)
+                  .map(a => ({ agentIndex: a.agentIndex, pythonScript: a.pythonScript }))
+              ),
+            },
+          ], { temperature: 0, jsonMode: true, tier: 2, budgetContext: { tenantId, missionId: 'composio_param_fix' } });
+
+          try {
+            const paramFixes = robustJSONParse(paramReviewResponse.content);
+            if (Array.isArray(paramFixes?.agents) && paramFixes.agents.length > 0) {
+              for (const fix of paramFixes.agents) {
+                const agent = llmOutput.agents.find(a => a.agentIndex === fix.agentIndex);
+                if (agent && fix.pythonScript) agent.pythonScript = fix.pythonScript;
+              }
+              console.log(`[intake] Parameter names validated and corrected for ${paramFixes.agents.length} agent(s)`);
+            } else {
+              console.log(`[intake] Parameter validation passed — all parameter names are correct`);
+            }
+          } catch {
+            console.warn('[intake] Parameter validation LLM parse failed (non-fatal)');
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[intake] Parameter validation failed (non-fatal):', err);
+    }
+  }
+
   // 4. Hydrate with IDs, tenantId, timestamps
   const now = new Date().toISOString();
   const missionId = uuidv4();
