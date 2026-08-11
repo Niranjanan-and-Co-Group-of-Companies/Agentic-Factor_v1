@@ -49,7 +49,14 @@ export async function POST(
     const missingProviders = await verifyMissionPermissions(missionId, tenantId);
 
     if (missingProviders.length > 0) {
-      const oauthProviders = ['google', 'linkedin_oidc', 'slack', 'github', 'notion', 'discord', 'zoho', 'twitter', 'facebook', 'instagram'];
+      const oauthProviders = [
+        'google', 'gmail', 'slack', 'github', 'notion', 'discord', 'zoho',
+        'twitter', 'facebook', 'instagram', 'linkedin_oidc', 'linkedin',
+        'hubspot', 'salesforce', 'airtable', 'asana', 'atlassian', 'jira',
+        'monday', 'mondaydotcom', 'microsoft', 'outlook', 'dropbox',
+        'intercom', 'mailchimp', 'paypal', 'shopify', 'linear', 'zendesk', 'reddit',
+        'trello', 'youtube', 'instagram', 'whatsapp',
+      ];
       const connectable = missingProviders.filter(p => oauthProviders.includes(p));
 
       if (connectable.length > 0) {

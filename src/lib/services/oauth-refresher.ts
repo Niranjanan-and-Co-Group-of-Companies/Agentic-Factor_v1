@@ -209,29 +209,84 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
   }
 
   // 2. Identify required providers
-  // Map from common names (used in mission JSON) to DB provider keys (used in tenant_permissions)
+  // Map from common names (used in mission JSON) to canonical AF provider keys
   const PROVIDER_ALIASES: Record<string, string> = {
+    // Google
     'google': 'google', 'gmail': 'google', 'google mail': 'google',
     'google workspace': 'google', 'google calendar': 'google', 'google drive': 'google',
     'google sheets': 'google', 'google docs': 'google',
+    // LinkedIn
     'linkedin': 'linkedin_oidc', 'linkedin_oidc': 'linkedin_oidc',
+    // Slack
     'slack': 'slack', 'slack_oidc': 'slack',
+    // GitHub
     'github': 'github', 'git': 'github',
+    // Notion
     'notion': 'notion',
+    // Zoho
     'zoho': 'zoho', 'zoho crm': 'zoho',
+    // Discord
     'discord': 'discord',
+    // CRM
     'hubspot': 'hubspot', 'hub spot': 'hubspot',
     'salesforce': 'salesforce', 'sfdc': 'salesforce',
+    // Project Management
     'airtable': 'airtable', 'air table': 'airtable',
     'asana': 'asana',
-    // ── Social Media Connectors ──
+    'atlassian': 'atlassian', 'jira': 'atlassian', 'confluence': 'atlassian',
+    'monday': 'monday', 'monday.com': 'monday', 'mondaydotcom': 'monday',
+    // Microsoft
+    'microsoft': 'microsoft', 'outlook': 'microsoft', 'teams': 'microsoft',
+    'onedrive': 'microsoft', 'office 365': 'microsoft', 'office365': 'microsoft',
+    // Storage
+    'dropbox': 'dropbox',
+    // Other
+    'intercom': 'intercom',
+    'mailchimp': 'mailchimp',
+    'paypal': 'paypal',
+    'shopify': 'shopify',
+    'linear': 'linear',
+    'zendesk': 'zendesk',
+    'reddit': 'reddit',
+    // Social Media
     'twitter': 'twitter', 'x': 'twitter', 'x.com': 'twitter',
     'twitter/x': 'twitter', 'x (twitter)': 'twitter',
-    'oauth 2.0 pkce': 'twitter',  // LLM often generates "Twitter/X OAuth 2.0 PKCE"
+    'oauth 2.0 pkce': 'twitter',
     'facebook': 'facebook', 'fb': 'facebook', 'meta': 'facebook',
     'facebook graph': 'facebook', 'graph api': 'facebook',
     'instagram': 'instagram', 'insta': 'instagram', 'ig': 'instagram',
     'whatsapp': 'whatsapp', 'messenger': 'messenger',
+  };
+
+  // AF provider key → Composio slug stored in tenant_permissions.
+  // All OAuth providers now connect through Composio, so the DB record uses
+  // the Composio slug (e.g. 'gmail'), not the legacy AF key (e.g. 'google').
+  const OAUTH_TO_COMPOSIO: Record<string, string> = {
+    google:        'gmail',
+    slack:         'slack',
+    github:        'github',
+    notion:        'notion',
+    discord:       'discord',
+    linkedin_oidc: 'linkedin',
+    twitter:       'twitter',
+    facebook:      'facebook',
+    instagram:     'instagram',
+    hubspot:       'hubspot',
+    salesforce:    'salesforce',
+    airtable:      'airtable',
+    asana:         'asana',
+    zoho:          'zoho',
+    atlassian:     'jira',
+    microsoft:     'outlook',
+    dropbox:       'dropbox',
+    monday:        'mondaydotcom',
+    linear:        'linear',
+    intercom:      'intercom',
+    paypal:        'paypal',
+    mailchimp:     'mailchimp',
+    reddit:        'reddit',
+    shopify:       'shopify',
+    zendesk:       'zendesk',
   };
 
   // Map api_key service names → DB provider keys in tenant_permissions
@@ -323,14 +378,44 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
   }
 
   // 3. Verify each provider
+  // For Composio-managed OAuth providers, check by Composio slug (e.g. 'gmail' not 'google').
+  // Fall back to legacy key check so missions created before the migration still work.
 
   for (const provider of requiredProviders) {
-    const token = await getValidTokens(tenantId, provider);
-    if (!token) {
-      console.log(`[VerifyPermissions] ❌ Provider "${provider}" — NO valid token found`);
+    const composioSlug = OAUTH_TO_COMPOSIO[provider];
+
+    if (composioSlug) {
+      // Primary: check for the Composio slug in tenant_permissions
+      const { data: composioRow } = await supabase
+        .from('tenant_permissions')
+        .select('provider')
+        .eq('tenant_id', tenantId)
+        .eq('provider', composioSlug)
+        .maybeSingle();
+
+      if (composioRow) {
+        console.log(`[VerifyPermissions] ✅ Provider "${provider}" — connected via Composio (${composioSlug})`);
+        continue;
+      }
+
+      // Fallback: check legacy AF key (transitional — users who connected before Composio migration)
+      const legacyToken = await getValidTokens(tenantId, provider);
+      if (legacyToken) {
+        console.log(`[VerifyPermissions] ✅ Provider "${provider}" — connected via legacy token`);
+        continue;
+      }
+
+      console.log(`[VerifyPermissions] ❌ Provider "${provider}" — not found as Composio "${composioSlug}" or legacy "${provider}"`);
       missingProviders.push(provider);
     } else {
-      console.log(`[VerifyPermissions] ✅ Provider "${provider}" — valid token found (${token.access_token.substring(0, 10)}...)`);
+      // Non-Composio provider (API key, custom) — check directly
+      const token = await getValidTokens(tenantId, provider);
+      if (!token) {
+        console.log(`[VerifyPermissions] ❌ Provider "${provider}" — NO valid token found`);
+        missingProviders.push(provider);
+      } else {
+        console.log(`[VerifyPermissions] ✅ Provider "${provider}" — valid token found (${token.access_token.substring(0, 10)}...)`);
+      }
     }
   }
 

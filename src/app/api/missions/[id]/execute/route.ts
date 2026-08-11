@@ -45,8 +45,15 @@ export async function POST(
         const missionTitle = missionData?.mission_json?.title || 'Unknown Mission';
         const customerEmail = user?.email || '';
         
-        // OAuth-connectable providers (customer can self-serve)
-        const oauthProviders = ['google', 'linkedin_oidc', 'slack', 'github', 'notion', 'discord', 'zoho', 'twitter', 'facebook', 'instagram'];
+        // All providers that connect via Composio OAuth — customers can self-serve from the Connectors page
+        const oauthProviders = [
+          'google', 'gmail', 'slack', 'github', 'notion', 'discord', 'zoho',
+          'twitter', 'facebook', 'instagram', 'linkedin_oidc', 'linkedin',
+          'hubspot', 'salesforce', 'airtable', 'asana', 'atlassian', 'jira',
+          'monday', 'mondaydotcom', 'microsoft', 'outlook', 'dropbox',
+          'intercom', 'mailchimp', 'paypal', 'shopify', 'linear', 'zendesk', 'reddit',
+          'trello', 'youtube', 'instagram', 'whatsapp',
+        ];
         const customerConnectable = missingProviders.filter(p => oauthProviders.includes(p));
         const platformOnly = missingProviders.filter(p => !oauthProviders.includes(p));
         
