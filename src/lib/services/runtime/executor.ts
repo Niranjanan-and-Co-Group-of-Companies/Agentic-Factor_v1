@@ -159,6 +159,29 @@ export async function executeMission(
   }
 
   const mission = missionRow.mission_json;
+
+  // Repair any permissions that are still granted: false even though the provider is connected.
+  // This fixes missions created before the auto-grant logic existed, and acts as a universal
+  // safety net so the validation gate never rejects a well-connected mission.
+  if (mission.permissions?.length > 0 && userTokensRow && userTokensRow.length > 0) {
+    const connectedSlugs = new Set<string>(userTokensRow.map((t: any) => (t.provider as string).toLowerCase()));
+    let anyAutoGranted = false;
+    mission.permissions = mission.permissions.map((perm: any) => {
+      if (!perm.granted && perm.type === 'composio_oauth') {
+        const service = (perm.service ?? '').toLowerCase().trim();
+        if (connectedSlugs.has(service)) {
+          anyAutoGranted = true;
+          return { ...perm, granted: true };
+        }
+      }
+      return perm;
+    });
+    if (anyAutoGranted) {
+      await supabase.from('missions').update({ mission_json: mission }).eq('id', missionId);
+      console.log(`[Executor] Auto-granted Composio permissions for connected providers`);
+    }
+  }
+
   const orchestration = mission.orchestration;
   const agents = mission.agents;
 

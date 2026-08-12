@@ -732,6 +732,25 @@ export async function generateMissionJSON(
     llmOutput.permissions = normalizePermissions(llmOutput.permissions as any) as any;
   }
 
+  // 4.5.1 Auto-grant composio_oauth permissions for providers already connected by this tenant.
+  // The LLM always emits granted: false (it doesn't know the tenant's connection state).
+  // Correcting it here ensures validation-agent.ts sees granted: true for connected services,
+  // preventing the quality gate from failing on missions where everything IS connected.
+  if (llmOutput.permissions?.length > 0 && connectedProviders.length > 0) {
+    const { AF_TO_COMPOSIO_APP } = await import('./composio-actions');
+    const connectedSlugs = new Set<string>();
+    for (const cp of connectedProviders) {
+      connectedSlugs.add(cp.toLowerCase());
+      const slug = AF_TO_COMPOSIO_APP[cp];
+      if (slug) connectedSlugs.add(slug.toLowerCase());
+    }
+    llmOutput.permissions = (llmOutput.permissions as any[]).map((perm: any) => {
+      if (perm.type !== 'composio_oauth') return perm;
+      const service = (perm.service ?? '').toLowerCase().trim();
+      return { ...perm, granted: connectedSlugs.has(service) };
+    });
+  }
+
   // 4.6 Validate composio_execute action names against Composio's live action list.
   // If the LLM invented a name (e.g. "TRELLO_ADD_CARDS" instead of "TRELLO_CREATE_TRELLO_CARD"),
   // we catch it here and fix the script before the blueprint is saved — not at runtime after
@@ -1120,7 +1139,7 @@ export async function persistMission(
       service: perm.service,
       scope: perm.scope,
       confidentiality_level: perm.confidentialityLevel,
-      granted: false,
+      granted: perm.granted ?? false,
     }));
 
     const { error: permError } = await supabase.from('permissions').insert(permRows);
