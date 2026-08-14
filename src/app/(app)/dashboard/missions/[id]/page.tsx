@@ -11,6 +11,7 @@ import { useAuthPopup } from "@/components/providers/AuthProvider";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ConnectorQuickConnect from "@/components/ConnectorQuickConnect";
+import { humanizeError } from "@/lib/utils/error-messages";
 
 interface AgentNode { id: string; role: string; status: string; index: number; successScore: number | null; trustLevel: string; }
 interface ClarificationItem { id: string; agentRole: string; question: string; context: string; category: string; priority: string; missionTitle: string; }
@@ -66,7 +67,11 @@ function ActionPreview({ action }: { action: any }) {
     return (
       <div style={{ padding: "var(--space-md)", background: "hsla(0,84%,60%,0.08)", border: "1px solid hsla(0,84%,60%,0.3)", borderRadius: "var(--radius-sm)", marginBottom: "var(--space-md)" }}>
         <div style={{ fontWeight: 600, fontSize: "0.8rem", color: "var(--rose)", marginBottom: 4 }}>⚠️ This action hit an error and may not complete correctly:</div>
-        <div style={{ fontSize: "0.78rem", color: "var(--text-secondary)", fontFamily: "monospace", whiteSpace: "pre-wrap" }}>{String(parsed.error)}</div>
+        <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginBottom: 6 }}>{humanizeError(String(parsed.error))}</div>
+        <details style={{ fontSize: "0.72rem" }}>
+          <summary style={{ cursor: "pointer", color: "var(--text-muted)", userSelect: "none" }}>Show technical details</summary>
+          <div style={{ marginTop: 4, fontFamily: "monospace", whiteSpace: "pre-wrap", color: "var(--text-muted)" }}>{String(parsed.error)}</div>
+        </details>
       </div>
     );
   }

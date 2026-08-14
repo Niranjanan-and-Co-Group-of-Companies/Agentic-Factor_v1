@@ -147,20 +147,17 @@ function setCachedModel(provider: string, tier: number, model: string): void {
 
 
 // ── Credit cost mapping based on actual model used ──
-// This ensures billing matches the ACTUAL model, not the requested tier.
+// 4X markup on our real LLM costs — matches CREDIT_COSTS constants in billing.ts.
+// Check flash first so gpt-4o-mini matches before gpt-4o.
 export function getModelCreditCost(model: string): number {
-  // Premium models (5 credits) — Opus, Gemini Pro, GPT-4o
-  const premiumModels = ['claude-opus', 'gemini-2.5-pro', 'gpt-4o'];
-  // Pro models (3 credits) — Sonnet, Gemini Flash
-  const proModels = ['claude-sonnet', 'gemini-2.5-flash'];
-  // Flash models (1 credit) — Haiku, Gemini 2.0 Flash, GPT-4o-mini
-  const flashModels = ['claude-haiku', 'gemini-2.0-flash', 'gpt-4o-mini'];
+  const flashModels   = ['claude-haiku', 'gemini-2.0-flash', 'gpt-4o-mini'];
+  const premiumModels = ['claude-opus',  'gemini-2.5-pro'];
+  const proModels     = ['claude-sonnet', 'gemini-2.5-flash', 'gpt-4o'];
 
-  // Check flash first (gpt-4o-mini must match before gpt-4o)
-  if (flashModels.some(m => model.includes(m))) return 1;
-  if (premiumModels.some(m => model.includes(m))) return 5;
-  if (proModels.some(m => model.includes(m))) return 3;
-  return 1; // Default to flash cost
+  if (flashModels.some(m => model.includes(m)))   return 4;   // was 1
+  if (premiumModels.some(m => model.includes(m))) return 20;  // was 5
+  if (proModels.some(m => model.includes(m)))     return 12;  // was 3
+  return 4; // default to flash tier
 }
 
 /**

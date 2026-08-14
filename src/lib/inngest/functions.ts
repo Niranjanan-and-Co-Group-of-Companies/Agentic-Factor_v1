@@ -179,9 +179,9 @@ export const executeMissionBackground = inngest.createFunction(
             return { output: existingEvents[0].payload.output, finalCode: agentToRun.pythonScript || '', resumed: true };
           }
 
-          // Credit check
-          const { checkCredits } = await import('@/lib/middleware/billing');
-          const creditCheck = await checkCredits(tenantId, 3);
+          // Credit check — must cover minimum sandbox (8) + flash LLM (4) = 12 credits
+          const { checkCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
+          const creditCheck = await checkCredits(tenantId, CREDIT_COSTS.code_execution + CREDIT_COSTS.llm_call_flash);
           if (!creditCheck.allowed) {
             console.log(`[Inngest] Insufficient credits for agent ${agentToRun.role}. Pausing.`);
             await transitionMissionStatus(missionId, tenantId, 'paused');
@@ -221,7 +221,7 @@ export const executeMissionBackground = inngest.createFunction(
         // ── Orchestration: Determine next agent ──
         if (orchestration.pattern === 'supervisor' || orchestration.pattern === 'orchestrator_worker') {
           const nextAgent = await step.run(`supervisor-decision-after-${agent.role.replace(/\s+/g, '-')}`, async () => {
-            const { callLLM } = await import('@/lib/services/llm-router');
+            const { callLLM, getModelCreditCost } = await import('@/lib/services/llm-router');
             const availableAgents = agents
               .map((a: any) => ({ id: a.id, role: a.role }))
               .filter((a: any) => a.id !== agentId);
@@ -229,6 +229,11 @@ export const executeMissionBackground = inngest.createFunction(
               { role: 'system', content: `You are the Mission Supervisor. Based on the previous agent's output, decide which agent should run next. If the goal is fully achieved, return null. Return JSON: {"nextAgentId": "uuid-here" | null, "reasoning": "why"}` },
               { role: 'user', content: `Mission: ${mission.title}\n\nAvailable Agents:\n${JSON.stringify(availableAgents, null, 2)}\n\nPrevious Agent Output:\n${output}` }
             ], { jsonMode: true, tier: 2 });
+            // Bill supervisor routing call
+            try {
+              const { deductCredits } = await import('@/lib/middleware/billing');
+              await deductCredits(tenantId, getModelCreditCost(decision.model), `supervisor_routing:${agentId}`);
+            } catch { /* non-fatal */ }
             return JSON.parse(decision.content);
           });
           currentAgentId = nextAgent.nextAgentId;
@@ -471,8 +476,10 @@ export const generateBlueprintBackground = inngest.createFunction(
       });
 
       await step.run('deduct-credit', async () => {
+        // Blueprint generation makes 3 LLM calls: main generation + action name validation (4.6)
+        // + parameter validation (4.7). Charge all three at pro tier (12 × 3 = 36 credits).
         const { deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
-        await deductCredits(tenantId, CREDIT_COSTS.llm_call_pro, 'blueprint_generation').catch(() => {});
+        await deductCredits(tenantId, CREDIT_COSTS.llm_call_pro * 3, 'blueprint_generation').catch(() => {});
       });
 
       return { success: true, jobId, type: 'blueprint' };

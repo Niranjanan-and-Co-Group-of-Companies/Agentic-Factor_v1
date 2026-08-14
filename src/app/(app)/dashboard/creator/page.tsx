@@ -1,9 +1,10 @@
 "use client";
 import { useState, useEffect, useRef, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import UnifiedInput from "@/components/UnifiedInput";
 import AgentSettings from "@/components/AgentSettings";
+import ConnectorQuickConnect from "@/components/ConnectorQuickConnect";
 
 // ============================================================
 // Types for the Blueprint Review Layer
@@ -48,15 +49,18 @@ function MissionCreatorInner() {
   const [newCheckItem, setNewCheckItem] = useState("");
   const [questionAnswers, setQuestionAnswers] = useState<Record<number, string>>({});
   const [confirmResult, setConfirmResult] = useState<Record<string, unknown> | null>(null);
-  const [showAuthPopup, setShowAuthPopup] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<{name: string; content: string; size: number}[]>([]);
   const [logEntries, setLogEntries] = useState<Array<{text: string; done: boolean; id: number}>>([]);
   const [resetLoading, setResetLoading] = useState(false);
+  // Connector status tracking — fetched when blueprint enters review phase
+  const [connectedSlugs, setConnectedSlugs] = useState<Set<string>>(new Set());
+  const [connectingProvider, setConnectingProvider] = useState<string | null>(null);
   const logCounter = useRef(0);
   const lastSeenStep = useRef('');
   const lastIntent = useRef('');
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   // ── Extract text content from File objects ──
   const extractFileContent = async (file: File): Promise<string> => {
@@ -101,6 +105,27 @@ function MissionCreatorInner() {
       setIsAuthenticated(!!user);
     });
   }, []);
+
+  // ── Fetch connected provider slugs when blueprint enters review ──
+  // Used to show live connection status and inline Connect buttons per permission.
+  useEffect(() => {
+    if (phase !== 'reviewing' || !isAuthenticated) return;
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return;
+      const { data: perms } = await supabase
+        .from('tenant_permissions')
+        .select('provider')
+        .eq('tenant_id', user.id);
+      const slugs = new Set<string>();
+      const LEGACY: Record<string, string> = { google: 'gmail', microsoft: 'outlook', monday: 'mondaydotcom', linkedin_oidc: 'linkedin', atlassian: 'jira' };
+      (perms ?? []).forEach(p => { slugs.add(p.provider); const m = LEGACY[p.provider]; if (m) slugs.add(m); });
+      setConnectedSlugs(slugs);
+    });
+  }, [phase, isAuthenticated]);
 
   // ── Guest→User Blueprint Migration ──
   useEffect(() => {
@@ -391,12 +416,13 @@ function MissionCreatorInner() {
 
       setConfirmResult(data);
       setPhase("confirmed");
+      // Auto-navigate to mission detail so the customer can connect accounts and start immediately
+      if (data.missionId) {
+        setTimeout(() => router.push(`/dashboard/missions/${data.missionId as string}`), 1200);
+      }
     } catch (err) { setError((err as Error).message); }
     finally { setLoading(false); }
   };
-
-  // Legacy alias for demo-user flow
-  const handleConfirmAfterAuth = persistBlueprint;
 
   // ── Edit helpers ──
   const updateAgent = (idx: number, updates: Partial<BlueprintAgent>) => {
@@ -590,12 +616,21 @@ function MissionCreatorInner() {
             </div>
             <div className="row" style={{ alignItems: "center" }}>
               <button className="btn btn-ghost" onClick={() => setPhase("input")}>← Back</button>
-              <button className="btn btn-ghost btn-sm" onClick={() => handleConfirmClick(false)} disabled={loading} title="Go live immediately, no rehearsal runs">
-                Skip — Go Live Immediately
-              </button>
-              <button className="btn btn-primary btn-lg" onClick={() => handleConfirmClick(true)} disabled={loading}>
-                {loading ? "🔒 Provisioning..." : "👁 Start in Preview Mode"}
-              </button>
+              {(() => {
+                const composioPerms = blueprint?.permissions?.filter(p => p.type === 'composio_oauth') ?? [];
+                const allConnectorsReady = composioPerms.every(p => connectedSlugs.has((p.service ?? '').toLowerCase()));
+                const blockedTitle = allConnectorsReady ? undefined : `Connect ${composioPerms.filter(p => !connectedSlugs.has((p.service ?? '').toLowerCase())).map(p => p.service).join(', ')} below before starting`;
+                return (
+                  <>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleConfirmClick(false)} disabled={loading || !allConnectorsReady} title={blockedTitle ?? "Go live immediately, no rehearsal runs"}>
+                      Skip — Go Live Immediately
+                    </button>
+                    <button className="btn btn-primary btn-lg" onClick={() => handleConfirmClick(true)} disabled={loading || !allConnectorsReady} title={blockedTitle}>
+                      {loading ? "🔒 Provisioning..." : allConnectorsReady ? "👁 Start in Preview Mode" : "🔌 Connect Accounts First"}
+                    </button>
+                  </>
+                );
+              })()}
             </div>
           </div>
           <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: "var(--space-sm)", textAlign: "right" }}>
@@ -848,31 +883,60 @@ function MissionCreatorInner() {
               </div>
             </div>
 
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">🔐 Required Permissions</span>
-                <span className="badge badge-amber">{blueprint.permissions.filter(p => p.confidentialityLevel !== "internal" && p.confidentialityLevel !== "public").length}</span>
-              </div>
-              <div className="stack" style={{ gap: "var(--space-xs)" }}>
-                {blueprint.permissions.filter(p => p.confidentialityLevel !== "internal" && p.confidentialityLevel !== "public").map((perm, idx) => (
-                  <div key={idx} className="row" style={{ padding: "var(--space-sm)", background: "var(--bg-glass)", borderRadius: "var(--radius-sm)", fontSize: "0.82rem" }}>
-                    <span>{perm.type === "oauth_token" ? "🔗" : perm.type === "composio_oauth" ? "🔌" : "🔑"}</span>
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontWeight: 500 }}>{perm.service}</span>
-                      <span style={{ color: "var(--text-muted)" }}> · {perm.scope}</span>
-                    </div>
-                    {perm.type !== "composio_oauth" && (
-                      <span className="badge" style={{ fontSize: "0.6rem", background: "var(--bg-glass)", color: "var(--text-muted)" }}>
-                        {perm.type === "oauth_token" ? "OAUTH" : "API KEY"}
-                      </span>
-                    )}
+            {/* ══ Required Connectors — live status + inline Connect ══ */}
+            {(() => {
+              const composioPerms = blueprint.permissions.filter(p => p.type === 'composio_oauth');
+              const otherPerms    = blueprint.permissions.filter(p => p.type !== 'composio_oauth' && p.confidentialityLevel !== 'internal' && p.confidentialityLevel !== 'public');
+              const allConnected  = composioPerms.every(p => connectedSlugs.has((p.service ?? '').toLowerCase()));
+              if (composioPerms.length === 0 && otherPerms.length === 0) return null;
+              return (
+                <div className="card" style={{ borderColor: allConnected ? 'hsla(152,69%,50%,0.35)' : 'hsla(38,100%,50%,0.35)' }}>
+                  <div className="card-header">
+                    <span className="card-title">🔐 Required Connections</span>
+                    <span className={`badge ${allConnected ? 'badge-green' : 'badge-amber'}`}>
+                      {allConnected ? '✓ All Connected' : `${composioPerms.filter(p => !connectedSlugs.has((p.service ?? '').toLowerCase())).length} Needed`}
+                    </span>
                   </div>
-                ))}
-                {blueprint.permissions.filter(p => p.confidentialityLevel !== "internal" && p.confidentialityLevel !== "public").length === 0 && (
-                  <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", textAlign: "center", padding: "var(--space-md)" }}>No external credentials required</p>
-                )}
-              </div>
-            </div>
+                  {!allConnected && (
+                    <div style={{ marginBottom: 'var(--space-md)', padding: 'var(--space-sm) var(--space-md)', background: 'hsla(38,100%,50%,0.08)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: 'hsla(38,100%,40%,1)', borderLeft: '3px solid hsla(38,100%,50%,0.6)' }}>
+                      Connect the accounts below before starting — the mission will fail without them.
+                    </div>
+                  )}
+                  <div className="stack" style={{ gap: 'var(--space-xs)' }}>
+                    {composioPerms.map((perm, idx) => {
+                      const slug = (perm.service ?? '').toLowerCase();
+                      const isConnected = connectedSlugs.has(slug);
+                      return (
+                        <div key={idx} className="row" style={{ padding: 'var(--space-sm)', background: 'var(--bg-glass)', borderRadius: 'var(--radius-sm)', fontSize: '0.82rem' }}>
+                          <span style={{ color: isConnected ? 'var(--emerald)' : 'var(--amber)' }}>{isConnected ? '✓' : '○'}</span>
+                          <div style={{ flex: 1 }}>
+                            <span style={{ fontWeight: 600, textTransform: 'capitalize' }}>{perm.service}</span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}> · OAuth</span>
+                          </div>
+                          {isConnected ? (
+                            <span className="badge badge-green" style={{ fontSize: '0.6rem' }}>Connected</span>
+                          ) : (
+                            <button className="btn btn-primary btn-sm" style={{ fontSize: '0.72rem', padding: '3px 10px' }}
+                              onClick={() => setConnectingProvider(perm.service ?? '')}>
+                              Connect →
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {otherPerms.map((perm, idx) => (
+                      <div key={`other-${idx}`} className="row" style={{ padding: 'var(--space-sm)', background: 'var(--bg-glass)', borderRadius: 'var(--radius-sm)', fontSize: '0.82rem' }}>
+                        <span>🔑</span>
+                        <div style={{ flex: 1 }}>
+                          <span style={{ fontWeight: 500 }}>{perm.service}</span>
+                          <span style={{ color: 'var(--text-muted)' }}> · {perm.type === 'oauth_token' ? 'OAuth' : 'API Key'}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Trust Level Legend */}
             <div className="card" style={{ background: "var(--bg-glass)" }}>
@@ -893,6 +957,27 @@ function MissionCreatorInner() {
             </div>
           </div>
         </div>
+        {connectingProvider && (
+          <ConnectorQuickConnect
+            provider={connectingProvider}
+            onConnected={async () => {
+              setConnectingProvider(null);
+              const { createBrowserClient } = await import('@supabase/ssr');
+              const supabase = createBrowserClient(
+                process.env.NEXT_PUBLIC_SUPABASE_URL!,
+                process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+              );
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) return;
+              const { data: perms } = await supabase.from('tenant_permissions').select('provider').eq('tenant_id', user.id);
+              const slugs = new Set<string>();
+              const LEGACY: Record<string, string> = { google: 'gmail', microsoft: 'outlook', monday: 'mondaydotcom', linkedin_oidc: 'linkedin', atlassian: 'jira' };
+              (perms ?? []).forEach((p: { provider: string }) => { slugs.add(p.provider); const m = LEGACY[p.provider]; if (m) slugs.add(m); });
+              setConnectedSlugs(slugs);
+            }}
+            onClose={() => setConnectingProvider(null)}
+          />
+        )}
       </>
     );
   }
