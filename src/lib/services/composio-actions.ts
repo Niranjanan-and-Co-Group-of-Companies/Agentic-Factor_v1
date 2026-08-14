@@ -19,6 +19,10 @@ export const AF_TO_COMPOSIO_APP: Record<string, string> = {
   twitter: 'twitter',
   facebook: 'facebook',
   instagram: 'instagram',
+  // ── Paid advertising platforms ──
+  google_ads: 'googleads',
+  google_analytics: 'googleanalytics',
+  facebook_ads: 'facebookads',
   hubspot: 'hubspot',
   salesforce: 'salesforce',
   airtable: 'airtable',

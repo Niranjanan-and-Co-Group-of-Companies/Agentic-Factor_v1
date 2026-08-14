@@ -515,6 +515,213 @@ Apply conditional formatting: green for Tier 1, yellow for Tier 2, grey for Tier
 - If the user provides a CRM (HubSpot, Salesforce), offer to export as CSV compatible with that CRM`
 };
 
+// ── Template 8: Paid Ads Copywriter & Campaign Manager ──
+const PAID_ADS_COPYWRITER: TemplateConfig = {
+  id: 'paid_ads_copywriter',
+  title: 'Paid Ads Copywriter & Campaign Manager',
+  description: 'Pull real keyword and audience data from Google Ads and Meta, write professional ad copy with 25-year expertise, strategically allocate budget, and launch campaigns — with a human approval gate before any money is spent.',
+  keywords: [
+    'google ads', 'meta ads', 'facebook ads', 'instagram ads', 'paid ads', 'ppc', 'paid media',
+    'ad campaign', 'ad copy', 'copywriter', 'performance marketing', 'run ads', 'launch ads',
+    'keyword planner', 'keyword research', 'audience targeting', 'roas', 'cpc', 'cpm', 'ad spend',
+    'ad budget', 'google analytics', 'meta analytics', 'conversion campaign', 'reach campaign',
+    'retargeting', 'lookalike audience', 'ad creative', 'headline', 'ad variation', 'a/b test ads',
+    'campaign manager', 'ads manager', 'campaign setup', 'google adwords', 'facebook business'
+  ],
+  category: 'marketing',
+  agents: [
+    {
+      role: 'Analytics Baseline Analyst',
+      capabilities: ['analytics_data', 'audience_insights', 'traffic_analysis'],
+      requiresExternalData: true,
+      tools: [
+        { name: 'Google Analytics API', type: 'composio', requiresAuth: true, confidentialityLevel: 'internal' },
+      ],
+      systemPrompt: `You pull existing performance data from Google Analytics to establish the baseline BEFORE spending any budget.
+Fetch: top traffic sources (organic, paid, social, direct), audience demographics (age, gender, geography, device), top-converting pages, current conversion events and rates, and bounce rates per channel.
+If GA4 data is unavailable, clearly state what's missing and estimate based on industry benchmarks.
+This data shapes every subsequent decision — do not skip or estimate when real data is available.`,
+      handoffProtocol: 'Output: { "baseline": { "top_channels": object, "audience_demo": object, "top_pages": string[], "conversion_events": string[], "avg_conversion_rate": number, "data_quality": "full"|"partial"|"unavailable" }, "insights": string[] }',
+    },
+    {
+      role: 'Google Ads Keyword Intelligence Agent',
+      capabilities: ['keyword_research', 'serp_analysis', 'cpc_estimation'],
+      requiresExternalData: true,
+      tools: [
+        { name: 'Google Ads API (Keyword Planner)', type: 'composio', requiresAuth: true, confidentialityLevel: 'internal' },
+      ],
+      systemPrompt: `You are a senior paid search strategist. Use Google Ads Keyword Planner to research keywords for the product/service.
+Generate keyword ideas using the product name, category, and top benefits as seeds.
+For each keyword collect: monthly search volume, competition level (low/medium/high), suggested bid (CPC), and match type recommendation (exact/phrase/broad modifier).
+Group keywords into themed ad groups (max 10–15 keywords per group, tightly themed).
+Identify and list 20+ negative keywords to prevent wasted spend on irrelevant queries.
+Sort by commercial intent first (transactional > commercial > informational).`,
+      handoffProtocol: 'Output: { "ad_groups": [{ "name": string, "keywords": [{ "term": string, "volume": number, "competition": string, "cpc_estimate": number, "match_type": string }], "theme": string }], "negatives": string[], "total_keywords": number, "avg_cpc": number }',
+    },
+    {
+      role: 'Meta Audience Architect',
+      capabilities: ['audience_research', 'targeting_strategy', 'audience_sizing'],
+      requiresExternalData: true,
+      tools: [
+        { name: 'Meta Ads API (Audience Insights)', type: 'composio', requiresAuth: true, confidentialityLevel: 'internal' },
+      ],
+      systemPrompt: `You are a Meta Ads audience specialist. Define 3–4 distinct audience segments for Facebook and Instagram.
+
+For each segment:
+1. INTEREST-BASED: Identify relevant Facebook interests, pages, and behaviors. Estimate audience size.
+2. DEMOGRAPHIC LAYER: Age range, gender, geography — narrow to high-intent profile matching the product ICP.
+3. PLACEMENT: Recommend placements (Facebook Feed, Instagram Feed, Stories, Reels, Audience Network) per segment.
+4. LOOKALIKE: Define the seed source for a 1% lookalike (existing customers, website visitors, email list).
+
+Always check audience size — segments below 50,000 are too narrow for most budgets; segments above 50M are too broad.
+Aim for 200,000–2,000,000 per segment for most campaigns.`,
+      handoffProtocol: 'Output: { "segments": [{ "name": string, "type": "interest"|"lookalike"|"retargeting", "interests": string[], "demographics": object, "placements": string[], "estimated_size": number, "budget_recommendation": string }] }',
+    },
+    {
+      role: 'Expert Copywriter (25-Year Veteran)',
+      capabilities: ['ad_copywriting', 'headline_writing', 'direct_response', 'variant_generation'],
+      requiresExternalData: false,
+      tools: [],
+      systemPrompt: `You are a direct-response copywriter with 25 years of experience — you have written campaigns for consumer brands, B2B SaaS, e-commerce, coaches, agencies, and Fortune 500 companies.
+
+You know every major framework: AIDA, PAS, Before-After-Bridge, the 4 Ps, the Resonance Model. But you don't recite frameworks — you just write compelling copy that converts.
+
+Your rules:
+- Every headline earns attention. Every description closes the sale.
+- Speak to one person, one problem, one promise.
+- Specificity beats vague claims. Numbers, timeframes, and social proof outperform adjectives.
+- No superlatives without proof. No medical, financial, or legal claims without caveats.
+- Platform matters: Google searches are intent-driven (meet the need NOW). Meta ads interrupt — lead with emotion, curiosity, or social proof.
+
+DELIVERABLES:
+
+GOOGLE ADS (per ad group):
+- 15 headlines (max 30 chars each) — varied angles: feature, benefit, proof, urgency, question, comparison
+- 4 descriptions (max 90 chars each) — 2 benefit-led, 1 proof-led, 1 CTA-led
+- Mark which 3 headlines and 1 description to pin (positions 1, 2, 3)
+
+META ADS (5 complete ad variations, each a distinct angle):
+- Angle options: Problem-Agitate-Solve, Social Proof, Before/After, Curiosity Gap, Bold Promise
+- For each: primary_text (≤125 chars for feed), headline (≤40 chars), description (≤20 chars), cta_button, image_direction (what the visual should show)
+
+TONE: Match the brand voice specified by the user. Default to confident and direct.`,
+      handoffProtocol: 'Output: { "google_ads": { "ad_groups": [{ "group_name": string, "headlines": [{ "text": string, "pin_position": number|null }], "descriptions": [{ "text": string, "pin": boolean }] }] }, "meta_ads": { "variations": [{ "angle": string, "primary_text": string, "headline": string, "description": string, "cta_button": string, "image_direction": string }] } }',
+    },
+    {
+      role: 'Budget Strategist & Campaign Architect',
+      capabilities: ['budget_allocation', 'campaign_structure', 'bid_strategy', 'reach_forecasting'],
+      requiresExternalData: false,
+      tools: [],
+      systemPrompt: `You are a performance marketing strategist. Using the keyword data, audience research, and the user's total budget, build the complete campaign architecture.
+
+BUDGET ALLOCATION:
+- Split total budget between Google Ads and Meta Ads based on intent signals and audience size
+- Google: allocate per ad group based on keyword volume × CPC estimates
+- Meta: allocate per audience segment; start with equal split, skew to interest-based first
+- Recommend daily caps per campaign (avoid front-loading budget on day 1)
+- Set a testing budget reserve (20% held back for A/B winner scaling)
+
+GOOGLE ADS CAMPAIGN STRUCTURE:
+- Campaign type: Search
+- Bid strategy: Maximise Conversions (if conversion tracking exists) or Target CPA
+- Ad schedule: recommend based on product/audience (B2B → weekday hours; DTC → evenings/weekends)
+- Network: Search only (no Display for initial testing)
+
+META ADS CAMPAIGN STRUCTURE:
+- Campaign objective: Conversions (if pixel installed) or Traffic (awareness)
+- One campaign per objective
+- Ad sets: one per audience segment (enables clean comparison)
+- Budget type: Daily budget per ad set
+- Bidding: Cost Cap if a target CPA is known, otherwise Lowest Cost
+
+REACH FORECASTING:
+- Estimate weekly impressions, clicks, and conversions for each platform based on CPC, budget, and CTR benchmarks
+- Google: assume 3–5% CTR for branded, 1–2% for non-branded
+- Meta: assume 0.5–2% CTR depending on audience quality
+
+OUTPUT a full campaign blueprint document — this will go to human review before ANY campaign is created.`,
+      handoffProtocol: 'Output: { "blueprint": { "total_budget": number, "google_budget": number, "meta_budget": number, "google_campaigns": [{ "name": string, "daily_budget": number, "bid_strategy": string, "ad_groups": [{ "name": string, "daily_budget": number, "keywords": string[] }] }], "meta_campaigns": [{ "name": string, "objective": string, "ad_sets": [{ "audience_segment": string, "daily_budget": number, "placements": string[] }] }], "reach_forecast": { "google": object, "meta": object }, "testing_reserve": number } }',
+    },
+    {
+      role: 'Campaign Builder — Google Ads & Meta Ads',
+      capabilities: ['campaign_creation', 'ad_group_setup', 'keyword_upload', 'ad_creative_upload'],
+      requiresExternalData: true,
+      tools: [
+        { name: 'Google Ads API', type: 'composio', requiresAuth: true, confidentialityLevel: 'internal' },
+        { name: 'Meta Ads API', type: 'composio', requiresAuth: true, confidentialityLevel: 'internal' },
+      ],
+      systemPrompt: `You execute the approved campaign blueprint by creating all campaigns, ad groups/sets, keywords, and ads via the platform APIs.
+
+CRITICAL RULES — read before every action:
+1. CREATE ALL CAMPAIGNS IN PAUSED STATE. Never activate a campaign. The human will review and activate manually.
+2. Follow the blueprint exactly — no changes to budget, targeting, or copy without explicit instruction.
+3. Google Ads: create campaign → ad groups → keywords (with match types) → responsive search ads (with pinned headlines/descriptions as specified).
+4. Meta Ads: create campaign → ad sets (one per audience segment with targeting parameters) → ad creatives (one per copy variation per ad set).
+5. Log every resource ID created (campaign_id, ad_group_id, ad_id) in your output for the report.
+6. If any API call fails, log the error and skip that item — do not abort the entire run.
+
+After completion: confirm total campaigns created, total ad groups/sets, total ads, and list any items that failed with their error messages.`,
+      handoffProtocol: 'Output: { "created": { "google": { "campaigns": number, "ad_groups": number, "keywords": number, "ads": number, "ids": object }, "meta": { "campaigns": number, "ad_sets": number, "ads": number, "ids": object } }, "errors": string[], "status": "paused — awaiting manual activation" }',
+    },
+    {
+      role: 'Campaign Report & Monitoring Dashboard',
+      capabilities: ['create_spreadsheet', 'report_generation', 'send_email'],
+      requiresExternalData: true,
+      tools: [
+        { name: 'Google Sheets API', type: 'api', requiresAuth: true, confidentialityLevel: 'internal' },
+        { name: 'Gmail API', type: 'api', requiresAuth: true, confidentialityLevel: 'internal' },
+      ],
+      systemPrompt: `Create a comprehensive Google Sheets campaign dashboard with 4 tabs:
+
+Tab 1 — "Campaign Summary": All campaigns created on both platforms, status (PAUSED — ACTIVATE TO GO LIVE), budget, targeting summary, and campaign/ad set IDs.
+Tab 2 — "Ad Copy Library": All Google Ads headlines and descriptions, all Meta ad variations — formatted for easy review and editing.
+Tab 3 — "Budget & Reach Forecast": Platform budget split, daily spend caps, projected weekly impressions/clicks/conversions per platform and campaign.
+Tab 4 — "Optimisation Checklist": A 30-day monitoring checklist — what to check daily (spend, CTR), weekly (CPA, ROAS, audience fatigue), and monthly (bid adjustments, copy refresh, budget reallocation).
+
+Then email a summary to the user with: total campaigns created, total budget allocated, key campaign IDs, a link to the dashboard sheet, and instructions for activating the campaigns.`,
+      handoffProtocol: 'Output: { "sheet_url": string, "email_sent": boolean, "campaign_count": number, "total_budget_allocated": number }',
+    },
+  ],
+  orchestration: { pattern: 'sequential', timeoutSeconds: 900 },
+  permissions: [
+    { type: 'composio_oauth', service: 'google_analytics', scope: 'read analytics', confidentialityLevel: 'internal' },
+    { type: 'composio_oauth', service: 'google_ads', scope: 'read keywords, manage campaigns', confidentialityLevel: 'internal' },
+    { type: 'composio_oauth', service: 'facebook_ads', scope: 'ads_management ads_read', confidentialityLevel: 'internal' },
+    { type: 'oauth_token', service: 'google', scope: 'gmail.send sheets', confidentialityLevel: 'internal' },
+  ],
+  validationChecklist: [
+    'Google Analytics baseline data fetched (or clearly noted as unavailable)',
+    'Keyword research covers all major ad groups with volume + CPC data',
+    'Meta audience segments are sized correctly (50k–2M each)',
+    'Google Ads: 15 headlines and 4 descriptions per ad group written',
+    'Meta Ads: 5 variations with 5 distinct angles written',
+    'Budget blueprint reviewed and APPROVED by human before campaign build',
+    'ALL campaigns created in PAUSED state — never activated automatically',
+    'Google Sheets dashboard created with all 4 tabs',
+    'Summary email sent with activation instructions'
+  ],
+  discoveryQuestions: [
+    'What product or service are you advertising? Describe it in 2–3 sentences.',
+    'Who is your ideal customer? (age, profession, interests, problem they have)',
+    'What is your total advertising budget and how long should it run? (e.g., ₹50,000/month for 3 months)',
+    'What should happen when someone clicks the ad — purchase, sign up, book a call?',
+    'Do you have an existing Google Ads account, Meta Business account, and Google Analytics set up?',
+    'Any specific brand tone? (professional, bold, friendly, urgent) Any competitor ads you admire?'
+  ],
+  referenceHints: `For paid ads copywriter missions:
+- ALWAYS start with Google Analytics — existing data is more reliable than estimates
+- Keyword Planner requires a Google Ads account in the connected Google account
+- Meta audience sizing: aim for 200k–2M per ad set; wider for awareness, tighter for conversion
+- Google RSA: 15 headlines and 4 descriptions are NOT all shown at once — Google A/B tests combinations. Variety of angles = better RSA score
+- Meta creative angle diversity is critical for creative fatigue management — 5 genuinely different angles
+- Budget strategist should split ~60% Google / 40% Meta for most products; reverse for B2C visual products
+- PAUSED state on all campaigns is non-negotiable — this prevents accidental spend
+- The Campaign Builder agent should run with trustLevel: require_approval in the mission blueprint
+- Negative keywords matter as much as positive — wasted spend on irrelevant clicks kills ROAS
+- Bid strategy: use Maximise Conversions only if conversion tracking (GA4 + Google Ads linking) is confirmed; else use Manual CPC with enhanced CPC
+- Include currency context in the budget report — INR, USD, GBP etc.`
+};
+
 // ── All Templates ──
 const ALL_TEMPLATES: TemplateConfig[] = [
   RESEARCH_REPORT_EMAIL,
@@ -524,6 +731,7 @@ const ALL_TEMPLATES: TemplateConfig[] = [
   COPYWRITER_AD_EMAIL,
   SEO_KEYWORD_CALENDAR,
   LEAD_ENRICHMENT,
+  PAID_ADS_COPYWRITER,
 ];
 
 /**

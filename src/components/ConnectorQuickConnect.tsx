@@ -45,6 +45,10 @@ const KNOWN_CONNECTORS: Record<string, ConnectorInfo> = {
   intercom:      { label: 'Intercom',         icon: '💬', connectionType: 'composio', composioSlug: 'intercom' },
   // ── Marketing ──
   mailchimp:     { label: 'Mailchimp',        icon: '🐒', connectionType: 'composio', composioSlug: 'mailchimp' },
+  // ── Paid Advertising ──
+  google_ads:    { label: 'Google Ads',       icon: '🎯', connectionType: 'composio', composioSlug: 'googleads',      helpText: 'Connects Google Ads for keyword research and campaign management. Requires a Google Ads account.' },
+  google_analytics: { label: 'Google Analytics', icon: '📈', connectionType: 'composio', composioSlug: 'googleanalytics', helpText: 'Connects Google Analytics 4 for audience and traffic data.' },
+  facebook_ads:  { label: 'Meta Ads',         icon: '📣', connectionType: 'composio', composioSlug: 'facebookads',   helpText: 'Connects Meta Ads Manager for Facebook and Instagram campaigns. Requires an active Meta Business account.' },
   // ── Social Media ──
   twitter:       { label: 'X (Twitter)',      icon: '🐦', connectionType: 'composio', composioSlug: 'twitter' },
   facebook:      { label: 'Facebook',         icon: '👥', connectionType: 'composio', composioSlug: 'facebook' },
