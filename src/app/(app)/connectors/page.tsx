@@ -81,6 +81,7 @@ export default function ConnectorsPage() {
   const [savingKey, setSavingKey]             = useState(false);
   const [keyError, setKeyError]               = useState<string | null>(null);
   const [keySuccess, setKeySuccess]           = useState(false);
+  const [keyAccountInfo, setKeyAccountInfo]   = useState<string | null>(null);
   const [customConnectors, setCustomConnectors] = useState<CustomConnector[]>([]);
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [customForm, setCustomForm]           = useState({ name: "", api_key: "", base_url: "", auth_type: "bearer" });
@@ -253,6 +254,7 @@ export default function ConnectorsPage() {
     setApiKeyValue("");
     setKeyError(null);
     setKeySuccess(false);
+    setKeyAccountInfo(null);
     setApiKeyModal(tk);
   };
 
@@ -260,15 +262,32 @@ export default function ConnectorsPage() {
     if (!apiKeyModal || !apiKeyValue.trim()) { setKeyError("API key is required"); return; }
     setSavingKey(true);
     setKeyError(null);
+    setKeyAccountInfo(null);
     try {
-      const res = await fetch("/api/connectors/apikey", {
+      // Step 1: verify the key against the real service
+      const verifyRes = await fetch("/api/connectors/apikey/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ provider: apiKeyModal.slug, fields: { apiKey: apiKeyValue.trim() } }),
       });
-      const data = await res.json() as { success?: boolean; error?: string };
-      if (!res.ok || !data.success) { setKeyError(data.error ?? "Failed to save"); setSavingKey(false); return; }
+      const verifyData = await verifyRes.json() as { verified: boolean; error?: string; accountInfo?: string };
+      if (!verifyData.verified) {
+        setKeyError(verifyData.error ?? "Invalid API key — please check and try again.");
+        setSavingKey(false);
+        return;
+      }
+      if (verifyData.accountInfo) setKeyAccountInfo(verifyData.accountInfo);
+
+      // Step 2: save the verified key
+      const saveRes = await fetch("/api/connectors/apikey", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ provider: apiKeyModal.slug, fields: { apiKey: apiKeyValue.trim() } }),
+      });
+      const saveData = await saveRes.json() as { success?: boolean; error?: string };
+      if (!saveRes.ok || !saveData.success) { setKeyError(saveData.error ?? "Failed to save"); setSavingKey(false); return; }
       setKeySuccess(true);
       setTimeout(() => {
         showToast(`✅ ${apiKeyModal.name} connected!`);
@@ -567,6 +586,11 @@ export default function ConnectorsPage() {
                   onKeyDown={e => e.key === "Enter" && !savingKey && handleApiKeySave()}
                   style={{ fontFamily: "monospace", fontSize: "0.85rem", marginBottom: "var(--space-md)" }}
                   disabled={savingKey} />
+                {keyAccountInfo && (
+                  <div style={{ padding: "var(--space-sm) var(--space-md)", background: "var(--emerald-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.78rem", color: "var(--emerald)", marginBottom: "var(--space-md)" }}>
+                    ✓ {keyAccountInfo}
+                  </div>
+                )}
                 {keyError && (
                   <div style={{ padding: "var(--space-sm) var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.8rem", color: "var(--rose)", marginBottom: "var(--space-md)" }}>
                     ❌ {keyError}

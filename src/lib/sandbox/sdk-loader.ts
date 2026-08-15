@@ -166,10 +166,10 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
 `;
 
 const INIT_FALLBACK = `
-__version__ = "1.1.0"
-from . import gmail, calendar, drive, sheets, search, files, api, social
+__version__ = "1.2.0"
+from . import gmail, calendar, drive, sheets, search, files, api, social, creative
 from ._core import ask_user, notify_user, schedule_check, composio_execute
-__all__ = ["gmail","calendar","drive","sheets","search","files","api","social","ask_user","notify_user","schedule_check","composio_execute"]
+__all__ = ["gmail","calendar","drive","sheets","search","files","api","social","creative","ask_user","notify_user","schedule_check","composio_execute"]
 `;
 
 const GMAIL_FALLBACK = `"""
@@ -1594,6 +1594,365 @@ def post_to_all(text: str, platforms: list = None) -> dict:
     return results
 `;
 
+const CREATIVE_FALLBACK = `"""
+AgenticFactor SDK — Creative Generation Module
+Image, video, and voice generation via DALL-E, Replicate (Flux), HeyGen, RunwayML, ElevenLabs.
+All functions save output to /tmp/ and return the local file path + metadata.
+"""
+
+import os
+import json
+import time
+import base64
+import requests
+from typing import Optional, Dict, Any, List
+
+
+def _api_key(env_var: str, service: str) -> str:
+    key = os.environ.get(env_var, "")
+    if not key:
+        from ._core import _signal_missing_permission
+        _signal_missing_permission(service)
+        raise PermissionError(f"Missing API key: {env_var}. Connect {service} in your AgenticFactor connectors.")
+    return key
+
+
+# ── Image Generation ──
+
+def generate_image(
+    prompt: str,
+    provider: str = "auto",
+    width: int = 1024,
+    height: int = 1024,
+    style: str = "photorealistic",
+    save_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Generate an image from a text prompt.
+
+    Args:
+        prompt: Text description of the image to generate
+        provider: "dalle" | "replicate" | "auto" (tries DALL-E first, falls back to Replicate)
+        width: Image width in pixels (default 1024)
+        height: Image height in pixels (default 1024)
+        style: "photorealistic" | "illustration" | "digital-art" | "cinematic"
+        save_path: Where to save the image (default: /tmp/generated_image_{timestamp}.png)
+
+    Returns:
+        Dict with "file_path", "url", "provider", "prompt"
+    """
+    if save_path is None:
+        save_path = f"/tmp/generated_image_{int(time.time())}.png"
+
+    # Style suffix for better results
+    style_hints = {
+        "photorealistic": "photorealistic, high quality, 8k, professional photography",
+        "illustration": "professional illustration, clean lines, vibrant colors",
+        "digital-art": "digital art, concept art, detailed",
+        "cinematic": "cinematic, dramatic lighting, film still, professional",
+    }
+    full_prompt = f"{prompt}, {style_hints.get(style, '')}"
+
+    openai_key = os.environ.get("OPENAI_ACCESS_TOKEN", "") or os.environ.get("DALLE_ACCESS_TOKEN", "")
+    replicate_key = os.environ.get("REPLICATE_ACCESS_TOKEN", "")
+
+    if provider == "dalle" or (provider == "auto" and openai_key):
+        return _dalle_generate(full_prompt, width, height, save_path, openai_key)
+    elif provider == "replicate" or (provider == "auto" and replicate_key):
+        return _replicate_image(full_prompt, width, height, save_path, replicate_key)
+    else:
+        raise PermissionError("No image generation API key found. Connect DALL-E (OpenAI) or Replicate in your connectors.")
+
+
+def _dalle_generate(prompt: str, width: int, height: int, save_path: str, api_key: str) -> Dict:
+    size = f"{width}x{height}" if f"{width}x{height}" in ["1024x1024","1792x1024","1024x1792"] else "1024x1024"
+    resp = requests.post(
+        "https://api.openai.com/v1/images/generations",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={"model": "dall-e-3", "prompt": prompt, "n": 1, "size": size, "quality": "hd"},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    image_url = data["data"][0]["url"]
+    img_resp = requests.get(image_url, timeout=60)
+    img_resp.raise_for_status()
+    with open(save_path, "wb") as f:
+        f.write(img_resp.content)
+    return {"file_path": save_path, "url": image_url, "provider": "dalle-3", "prompt": prompt, "revised_prompt": data["data"][0].get("revised_prompt", prompt)}
+
+
+def _replicate_image(prompt: str, width: int, height: int, save_path: str, api_key: str) -> Dict:
+    # Use Flux Schnell — fastest high-quality model on Replicate
+    resp = requests.post(
+        "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Prefer": "wait"},
+        json={"input": {"prompt": prompt, "width": width, "height": height, "num_outputs": 1}},
+        timeout=120,
+    )
+    resp.raise_for_status()
+    prediction = resp.json()
+    # Poll if not complete
+    if prediction.get("status") not in ("succeeded", "failed"):
+        for _ in range(30):
+            time.sleep(3)
+            poll = requests.get(f"https://api.replicate.com/v1/predictions/{prediction['id']}",
+                                headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
+            prediction = poll.json()
+            if prediction.get("status") in ("succeeded", "failed"):
+                break
+    if prediction.get("status") == "failed":
+        raise RuntimeError(f"Replicate image generation failed: {prediction.get('error')}")
+    image_url = prediction["output"][0] if isinstance(prediction.get("output"), list) else prediction.get("output")
+    img_resp = requests.get(image_url, timeout=60)
+    img_resp.raise_for_status()
+    with open(save_path, "wb") as f:
+        f.write(img_resp.content)
+    return {"file_path": save_path, "url": image_url, "provider": "replicate-flux", "prompt": prompt}
+
+
+def generate_image_variations(prompt: str, count: int = 3, **kwargs) -> List[Dict]:
+    """Generate multiple image variations for A/B testing (e.g., ad creatives)."""
+    results = []
+    for i in range(count):
+        variation_prompt = f"{prompt} — variation {i+1}"
+        save_path = f"/tmp/image_variant_{i+1}_{int(time.time())}.png"
+        results.append(generate_image(variation_prompt, save_path=save_path, **kwargs))
+    return results
+
+
+# ── Voice / Audio Generation ──
+
+def text_to_speech(
+    text: str,
+    voice_id: str = "21m00Tcm4TlvDq8ikWAM",
+    voice_name: str = "Rachel",
+    stability: float = 0.5,
+    similarity_boost: float = 0.75,
+    save_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Convert text to speech using ElevenLabs.
+
+    Args:
+        text: The text to convert to speech
+        voice_id: ElevenLabs voice ID (default: Rachel)
+        voice_name: Human-readable voice name (for logging)
+        stability: Voice stability 0-1 (higher = more consistent)
+        similarity_boost: Voice similarity 0-1 (higher = closer to original)
+        save_path: Where to save the MP3 (default: /tmp/speech_{timestamp}.mp3)
+
+    Returns:
+        Dict with "file_path", "duration_estimate_seconds", "voice", "characters"
+    """
+    api_key = _api_key("ELEVENLABS_ACCESS_TOKEN", "ElevenLabs")
+    if save_path is None:
+        save_path = f"/tmp/speech_{int(time.time())}.mp3"
+
+    resp = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+        headers={"xi-api-key": api_key, "Content-Type": "application/json", "Accept": "audio/mpeg"},
+        json={"text": text, "model_id": "eleven_multilingual_v2", "voice_settings": {"stability": stability, "similarity_boost": similarity_boost}},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    with open(save_path, "wb") as f:
+        f.write(resp.content)
+    chars = len(text)
+    duration_estimate = chars / 15  # ~15 chars/sec average speech rate
+    return {"file_path": save_path, "duration_estimate_seconds": round(duration_estimate, 1), "voice": voice_name, "characters": chars}
+
+
+def list_voices() -> List[Dict]:
+    """List available ElevenLabs voices."""
+    api_key = _api_key("ELEVENLABS_ACCESS_TOKEN", "ElevenLabs")
+    resp = requests.get("https://api.elevenlabs.io/v1/voices", headers={"xi-api-key": api_key}, timeout=30)
+    resp.raise_for_status()
+    voices = resp.json().get("voices", [])
+    return [{"voice_id": v["voice_id"], "name": v["name"], "category": v.get("category", ""), "description": v.get("description", "")} for v in voices]
+
+
+# ── Video Generation ──
+
+def create_presenter_video(
+    script: str,
+    avatar_id: Optional[str] = None,
+    voice_id: Optional[str] = None,
+    background: str = "office",
+    width: int = 1280,
+    height: int = 720,
+    save_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Create an AI presenter video using HeyGen.
+    An avatar reads the script on camera. Best for YouTube videos, product demos, explainers.
+
+    Args:
+        script: The text the avatar will speak
+        avatar_id: HeyGen avatar ID (uses default if not specified)
+        voice_id: HeyGen voice ID (uses avatar default if not specified)
+        background: Background style ("office", "studio", "gradient", "transparent")
+        width/height: Video dimensions (default 1280x720)
+        save_path: Where to save the MP4 (default: /tmp/presenter_video_{timestamp}.mp4)
+
+    Returns:
+        Dict with "file_path", "video_id", "duration_seconds", "provider"
+    """
+    api_key = _api_key("HEYGEN_ACCESS_TOKEN", "HeyGen")
+    if save_path is None:
+        save_path = f"/tmp/presenter_video_{int(time.time())}.mp4"
+
+    # List available avatars if none specified
+    if not avatar_id:
+        avatars_resp = requests.get("https://api.heygen.com/v2/avatars", headers={"x-api-key": api_key}, timeout=30)
+        if avatars_resp.ok:
+            avatars = avatars_resp.json().get("data", {}).get("avatars", [])
+            avatar_id = avatars[0]["avatar_id"] if avatars else "default"
+
+    video_payload: Dict[str, Any] = {
+        "video_inputs": [{
+            "character": {"type": "avatar", "avatar_id": avatar_id, "avatar_style": "normal"},
+            "voice": {"type": "text", "input_text": script, "speed": 1.0},
+            "background": {"type": "color", "value": "#f0f0f0"} if background == "studio" else {"type": "image", "url": f"https://files.heygen.ai/backgrounds/{background}.jpg"},
+        }],
+        "dimension": {"width": width, "height": height},
+        "aspect_ratio": None,
+    }
+    if voice_id:
+        video_payload["video_inputs"][0]["voice"]["voice_id"] = voice_id
+
+    create_resp = requests.post(
+        "https://api.heygen.com/v2/video/generate",
+        headers={"x-api-key": api_key, "Content-Type": "application/json"},
+        json=video_payload,
+        timeout=30,
+    )
+    create_resp.raise_for_status()
+    video_id = create_resp.json()["data"]["video_id"]
+
+    # Poll for completion (HeyGen videos take 1-5 minutes)
+    for attempt in range(60):
+        time.sleep(10)
+        status_resp = requests.get(f"https://api.heygen.com/v1/video_status.get?video_id={video_id}",
+                                   headers={"x-api-key": api_key}, timeout=30)
+        status_data = status_resp.json().get("data", {})
+        status = status_data.get("status", "")
+        if status == "completed":
+            video_url = status_data.get("video_url", "")
+            duration = status_data.get("duration", 0)
+            # Download the video
+            vid_resp = requests.get(video_url, timeout=300, stream=True)
+            vid_resp.raise_for_status()
+            with open(save_path, "wb") as f:
+                for chunk in vid_resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            return {"file_path": save_path, "video_id": video_id, "duration_seconds": duration, "provider": "heygen", "video_url": video_url}
+        elif status == "failed":
+            raise RuntimeError(f"HeyGen video generation failed: {status_data.get('error')}")
+
+    raise TimeoutError(f"HeyGen video generation timed out after 10 minutes. Video ID: {video_id}")
+
+
+def generate_video_clip(
+    prompt: str,
+    duration: int = 5,
+    provider: str = "runwayml",
+    image_path: Optional[str] = None,
+    save_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Generate a short video clip from a text prompt or image using RunwayML.
+    Best for intros, transitions, B-roll footage, and creative visuals.
+
+    Args:
+        prompt: Text description of the video to generate
+        duration: Video duration in seconds (5 or 10)
+        provider: "runwayml" (default)
+        image_path: Optional source image for image-to-video (local file path)
+        save_path: Where to save the MP4 (default: /tmp/video_clip_{timestamp}.mp4)
+
+    Returns:
+        Dict with "file_path", "task_id", "duration_seconds", "provider"
+    """
+    api_key = _api_key("RUNWAYML_ACCESS_TOKEN", "RunwayML")
+    if save_path is None:
+        save_path = f"/tmp/video_clip_{int(time.time())}.mp4"
+
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "X-Runway-Version": "2024-11-06"}
+
+    payload: Dict[str, Any] = {
+        "model": "gen4_turbo",
+        "promptText": prompt,
+        "duration": duration,
+        "ratio": "1280:720",
+    }
+
+    if image_path and os.path.exists(image_path):
+        with open(image_path, "rb") as img_f:
+            img_b64 = base64.b64encode(img_f.read()).decode()
+        ext = image_path.rsplit(".", 1)[-1].lower()
+        mime = "image/png" if ext == "png" else "image/jpeg"
+        payload["promptImage"] = f"data:{mime};base64,{img_b64}"
+
+    create_resp = requests.post("https://api.dev.runwayml.com/v1/image_to_video", headers=headers, json=payload, timeout=30)
+    create_resp.raise_for_status()
+    task_id = create_resp.json()["id"]
+
+    # Poll for completion
+    for _ in range(60):
+        time.sleep(10)
+        poll = requests.get(f"https://api.dev.runwayml.com/v1/tasks/{task_id}", headers=headers, timeout=30)
+        task = poll.json()
+        status = task.get("status", "")
+        if status == "SUCCEEDED":
+            video_url = task["output"][0]
+            vid_resp = requests.get(video_url, timeout=300, stream=True)
+            vid_resp.raise_for_status()
+            with open(save_path, "wb") as f:
+                for chunk in vid_resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            return {"file_path": save_path, "task_id": task_id, "duration_seconds": duration, "provider": "runwayml", "video_url": video_url}
+        elif status == "FAILED":
+            raise RuntimeError(f"RunwayML video generation failed: {task.get('error')}")
+
+    raise TimeoutError(f"RunwayML generation timed out. Task ID: {task_id}")
+
+
+def create_thumbnail(
+    title: str,
+    subtitle: str = "",
+    background_prompt: str = "",
+    style: str = "youtube",
+    save_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Generate a YouTube thumbnail or ad banner image.
+
+    Args:
+        title: Main text to display on the thumbnail
+        subtitle: Secondary text (optional)
+        background_prompt: Image description for the background
+        style: "youtube" (1280x720) | "square" (1080x1080) | "story" (1080x1920)
+        save_path: Where to save the image
+
+    Returns:
+        Dict with "file_path", "url", "dimensions"
+    """
+    dimensions = {"youtube": (1280, 720), "square": (1080, 1080), "story": (1080, 1920)}
+    w, h = dimensions.get(style, (1280, 720))
+
+    full_prompt = (
+        f"YouTube thumbnail, bold eye-catching design, text overlay space: '{title}'"
+        + (f", subtitle: '{subtitle}'" if subtitle else "")
+        + (f", background: {background_prompt}" if background_prompt else ", vibrant background")
+        + ", professional, high contrast, 4K quality"
+    )
+    if save_path is None:
+        save_path = f"/tmp/thumbnail_{int(time.time())}.png"
+
+    return generate_image(full_prompt, width=w, height=h, save_path=save_path)
+`;
+
 // SDK file list — all fallbacks are embedded so Vercel serverless works even if
 // outputFileTracing doesn't include the .py files from src/lib/sandbox/agenticfactor/
 const SDK_FILES: { name: string; fallback: string }[] = [
@@ -1607,6 +1966,7 @@ const SDK_FILES: { name: string; fallback: string }[] = [
   { name: 'search.py', fallback: SEARCH_FALLBACK },
   { name: 'files.py', fallback: FILES_FALLBACK },
   { name: 'social.py', fallback: SOCIAL_FALLBACK },
+  { name: 'creative.py', fallback: CREATIVE_FALLBACK },
 ];
 
 /**

@@ -365,7 +365,7 @@ export async function deductCredits(
  */
 export function getModelCreditCost(model: string): number {
   const flashModels = ['gemini-2.0-flash', 'gemini-flash', 'gpt-4o-mini', 'claude-haiku'];
-  const proModels   = ['gemini-2.5-pro', 'gemini-pro', 'gpt-4o', 'claude-sonnet'];
+  const proModels   = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-pro', 'gpt-4o', 'claude-sonnet'];
   const premiumModels = ['claude-opus', 'o1', 'o1-pro'];
 
   if (premiumModels.some(m => model.includes(m))) return CREDIT_COSTS.llm_call_premium;

@@ -722,6 +722,243 @@ Then email a summary to the user with: total campaigns created, total budget all
 - Include currency context in the budget report — INR, USD, GBP etc.`
 };
 
+// ── Template 9: YouTube Channel Automation ──
+const YOUTUBE_CHANNEL_AUTOMATION: TemplateConfig = {
+  id: 'youtube_channel_automation',
+  title: 'YouTube Channel Automation',
+  description: 'Fully autonomous YouTube pipeline: research trending topics, write a script, generate AI voiceover, create a thumbnail, produce a video, and upload to YouTube — on a recurring schedule.',
+  keywords: [
+    'youtube', 'youtube video', 'youtube channel', 'upload youtube', 'post youtube',
+    'video automation', 'youtube automation', 'youtube content', 'youtube schedule',
+    'video every week', 'weekly video', 'sunday video', 'monday video', 'recurring video',
+    'voiceover', 'ai video', 'ai presenter', 'heygen', 'elevenlabs', 'tts', 'thumbnail',
+    'video script', 'script writer', 'video thumbnail', 'video production', 'video upload',
+    'automate channel', 'content creator', 'youtuber', 'video content', 'video series',
+    'channel growth', 'video SEO', 'youtube SEO', 'video title', 'video description',
+    'video tags', 'runwayml', 'ai video generation', 'text to speech video'
+  ],
+  category: 'content',
+  agents: [
+    {
+      role: 'Trend Research & Topic Selector',
+      capabilities: ['web_search', 'trend_analysis', 'youtube_research', 'topic_scoring'],
+      requiresExternalData: true,
+      tools: [
+        { name: 'Tavily Search', type: 'web_search', requiresAuth: true, confidentialityLevel: 'public' },
+        { name: 'YouTube API (Search)', type: 'composio', requiresAuth: true, confidentialityLevel: 'internal' },
+      ],
+      systemPrompt: `You are a YouTube strategist. Your job is to find the BEST topic to make a video about this week.
+
+PROCESS:
+1. Search YouTube for recent uploads in the channel's niche (sort by view count + upload date) to identify trending topics.
+2. Use web search (Tavily) to find what's trending in the niche right now — news, viral topics, hot debates.
+3. Cross-reference YouTube search volume by checking how many videos exist for each candidate topic and their average view counts.
+4. Score each candidate topic: (trending_signal × 0.4) + (search_volume_signal × 0.3) + (competition_gap × 0.3).
+   Competition gap = high score if few quality videos exist on the topic.
+5. Select the SINGLE best topic for this week and explain why.
+
+Output EXACTLY ONE winning topic with full metadata.`,
+      handoffProtocol: 'Output: { "winning_topic": string, "rationale": string, "trending_keywords": string[], "competitor_videos": [{ "title": string, "view_count": number }], "search_query_suggestions": string[], "niche": string }',
+    },
+    {
+      role: 'YouTube Script Writer',
+      capabilities: ['scriptwriting', 'seo_optimization', 'hook_writing', 'storytelling'],
+      requiresExternalData: true,
+      tools: [
+        { name: 'Tavily Search', type: 'web_search', requiresAuth: true, confidentialityLevel: 'public' },
+      ],
+      systemPrompt: `You are an expert YouTube scriptwriter. You write scripts that hook viewers in the first 30 seconds and keep them watching.
+
+SCRIPT STRUCTURE (adapt to topic, but follow this arc):
+- HOOK (0–30s): Pattern interrupt. State a surprising fact, bold claim, or question that makes stopping impossible.
+- INTRO (30s–1min): What this video delivers + who it's for. Tease the best insight to come.
+- BODY (main content): 3–5 sections, each with a clear idea, supporting evidence/story, and a mini-payoff.
+- BRIDGE MOMENTS: Every 90 seconds, add a curiosity bridge ("But here's what most people miss...") to prevent drop-off.
+- OUTRO (last 60s): Key takeaways, call to subscribe, tease the next video.
+
+RULES:
+- Write conversational, spoken language. Read each sentence aloud in your head — if it sounds unnatural when spoken, rewrite it.
+- Avoid passive voice and academic language.
+- Target 8–12 minutes (1,200–1,800 words for spoken script at 150 words/minute).
+- Include [PAUSE] markers and [EMPHASIS] for delivery direction.
+- Research the topic first with Tavily to ensure facts are accurate.
+
+Also generate: optimised video title (60 chars max, front-loaded with keyword), SEO description (first 150 chars are visible pre-click — make them count), 15 relevant tags.`,
+      handoffProtocol: 'Output: { "title": string, "description": string, "tags": string[], "script": string, "word_count": number, "estimated_duration_minutes": number, "hook": string, "key_sections": string[] }',
+    },
+    {
+      role: 'AI Voiceover Creator',
+      capabilities: ['text_to_speech', 'audio_production', 'voice_selection'],
+      requiresExternalData: true,
+      tools: [
+        { name: 'ElevenLabs API', type: 'apikey', requiresAuth: true, confidentialityLevel: 'internal' },
+      ],
+      systemPrompt: `You create a professional AI voiceover from the video script using ElevenLabs.
+
+PROCESS:
+1. Call creative.list_voices() to see available voices.
+2. Select the best voice for the channel's tone (check if user specified a preferred voice_id, else pick a natural English voice).
+3. Call creative.text_to_speech(text=script, voice_id=selected_id, stability=0.5, similarity_boost=0.75).
+4. The function returns a base64-encoded MP3 or a file path — log whichever you receive.
+5. Save the audio to a file named "voiceover_{timestamp}.mp3".
+
+VOICE SELECTION GUIDANCE:
+- News/educational: choose a clear, authoritative voice (e.g. "Matthew" or similar)
+- Lifestyle/casual: choose a warmer, conversational voice
+- Always prefer a voice the user has specified in their preferences over your default pick.
+
+Output the voice used and the audio file reference for the next agent.`,
+      handoffProtocol: 'Output: { "voice_id": string, "voice_name": string, "audio_file": string, "duration_estimate_seconds": number, "status": "success"|"failed", "error": string|null }',
+    },
+    {
+      role: 'AI Thumbnail Creator',
+      capabilities: ['image_generation', 'thumbnail_design', 'visual_branding'],
+      requiresExternalData: true,
+      tools: [
+        { name: 'OpenAI DALL-E / Replicate (Flux)', type: 'apikey', requiresAuth: true, confidentialityLevel: 'internal' },
+      ],
+      systemPrompt: `You create a YouTube thumbnail that maximises click-through rate.
+
+THUMBNAIL RULES:
+- YouTube thumbnails are 1280×720px (16:9 ratio).
+- High-contrast, bold colours outperform muted palettes.
+- Include 3–5 words of overlay text MAX (you describe this in the prompt, the image model renders it).
+- Faces with expressive emotion (surprise, excitement, concern) outperform generic stock imagery.
+- Avoid cluttered backgrounds — simple works best.
+
+PROCESS:
+1. Based on the video title and hook, design a thumbnail concept: what's in the image, what text overlay, what emotion.
+2. Call creative.create_thumbnail(title=SHORT_TEXT, subtitle=SUPPORTING_TEXT, style="youtube", prompt=DETAILED_IMAGE_PROMPT).
+   Or call creative.generate_image(prompt=FULL_PROMPT, width=1280, height=720, provider="auto").
+3. Log the image file path returned.
+
+Write a detailed, specific image prompt — not "a person looking surprised" but "a young professional at a desk, mouth open in genuine shock, looking directly at camera, bright yellow background, studio lighting, photorealistic".`,
+      handoffProtocol: 'Output: { "thumbnail_file": string, "image_prompt": string, "design_concept": string, "status": "success"|"failed", "error": string|null }',
+    },
+    {
+      role: 'AI Video Producer',
+      capabilities: ['video_generation', 'ai_presenter', 'video_assembly'],
+      requiresExternalData: true,
+      tools: [
+        { name: 'HeyGen (AI Presenter)', type: 'apikey', requiresAuth: true, confidentialityLevel: 'internal' },
+        { name: 'RunwayML (Video Clips)', type: 'apikey', requiresAuth: true, confidentialityLevel: 'internal' },
+      ],
+      systemPrompt: `You produce the video. You have two production modes:
+
+MODE A — AI PRESENTER (HeyGen): Best for talking-head style, educational, or face-to-camera formats.
+- Call creative.create_presenter_video(script=FULL_SCRIPT, avatar_id=AVATAR_ID, voice_id=ELEVENLABS_VOICE_ID).
+- Use the same voice_id from the voiceover agent for consistency.
+- Polling is handled automatically — the function waits for rendering to complete.
+- Returns a video URL or file path.
+
+MODE B — VIDEO CLIPS + VOICEOVER (RunwayML): Best for cinematic, B-roll, or visual content.
+- Split the script into 4–6 visual scenes.
+- For each scene, call creative.generate_video_clip(prompt=SCENE_DESCRIPTION, duration=5).
+- Combine with the voiceover audio from the previous agent.
+
+SELECTION LOGIC:
+- If HeyGen API key is available AND the channel format is "presenter/talking head" → use MODE A.
+- Otherwise → use MODE B with RunwayML clips.
+- If neither API is available, log a clear error and skip video generation (do not block the upload step).
+
+Log the final video file path or URL for the upload agent.`,
+      handoffProtocol: 'Output: { "video_file": string|null, "video_url": string|null, "production_mode": "heygen"|"runwayml"|"skipped", "duration_seconds": number|null, "status": "success"|"failed"|"skipped", "error": string|null }',
+    },
+    {
+      role: 'YouTube Uploader & Publisher',
+      capabilities: ['youtube_upload', 'video_publishing', 'metadata_optimization'],
+      requiresExternalData: true,
+      tools: [
+        { name: 'YouTube API', type: 'composio', requiresAuth: true, confidentialityLevel: 'internal' },
+      ],
+      systemPrompt: `You upload and publish the completed video to YouTube.
+
+PROCESS:
+1. Use YOUTUBE_UPLOAD_VIDEO composio action with:
+   - title: from script writer output (SEO-optimised title)
+   - description: from script writer output (full SEO description with timestamps if possible)
+   - tags: from script writer output (15 tags array)
+   - privacyStatus: "public" (or "private" if user wants manual review first)
+   - If a thumbnail file is available, upload it using YOUTUBE_SET_VIDEO_THUMBNAIL.
+
+2. Log the returned video ID and URL.
+3. Verify upload success by calling YOUTUBE_GET_VIDEO with the returned video ID.
+
+FALLBACK: If a video file is not available (video agent was skipped or failed), upload as:
+- A video with the thumbnail image + voiceover audio as a slideshow/static video — note this in the output.
+- Or log that manual upload is required, and provide all the metadata ready to paste.
+
+Never skip the upload step just because the video agent had issues. Upload what you have.`,
+      handoffProtocol: 'Output: { "youtube_video_id": string|null, "youtube_url": string|null, "title": string, "upload_status": "published"|"private"|"failed"|"manual_required", "thumbnail_uploaded": boolean, "error": string|null }',
+    },
+    {
+      role: 'Channel Report & Next-Run Preparer',
+      capabilities: ['report_generation', 'send_email', 'next_run_planning'],
+      requiresExternalData: true,
+      tools: [
+        { name: 'Gmail API', type: 'api', requiresAuth: true, confidentialityLevel: 'internal' },
+        { name: 'Google Sheets API', type: 'api', requiresAuth: true, confidentialityLevel: 'internal' },
+      ],
+      systemPrompt: `You create a final report for this week's video and prepare for the next run.
+
+DELIVERABLES:
+1. Update (or create) a "YouTube Channel Tracker" Google Sheet with a new row:
+   - Date, Video Title, YouTube URL, Video ID, Topic Selected, Script Word Count, Voice Used, Production Mode (HeyGen/RunwayML), Thumbnail Created (Y/N), Upload Status
+
+2. Email the channel owner a concise run report with:
+   - This week's video: title + YouTube link
+   - Quick production summary (topic research → script → voiceover → video → upload — each step: success/fail)
+   - What to expect next run (suggested topic direction based on this week's trend data)
+   - Any manual actions needed (e.g., video needs manual activation, thumbnail needs replacement)
+
+3. Output a "next_run_brief" — a short paragraph (3–5 sentences) summarising the trending direction to seed the next Topic Research run. This gets stored in mission memory and re-used next run to maintain channel thematic continuity.`,
+      handoffProtocol: 'Output: { "sheet_url": string, "email_sent": boolean, "next_run_brief": string, "run_summary": { "topic": string, "title": string, "youtube_url": string|null, "steps_succeeded": string[], "steps_failed": string[] } }',
+    },
+  ],
+  orchestration: { pattern: 'sequential', timeoutSeconds: 1800 },
+  permissions: [
+    { type: 'api_key', service: 'tavily', scope: 'search', confidentialityLevel: 'public' },
+    { type: 'composio_oauth', service: 'youtube', scope: 'youtube.upload youtube.readonly', confidentialityLevel: 'internal' },
+    { type: 'api_key', service: 'elevenlabs', scope: 'text_to_speech voices', confidentialityLevel: 'internal' },
+    { type: 'api_key', service: 'openai', scope: 'images', confidentialityLevel: 'internal' },
+    { type: 'api_key', service: 'heygen', scope: 'video_generation', confidentialityLevel: 'internal' },
+    { type: 'api_key', service: 'runwayml', scope: 'video_generation', confidentialityLevel: 'internal' },
+    { type: 'oauth_token', service: 'google', scope: 'gmail.send sheets', confidentialityLevel: 'internal' },
+  ],
+  validationChecklist: [
+    'Trend research identifies a clearly trending topic — not just a random choice',
+    'Script follows hook → body → outro arc and is 1,200–1,800 words',
+    'Video title ≤60 chars, SEO description has keyword in first 150 chars, 15 tags provided',
+    'Voiceover generated with ElevenLabs (or fallback noted)',
+    'Thumbnail generated at 1280×720 with bold, high-contrast design',
+    'Video produced via HeyGen (presenter) or RunwayML (clips) — or fallback documented',
+    'Upload to YouTube succeeds — video ID and URL logged',
+    'Channel tracker Google Sheet updated with this run\'s row',
+    'Email report sent with YouTube link and next-run brief',
+  ],
+  discoveryQuestions: [
+    'What is your YouTube channel about? (niche, topic area, target audience)',
+    'What format do you want? AI presenter (talking head via HeyGen) or cinematic clips (via RunwayML)?',
+    'Do you have API keys for ElevenLabs, HeyGen, or RunwayML? Or should we use what\'s connected?',
+    'What day and time should videos go up? (e.g., every Sunday and Monday at 10:00 AM IST)',
+    'Do you want videos published immediately (public) or uploaded privately for your review first?',
+    'Is there a specific voice or presenter style you prefer?',
+  ],
+  referenceHints: `For YouTube channel automation missions:
+- Topic research is the highest-leverage step — a bad topic kills all the downstream effort. Always pull REAL YouTube search data.
+- Script length target: 1,200–1,800 words spoken ≈ 8–12 minute video. Shorter scripts make shorter videos (5–8 min is acceptable for some niches).
+- ElevenLabs voice: default to voice_id "21m00Tcm4TlvDq8ikWAM" (Rachel) or list voices and pick. Never hardcode a voice without checking availability.
+- HeyGen avatar_id: list available avatars if not specified. Use the free avatar for testing.
+- RunwayML scenes: 5 × 5-second clips = 25 seconds of B-roll. Combine with voiceover in final video.
+- YouTube composio action for upload: YOUTUBE_UPLOAD_VIDEO — requires file path or URL, not base64.
+- Thumbnail: always generate even if video generation fails — a good thumbnail + manual upload is better than no upload.
+- privacyStatus: default to "private" for first run so the user can review. After trust is established, switch to "public".
+- Channel tracker sheet: one row per run. This becomes the channel's editorial calendar over time.
+- Scheduling: this template is designed for recurring scheduled missions. On each run, the trend research starts fresh. The next_run_brief from the previous run seeds the topic direction for continuity.
+- If the channel niche is narrowly defined (e.g., "Python tutorials for beginners"), hardcode the search terms — don't let the topic agent go too broad.
+- For autonomous multi-week scheduling: set schedule type=custom with daysOfWeek=["sunday","monday"] and time="10:00" with timezone set to the user's local timezone.`
+};
+
 // ── All Templates ──
 const ALL_TEMPLATES: TemplateConfig[] = [
   RESEARCH_REPORT_EMAIL,
@@ -732,6 +969,7 @@ const ALL_TEMPLATES: TemplateConfig[] = [
   SEO_KEYWORD_CALENDAR,
   LEAD_ENRICHMENT,
   PAID_ADS_COPYWRITER,
+  YOUTUBE_CHANNEL_AUTOMATION,
 ];
 
 /**

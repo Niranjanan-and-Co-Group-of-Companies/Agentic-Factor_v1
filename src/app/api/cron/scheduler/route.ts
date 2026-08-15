@@ -177,16 +177,67 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ 
-      woke: wokeCount, 
+    // ── Ads Governor: run daily checks for active paid-ads missions ──
+    const governorChecked = await runAdsGovernorChecks(now);
+
+    return NextResponse.json({
+      woke: wokeCount,
       checked: waitEvents.length,
-      message: `Checked ${waitEvents.length} scheduled missions, woke ${wokeCount}` 
+      adsGovernorChecked: governorChecked,
+      message: `Checked ${waitEvents.length} scheduled missions, woke ${wokeCount}; ads governor checked ${governorChecked} missions`
     });
 
   } catch (error) {
     console.error('[Cron Scheduler] Error:', error);
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
+}
+
+// ── Ads Governor: daily performance check for paid-ads missions ──
+
+async function runAdsGovernorChecks(now: Date): Promise<number> {
+  // Only run once per day — at 8am UTC (before business hours)
+  if (now.getHours() !== 8 || now.getMinutes() !== 0) return 0;
+
+  const supabase = createServiceClient();
+
+  // Find all missions that have an active ads governor state
+  const { data: governorEvents } = await supabase
+    .from('events')
+    .select('entity_id, tenant_id, payload')
+    .eq('event_type', 'ads.governor.state');
+
+  if (!governorEvents || governorEvents.length === 0) return 0;
+
+  let checked = 0;
+  for (const ev of governorEvents) {
+    const state = ev.payload as { status?: string; lastCheckAt?: string } | null;
+    if (!state || state.status !== 'active') continue;
+
+    // Skip if already checked today
+    const lastCheck = state.lastCheckAt ? new Date(state.lastCheckAt) : null;
+    if (lastCheck && lastCheck.toISOString().split('T')[0] === now.toISOString().split('T')[0]) continue;
+
+    // Fire governor PATCH via internal fetch — reuse the route logic
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+      await fetch(`${baseUrl}/api/ads/governor`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          // Pass cron secret as Authorization so the governor can identify this as an internal call
+          Authorization: `Bearer ${process.env.CRON_SECRET ?? 'internal'}`,
+          'x-tenant-id': ev.tenant_id,
+        },
+        body: JSON.stringify({ missionId: ev.entity_id }),
+      });
+      checked++;
+    } catch (err) {
+      console.warn(`[Ads Governor Cron] Failed to check mission ${ev.entity_id}:`, err);
+    }
+  }
+
+  return checked;
 }
 
 // ── Helpers ──
@@ -207,35 +258,69 @@ function parseDuration(config: string): number {
  *   - "HH:MM" format: "14:30" → runs daily at 14:30
  *   - JSON custom config: { type: "custom", dayOfWeek: "friday", time: "12:30", endDate: "...", maxRuns: 3 }
  */
-function matchesSchedule(config: string | Record<string, any>, now: Date): boolean {
-  const hour = now.getHours();
-  const minute = now.getMinutes();
-  const dayOfWeek = now.getDay(); // 0 = Sunday
+const DAY_MAP: Record<string, number> = {
+  sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+  thursday: 4, friday: 5, saturday: 6,
+};
 
+/**
+ * Convert a UTC Date to the customer's local time using their timezone.
+ * Falls back to UTC if the timezone is invalid or missing.
+ */
+function toLocalTime(utcNow: Date, timezone?: string): { hour: number; minute: number; dayOfWeek: number } {
+  if (timezone) {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        hour: 'numeric', minute: 'numeric', weekday: 'short',
+        hour12: false,
+      });
+      const parts = formatter.formatToParts(utcNow);
+      const get = (type: string) => parseInt(parts.find(p => p.type === type)?.value ?? '0');
+      const weekday = parts.find(p => p.type === 'weekday')?.value?.toLowerCase() ?? '';
+      const dayAbbrevMap: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+      return {
+        hour: get('hour'),
+        minute: get('minute'),
+        dayOfWeek: dayAbbrevMap[weekday.slice(0, 3)] ?? utcNow.getDay(),
+      };
+    } catch {
+      // Invalid timezone string — fall through to UTC
+    }
+  }
+  return { hour: utcNow.getHours(), minute: utcNow.getMinutes(), dayOfWeek: utcNow.getDay() };
+}
+
+/**
+ * Match a schedule config against the current time.
+ * Supports:
+ *   - String presets: "every_minute", "every_5_minutes", "every_hour", "daily_9am", etc.
+ *   - "HH:MM" format: "14:30" → runs daily at 14:30
+ *   - JSON custom config: { type: "custom", dayOfWeek?: string, daysOfWeek?: string[],
+ *       time: "HH:MM", timezone?: string, endDate?: string, maxRuns?: number }
+ */
+function matchesSchedule(config: string | Record<string, any>, now: Date): boolean {
   // Handle JSON config objects (custom schedules)
   if (typeof config === 'object' && config !== null) {
     if (config.type === 'custom') {
-      // Check day of week (if specified)
+      const local = toLocalTime(now, config.timezone);
+      const { hour, minute, dayOfWeek } = local;
+
+      // Check single day of week
       if (config.dayOfWeek && config.dayOfWeek !== 'everyday') {
-        const dayMap: Record<string, number> = {
-          sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
-          thursday: 4, friday: 5, saturday: 6
-        };
-        const targetDay = dayMap[config.dayOfWeek.toLowerCase()];
+        const targetDay = DAY_MAP[config.dayOfWeek.toLowerCase()];
         if (targetDay !== undefined && dayOfWeek !== targetDay) return false;
       }
 
-      // Check multiple days of week (if specified as array)
-      if (Array.isArray(config.daysOfWeek)) {
-        const dayMap: Record<string, number> = {
-          sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
-          thursday: 4, friday: 5, saturday: 6
-        };
-        const targetDays = config.daysOfWeek.map((d: string) => dayMap[d.toLowerCase()]).filter((d: number | undefined) => d !== undefined);
+      // Check multiple days of week (array — e.g. ["sunday", "monday"])
+      if (Array.isArray(config.daysOfWeek) && config.daysOfWeek.length > 0) {
+        const targetDays = config.daysOfWeek
+          .map((d: string) => DAY_MAP[d.toLowerCase()])
+          .filter((d: number | undefined) => d !== undefined) as number[];
         if (targetDays.length > 0 && !targetDays.includes(dayOfWeek)) return false;
       }
 
-      // Check time (HH:MM)
+      // Check time (HH:MM) in customer's local timezone
       if (config.time) {
         const [h, m] = config.time.split(':').map(Number);
         if (hour !== h || minute !== m) return false;
@@ -243,35 +328,27 @@ function matchesSchedule(config: string | Record<string, any>, now: Date): boole
 
       return true;
     }
-    
-    // Unknown config type
     return false;
   }
 
-  // Handle string presets
+  // String presets always run in server time (UTC) — acceptable for system presets
   const configStr = String(config);
-  
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const dayOfWeek = now.getDay();
+
   switch (configStr) {
-    case 'every_minute':
-      return true;
-    case 'every_5_minutes':
-      return minute % 5 === 0;
-    case 'every_hour':
-      return minute === 0;
-    case 'daily_9am':
-      return hour === 9 && minute === 0;
-    case 'daily_6pm':
-      return hour === 18 && minute === 0;
-    case 'weekly_monday':
-      return dayOfWeek === 1 && hour === 9 && minute === 0;
-    case 'weekly_friday':
-      return dayOfWeek === 5 && hour === 17 && minute === 0;
-    default:
-      // Try to parse as "HH:MM" format
+    case 'every_minute':      return true;
+    case 'every_5_minutes':   return minute % 5 === 0;
+    case 'every_hour':        return minute === 0;
+    case 'daily_9am':         return hour === 9 && minute === 0;
+    case 'daily_6pm':         return hour === 18 && minute === 0;
+    case 'weekly_monday':     return dayOfWeek === 1 && hour === 9 && minute === 0;
+    case 'weekly_friday':     return dayOfWeek === 5 && hour === 17 && minute === 0;
+    default: {
       const timeMatch = configStr.match(/^(\d{1,2}):(\d{2})$/);
-      if (timeMatch) {
-        return hour === parseInt(timeMatch[1]) && minute === parseInt(timeMatch[2]);
-      }
+      if (timeMatch) return hour === parseInt(timeMatch[1]) && minute === parseInt(timeMatch[2]);
       return false;
+    }
   }
 }

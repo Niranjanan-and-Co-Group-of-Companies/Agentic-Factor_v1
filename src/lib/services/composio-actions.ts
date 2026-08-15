@@ -23,6 +23,10 @@ export const AF_TO_COMPOSIO_APP: Record<string, string> = {
   google_ads: 'googleads',
   google_analytics: 'googleanalytics',
   facebook_ads: 'facebookads',
+  // ── Content & video platforms ──
+  youtube: 'youtube',
+  buffer: 'buffer',
+  canva: 'canva',
   hubspot: 'hubspot',
   salesforce: 'salesforce',
   airtable: 'airtable',

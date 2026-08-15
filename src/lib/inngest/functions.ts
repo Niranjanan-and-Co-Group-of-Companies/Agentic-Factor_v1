@@ -297,12 +297,28 @@ export const executeMissionBackground = inngest.createFunction(
             await transitionMissionStatus(missionId, tenantId, 'completed');
 
             const durationMs = Date.now() - startedAt;
+
+            // Generate a one-paragraph run summary for cross-run memory.
+            // The next scheduled run reads this so the agent knows what was done last time.
+            let runSummary: string | null = null;
+            try {
+              const { callLLM } = await import('@/lib/services/llm-router');
+              const summaryResult = await callLLM(
+                [{ role: 'user', content: `Mission: "${mission.title}"\nFinal agent output:\n${typeof output === 'string' ? output.slice(0, 2000) : JSON.stringify(output).slice(0, 2000)}\n\nWrite ONE concise paragraph (2-4 sentences max) summarising exactly what was accomplished in this run. Be specific: mention URLs created, records processed, emails sent, keywords found, videos uploaded, ads launched, etc. This will be shown to the same agent next time it runs so it knows what was already done and what to do differently.` }],
+                { tier: 3, jsonMode: false, maxTokens: 256 },
+              );
+              runSummary = summaryResult.content?.slice(0, 1000) ?? null;
+            } catch (e) {
+              console.warn('[Inngest] Run summary generation failed (non-fatal):', e);
+            }
+
             const { error: runErr } = await supabase.from('mission_runs').update({
               status: 'completed',
               completed_at: new Date().toISOString(),
               duration_ms: durationMs,
               agents_done: agentsDone,
               agents_failed: agentsFailed,
+              ...(runSummary ? { summary: runSummary } : {}),
             }).eq('id', runId);
             if (runErr) console.warn('[Inngest] Failed to update mission_runs (non-fatal):', runErr.message);
 

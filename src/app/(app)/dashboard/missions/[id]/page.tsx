@@ -153,17 +153,19 @@ function formatScheduleConfig(config: unknown): string {
     return SCHEDULE_PRESET_LABELS[config] || config;
   }
   if (config && typeof config === "object") {
-    const c = config as { type?: string; dayOfWeek?: string; time?: string; maxRuns?: number; endDate?: string };
+    const c = config as { type?: string; dayOfWeek?: string; daysOfWeek?: string[]; time?: string; timezone?: string; maxRuns?: number; endDate?: string };
     if (c.type !== "custom") return "Custom schedule";
-    const dayLabel = !c.dayOfWeek || c.dayOfWeek === "everyday"
+    const days = c.daysOfWeek?.length ? c.daysOfWeek : c.dayOfWeek ? [c.dayOfWeek] : [];
+    const dayLabel = !days.length || days.includes("everyday")
       ? "Every day"
-      : `Every ${c.dayOfWeek.charAt(0).toUpperCase()}${c.dayOfWeek.slice(1)}`;
+      : days.map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(" & ");
     let timeLabel = "";
     if (c.time) {
       const [h, m] = c.time.split(":").map(Number);
       const period = h >= 12 ? "PM" : "AM";
       const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-      timeLabel = ` at ${h12}:${String(m).padStart(2, "0")} ${period}`;
+      const tzShort = c.timezone ? ` ${c.timezone.split("/").pop()?.replace("_", " ") ?? c.timezone}` : "";
+      timeLabel = ` at ${h12}:${String(m).padStart(2, "0")} ${period}${tzShort}`;
     }
     const endLabel = c.maxRuns
       ? ` • ${c.maxRuns} runs total`
@@ -258,8 +260,9 @@ export default function MissionDetailPage() {
   const [showSchedulePicker, setShowSchedulePicker] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<'preset' | 'custom'>('preset');
   const [schedulePreset, setSchedulePreset] = useState('daily_9am');
-  const [customDay, setCustomDay] = useState('everyday');
+  const [customDays, setCustomDays] = useState<string[]>(['everyday']);
   const [customTime, setCustomTime] = useState('09:00');
+  const [customTimezone, setCustomTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [endCondition, setEndCondition] = useState<'forever' | 'max_runs' | 'end_date'>('forever');
   const [maxRuns, setMaxRuns] = useState(5);
   const [endDate, setEndDate] = useState('');
@@ -1077,34 +1080,48 @@ export default function MissionDetailPage() {
               ) : (
                 /* Custom Mode */
                 <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-md)" }}>
-                  {/* Day of Week */}
+                  {/* Days of Week — multi-select checkboxes */}
                   <div>
-                    <label style={{ fontSize: "0.78rem", fontWeight: 600, marginBottom: 6, display: "block", color: "var(--text-secondary)" }}>Day</label>
-                    <select 
-                      value={customDay} 
-                      onChange={(e) => setCustomDay(e.target.value)}
-                      style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: "0.9rem", width: "100%" }}
-                    >
-                      <option value="everyday">Every day</option>
-                      <option value="monday">Monday</option>
-                      <option value="tuesday">Tuesday</option>
-                      <option value="wednesday">Wednesday</option>
-                      <option value="thursday">Thursday</option>
-                      <option value="friday">Friday</option>
-                      <option value="saturday">Saturday</option>
-                      <option value="sunday">Sunday</option>
-                    </select>
+                    <label style={{ fontSize: "0.78rem", fontWeight: 600, marginBottom: 8, display: "block", color: "var(--text-secondary)" }}>Days</label>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {['everyday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map(day => {
+                        const isEveryday = day === 'everyday';
+                        const checked = isEveryday ? customDays.includes('everyday') : (customDays.includes(day) && !customDays.includes('everyday'));
+                        return (
+                          <label key={day} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 20, border: `1px solid ${checked ? 'hsl(270,100%,70%)' : 'var(--border)'}`, background: checked ? 'hsla(270,100%,70%,0.12)' : 'var(--bg-glass)', cursor: "pointer", fontSize: "0.8rem", fontWeight: checked ? 600 : 400, transition: "all 0.15s" }}>
+                            <input type="checkbox" checked={checked} style={{ display: "none" }} readOnly />
+                            <span onClick={() => {
+                              if (isEveryday) { setCustomDays(['everyday']); return; }
+                              setCustomDays(prev => {
+                                const without = prev.filter(d => d !== 'everyday' && d !== day);
+                                return prev.includes(day) ? (without.length ? without : ['everyday']) : [...without, day];
+                              });
+                            }}>{day.charAt(0).toUpperCase() + day.slice(1, 3)}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  {/* Time Input */}
-                  <div>
-                    <label style={{ fontSize: "0.78rem", fontWeight: 600, marginBottom: 6, display: "block", color: "var(--text-secondary)" }}>Time</label>
-                    <input 
-                      type="time" 
-                      value={customTime}
-                      onChange={(e) => setCustomTime(e.target.value)}
-                      style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: "0.9rem", width: "100%" }}
-                    />
+                  {/* Time + Timezone row */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-sm)" }}>
+                    <div>
+                      <label style={{ fontSize: "0.78rem", fontWeight: 600, marginBottom: 6, display: "block", color: "var(--text-secondary)" }}>Time</label>
+                      <input type="time" value={customTime} onChange={(e) => setCustomTime(e.target.value)}
+                        style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: "0.9rem", width: "100%" }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: "0.78rem", fontWeight: 600, marginBottom: 6, display: "block", color: "var(--text-secondary)" }}>Timezone</label>
+                      <select value={customTimezone} onChange={(e) => setCustomTimezone(e.target.value)}
+                        style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-primary)", fontSize: "0.82rem", width: "100%" }}>
+                        {[
+                          'Asia/Kolkata','Asia/Singapore','Asia/Tokyo','Asia/Dubai','Asia/Hong_Kong',
+                          'Europe/London','Europe/Paris','Europe/Berlin','Europe/Moscow',
+                          'America/New_York','America/Chicago','America/Denver','America/Los_Angeles',
+                          'America/Sao_Paulo','Australia/Sydney','Pacific/Auckland','UTC',
+                        ].map(tz => <option key={tz} value={tz}>{tz.replace('_', ' ')}</option>)}
+                      </select>
+                    </div>
                   </div>
 
                   {/* End Condition */}
@@ -1118,27 +1135,15 @@ export default function MissionDetailPage() {
                       <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", cursor: "pointer" }}>
                         <input type="radio" name="endCondition" checked={endCondition === 'max_runs'} onChange={() => setEndCondition('max_runs')} style={{ accentColor: "hsl(270,100%,70%)" }} />
                         Run for
-                        <input 
-                          type="number" 
-                          min={1} max={100} 
-                          value={maxRuns}
-                          onChange={(e) => setMaxRuns(parseInt(e.target.value) || 1)}
-                          disabled={endCondition !== 'max_runs'}
-                          style={{ width: 60, padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", background: endCondition === 'max_runs' ? "var(--bg-card)" : "var(--bg-glass)", color: "var(--text-primary)", fontSize: "0.85rem", textAlign: "center" }}
-                        />
+                        <input type="number" min={1} max={100} value={maxRuns} onChange={(e) => setMaxRuns(parseInt(e.target.value) || 1)} disabled={endCondition !== 'max_runs'}
+                          style={{ width: 60, padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", background: endCondition === 'max_runs' ? "var(--bg-card)" : "var(--bg-glass)", color: "var(--text-primary)", fontSize: "0.85rem", textAlign: "center" }} />
                         times
                       </label>
                       <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", cursor: "pointer" }}>
                         <input type="radio" name="endCondition" checked={endCondition === 'end_date'} onChange={() => setEndCondition('end_date')} style={{ accentColor: "hsl(270,100%,70%)" }} />
                         Until
-                        <input 
-                          type="date"
-                          value={endDate}
-                          onChange={(e) => setEndDate(e.target.value)}
-                          disabled={endCondition !== 'end_date'}
-                          min={new Date().toISOString().split('T')[0]}
-                          style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", background: endCondition === 'end_date' ? "var(--bg-card)" : "var(--bg-glass)", color: "var(--text-primary)", fontSize: "0.85rem" }}
-                        />
+                        <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={endCondition !== 'end_date'} min={new Date().toISOString().split('T')[0]}
+                          style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", background: endCondition === 'end_date' ? "var(--bg-card)" : "var(--bg-glass)", color: "var(--text-primary)", fontSize: "0.85rem" }} />
                       </label>
                     </div>
                   </div>
@@ -1148,13 +1153,14 @@ export default function MissionDetailPage() {
                     <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: 4 }}>Preview</div>
                     <div style={{ fontSize: "0.85rem", fontWeight: 500, color: "hsl(270,100%,80%)" }}>
                       {(() => {
-                        const dayLabel = customDay === 'everyday' ? 'Every day' : `Every ${customDay.charAt(0).toUpperCase() + customDay.slice(1)}`;
+                        const dayLabel = customDays.includes('everyday') ? 'Every day' : customDays.map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(' & ');
                         const [h, m] = customTime.split(':').map(Number);
                         const period = h >= 12 ? 'PM' : 'AM';
                         const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
                         const timeLabel = `${h12}:${String(m).padStart(2, '0')} ${period}`;
+                        const tzShort = customTimezone.split('/').pop()?.replace('_', ' ') ?? customTimezone;
                         const endLabel = endCondition === 'forever' ? '' : endCondition === 'max_runs' ? ` • ${maxRuns} runs total` : endDate ? ` • until ${new Date(endDate).toLocaleDateString()}` : '';
-                        return `${dayLabel} at ${timeLabel}${endLabel}`;
+                        return `${dayLabel} at ${timeLabel} ${tzShort}${endLabel}`;
                       })()}
                     </div>
                   </div>
@@ -1169,10 +1175,12 @@ export default function MissionDetailPage() {
                   if (scheduleMode === 'preset') {
                     finalConfig = schedulePreset;
                   } else {
+                    const isEveryday = customDays.includes('everyday');
                     finalConfig = {
                       type: 'custom',
-                      dayOfWeek: customDay,
+                      ...(isEveryday ? {} : { daysOfWeek: customDays }),
                       time: customTime,
+                      timezone: customTimezone,
                       ...(endCondition === 'max_runs' ? { maxRuns } : {}),
                       ...(endCondition === 'end_date' && endDate ? { endDate } : {}),
                     };

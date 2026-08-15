@@ -18,6 +18,24 @@ interface AgentConfig {
  * Sanitize LLM-generated Python code before execution.
  * Fixes common issues like unterminated string literals.
  */
+/** Create an E2B sandbox with automatic retry on transient infrastructure failures. */
+async function createSandboxWithRetry(timeoutMs: number, maxAttempts = 3): Promise<InstanceType<typeof Sandbox>> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await Sandbox.create({ apiKey: process.env.E2B_API_KEY, timeoutMs });
+    } catch (err) {
+      lastErr = err;
+      const msg = (err as Error).message ?? '';
+      const isInfra = /e2b|timeout|connect|network|ECONNRESET|503|502|unavailable/i.test(msg);
+      if (!isInfra || attempt === maxAttempts) throw err;
+      console.warn(`[E2B] Sandbox.create failed (attempt ${attempt}/${maxAttempts}), retrying in ${attempt * 2}s:`, msg);
+      await new Promise(r => setTimeout(r, attempt * 2000));
+    }
+  }
+  throw lastErr;
+}
+
 function sanitizePythonCode(code: string): string {
   // Fix 0: Strip null bytes and other non-printable characters that crash Python's parser
   // Python hard-rejects \x00 with: "source code string cannot contain null bytes"
@@ -322,10 +340,7 @@ async function runRealSideEffects(
     const finalEnvs = { ...sandboxEnvs };
     delete finalEnvs['AF_DRY_RUN'];
 
-    const finalSandbox = await Sandbox.create({
-      apiKey: process.env.E2B_API_KEY,
-      timeoutMs: 120_000,
-    });
+    const finalSandbox = await createSandboxWithRetry(120_000);
 
     try {
       const phase2Pkgs = getRequiredPackages(pythonCode);
@@ -911,10 +926,7 @@ INSTRUCTIONS:
         const syntaxCheckCode = `import ast\ntry:\n    ast.parse(${JSON.stringify(code)})\n    print("SYNTAX_OK")\nexcept SyntaxError as e:\n    print(f"SYNTAX_ERROR:{e.lineno}:{e.msg}:{e.text}")`;
         
         try {
-          const checkSandbox = await Sandbox.create({
-            apiKey: process.env.E2B_API_KEY,
-            timeoutMs: 15_000,
-          });
+          const checkSandbox = await createSandboxWithRetry(15_000);
           const checkResult = await checkSandbox.runCode(syntaxCheckCode);
           await checkSandbox.kill().catch(() => {});
           
@@ -1057,10 +1069,7 @@ matplotlib.use('Agg')
 ${pythonCode}`;
 
       // Execute in E2B cloud sandbox (pre-warmed, <1s start time)
-      const sandbox = await Sandbox.create({
-        apiKey: process.env.E2B_API_KEY,
-        timeoutMs: 120_000,  // 2 minute timeout
-      });
+      const sandbox = await createSandboxWithRetry(120_000);
 
       try {
         // Install only the packages this script actually imports — skip unused heavy deps.

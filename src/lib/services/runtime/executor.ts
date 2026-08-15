@@ -164,7 +164,22 @@ export async function executeMission(
   // This fixes missions created before the auto-grant logic existed, and acts as a universal
   // safety net so the validation gate never rejects a well-connected mission.
   if (mission.permissions?.length > 0 && userTokensRow && userTokensRow.length > 0) {
-    const connectedSlugs = new Set<string>(userTokensRow.map((t: any) => (t.provider as string).toLowerCase()));
+    // Build bidirectional slug set: raw DB provider value + reverse-mapped AF key.
+    // intake.ts already does this at generation time; this safety net must match
+    // so users who connect via the connectors page (Composio slug stored) get the
+    // same auto-grant as users who connect via the inline quick-connect (AF key stored).
+    const { AF_TO_COMPOSIO_APP } = await import('@/lib/services/composio-actions');
+    const connectedSlugs = new Set<string>();
+    for (const t of userTokensRow) {
+      const slug = (t.provider as string).toLowerCase();
+      connectedSlugs.add(slug);
+      // Add the AF key if this slug is a Composio slug (reverse-map)
+      const afKey = Object.entries(AF_TO_COMPOSIO_APP).find(([, v]) => v === slug)?.[0];
+      if (afKey) connectedSlugs.add(afKey);
+      // Add the Composio slug if this is an AF key (forward-map)
+      const composioSlug = AF_TO_COMPOSIO_APP[slug];
+      if (composioSlug) connectedSlugs.add(composioSlug);
+    }
     let anyAutoGranted = false;
     mission.permissions = mission.permissions.map((perm: any) => {
       if (!perm.granted && perm.type === 'composio_oauth') {

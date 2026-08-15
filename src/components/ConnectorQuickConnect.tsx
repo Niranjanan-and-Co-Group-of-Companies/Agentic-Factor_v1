@@ -46,9 +46,18 @@ const KNOWN_CONNECTORS: Record<string, ConnectorInfo> = {
   // ── Marketing ──
   mailchimp:     { label: 'Mailchimp',        icon: '🐒', connectionType: 'composio', composioSlug: 'mailchimp' },
   // ── Paid Advertising ──
-  google_ads:    { label: 'Google Ads',       icon: '🎯', connectionType: 'composio', composioSlug: 'googleads',      helpText: 'Connects Google Ads for keyword research and campaign management. Requires a Google Ads account.' },
-  google_analytics: { label: 'Google Analytics', icon: '📈', connectionType: 'composio', composioSlug: 'googleanalytics', helpText: 'Connects Google Analytics 4 for audience and traffic data.' },
-  facebook_ads:  { label: 'Meta Ads',         icon: '📣', connectionType: 'composio', composioSlug: 'facebookads',   helpText: 'Connects Meta Ads Manager for Facebook and Instagram campaigns. Requires an active Meta Business account.' },
+  google_ads:       { label: 'Google Ads',        icon: '🎯', connectionType: 'composio', composioSlug: 'googleads',       helpText: 'Connects Google Ads for keyword research and campaign management. Requires a Google Ads account.' },
+  google_analytics: { label: 'Google Analytics',  icon: '📈', connectionType: 'composio', composioSlug: 'googleanalytics', helpText: 'Connects Google Analytics 4 for audience and traffic data.' },
+  facebook_ads:     { label: 'Meta Ads',           icon: '📣', connectionType: 'composio', composioSlug: 'facebookads',    helpText: 'Connects Meta Ads Manager for Facebook and Instagram campaigns. Requires an active Meta Business account.' },
+  // ── Content & Video Platforms ──
+  youtube:          { label: 'YouTube',            icon: '▶️',  connectionType: 'composio', composioSlug: 'youtube',        helpText: 'Upload videos, manage playlists, and schedule posts on YouTube.' },
+  buffer:           { label: 'Buffer',             icon: '📅', connectionType: 'composio', composioSlug: 'buffer',         helpText: 'Schedule and publish social media posts across multiple platforms.' },
+  canva:            { label: 'Canva',              icon: '🎨', connectionType: 'composio', composioSlug: 'canva',          helpText: 'Create and export designs, presentations, and graphics.' },
+  // ── AI Creative Generation (API key) ──
+  openai:           { label: 'OpenAI (DALL-E)',    icon: '🖼️',  connectionType: 'apikey',   fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'sk-...' }], helpText: 'Used for DALL-E 3 image generation. Get your key at platform.openai.com' },
+  replicate:        { label: 'Replicate (Flux)',   icon: '✨', connectionType: 'apikey',   fields: [{ key: 'apiKey', label: 'API Token', placeholder: 'r8_...' }], helpText: 'Access Flux, Stable Diffusion, and 100s of other AI models via one key. Get yours at replicate.com' },
+  heygen:           { label: 'HeyGen',             icon: '🎬', connectionType: 'apikey',   fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'Your HeyGen API key' }], helpText: 'AI presenter videos — an avatar reads your script on camera. Great for YouTube and ads. Get key at heygen.com' },
+  runwayml:         { label: 'RunwayML',           icon: '🎥', connectionType: 'apikey',   fields: [{ key: 'apiKey', label: 'API Key', placeholder: 'Your RunwayML API key' }], helpText: 'Text-to-video and image-to-video generation. Best for short clips, intros, and B-roll.' },
   // ── Social Media ──
   twitter:       { label: 'X (Twitter)',      icon: '🐦', connectionType: 'composio', composioSlug: 'twitter' },
   facebook:      { label: 'Facebook',         icon: '👥', connectionType: 'composio', composioSlug: 'facebook' },
