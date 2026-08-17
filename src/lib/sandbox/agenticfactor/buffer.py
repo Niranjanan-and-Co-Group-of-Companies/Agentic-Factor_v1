@@ -1,14 +1,21 @@
 """
 AgenticFactor SDK — Buffer Social Media Module
-Schedule and publish posts to Facebook Pages, Instagram Business, LinkedIn, and Twitter
-via Buffer's pre-approved social media API. No Meta app review required.
+Publish posts to Facebook Pages, Instagram Business, LinkedIn, Twitter, TikTok,
+Threads, Bluesky, Pinterest, and more via Buffer's GraphQL API.
+
+Buffer already has Meta's approval — no separate Facebook/Instagram app review needed.
 
 Usage:
     from agenticfactor import buffer
 
-    profiles = buffer.buffer_get_profiles()
-    linkedin_ids = [p['id'] for p in profiles if p['service'] == 'linkedin']
-    buffer.buffer_post_text(linkedin_ids, "Hello LinkedIn!")
+    # Get all connected social channels
+    channels = buffer.buffer_get_channels()
+    linkedin = [c for c in channels if c['service'] == 'linkedin']
+    facebook = [c for c in channels if c['service'] == 'facebook']
+
+    # Post to LinkedIn and Facebook
+    buffer.buffer_create_post(linkedin[0]['id'], "Hello LinkedIn!")
+    buffer.buffer_create_post(facebook[0]['id'], "Hello Facebook!", now=True)
 """
 import os
 import json
@@ -16,7 +23,7 @@ import time
 import requests
 from typing import Optional, List, Dict, Any
 
-BUFFER_BASE = "https://api.bufferapp.com/1"
+BUFFER_GQL = "https://api.buffer.com"
 
 
 def _token() -> str:
@@ -28,173 +35,251 @@ def _token() -> str:
     return token
 
 
-def _req(method: str, path: str, **kwargs) -> Any:
+def _gql(query: str, variables: Optional[Dict] = None) -> Dict:
+    """Execute a GraphQL query/mutation against the Buffer API."""
     token = _token()
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"}
-    resp = requests.request(
-        method, f"{BUFFER_BASE}{path}",
-        headers=headers, timeout=30, **kwargs
+    resp = requests.post(
+        BUFFER_GQL,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"query": query, "variables": variables or {}},
+        timeout=30,
     )
     if resp.status_code >= 400:
-        try:
-            err = resp.json()
-        except Exception:
-            err = resp.text
-        raise RuntimeError(f"[Buffer] HTTP {resp.status_code}: {err}")
-    try:
-        return resp.json()
-    except Exception:
-        return {"status": resp.status_code, "text": resp.text}
+        raise RuntimeError(f"[Buffer] HTTP {resp.status_code}: {resp.text[:300]}")
+    data = resp.json()
+    if data.get("errors"):
+        raise RuntimeError(f"[Buffer] GraphQL error: {data['errors']}")
+    return data.get("data", {})
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def buffer_get_profiles() -> List[Dict]:
-    """Return all social media profiles connected to this Buffer account.
+def buffer_get_channels() -> List[Dict]:
+    """Return all social media channels connected to this Buffer account.
 
-    Returns list of dicts with keys:
-        id (str)               — profile ID used in post calls
-        service (str)          — 'facebook', 'instagram', 'linkedin', 'twitter', etc.
-        service_username (str) — handle or page name
-        formatted_username (str)
-        avatar (str)           — profile image URL
+    First fetches organization IDs, then fetches channels for each org.
+
+    Returns list of dicts:
+        id (str)           — channel ID used in createPost calls
+        service (str)      — 'facebook', 'instagram', 'linkedin', 'twitter',
+                             'tiktok', 'threads', 'bluesky', 'pinterest', etc.
+        name (str)         — channel display name (page/profile name)
+        displayName (str)  — formatted display name
+        avatar (str)       — profile image URL
+        organizationId (str)
+        isDisconnected (bool)
     """
-    data = _req("GET", "/profiles.json")
-    profiles = []
-    for p in (data if isinstance(data, list) else []):
-        profiles.append({
-            "id": p.get("id", ""),
-            "service": p.get("service", ""),
-            "service_username": p.get("service_username", ""),
-            "formatted_username": p.get("formatted_username", ""),
-            "avatar": p.get("avatar", ""),
-        })
-    return profiles
+    account_data = _gql("query { account { organizations { id name } } }")
+    orgs = account_data.get("account", {}).get("organizations", [])
 
+    all_channels: List[Dict] = []
+    for org in orgs:
+        result = _gql(
+            """
+            query GetChannels($input: ChannelsInput!) {
+              channels(input: $input) {
+                id
+                name
+                displayName
+                service
+                type
+                avatar
+                organizationId
+                isDisconnected
+              }
+            }
+            """,
+            variables={"input": {"organizationId": org["id"]}},
+        )
+        channels = result.get("channels", [])
+        all_channels.extend(
+            {
+                "id": c.get("id", ""),
+                "service": c.get("service", ""),
+                "name": c.get("name", ""),
+                "displayName": c.get("displayName", ""),
+                "avatar": c.get("avatar", ""),
+                "organizationId": c.get("organizationId", ""),
+                "isDisconnected": c.get("isDisconnected", False),
+            }
+            for c in channels
+        )
 
-def buffer_post_text(
-    profile_ids: List[str],
-    text: str,
-    scheduled_at: Optional[str] = None,
-    now: bool = False,
-) -> Dict:
-    """Create a text post on one or more social profiles.
-
-    Args:
-        profile_ids:  List of profile IDs from buffer_get_profiles()
-        text:         Post content (plain text)
-        scheduled_at: ISO 8601 datetime string (e.g. "2024-06-15T09:00:00Z").
-                      If None, post is added to the queue at the next scheduled slot.
-        now:          If True, publish immediately instead of queuing.
-
-    Returns:
-        Buffer API response with update IDs and status.
-    """
-    data: Dict[str, Any] = {"text": text}
-    for i, pid in enumerate(profile_ids):
-        data[f"profile_ids[{i}]"] = pid
-    if scheduled_at:
-        data["scheduled_at"] = scheduled_at
-    if now:
-        data["now"] = "true"
-    return _req("POST", "/updates/create.json", data=data)
-
-
-def buffer_post_image(
-    profile_ids: List[str],
-    text: str,
-    image_url: str,
-    scheduled_at: Optional[str] = None,
-    now: bool = False,
-) -> Dict:
-    """Create an image post on one or more social profiles.
-
-    Args:
-        profile_ids: List of profile IDs from buffer_get_profiles()
-        text:        Post caption/text
-        image_url:   Publicly accessible URL of the image
-        scheduled_at: ISO 8601 datetime to schedule; None = next queue slot
-        now:         If True, publish immediately
-
-    Returns:
-        Buffer API response with update IDs and status.
-    """
-    data: Dict[str, Any] = {
-        "text": text,
-        "media[photo]": image_url,
-        "media[thumbnail]": image_url,
-    }
-    for i, pid in enumerate(profile_ids):
-        data[f"profile_ids[{i}]"] = pid
-    if scheduled_at:
-        data["scheduled_at"] = scheduled_at
-    if now:
-        data["now"] = "true"
-    return _req("POST", "/updates/create.json", data=data)
+    return all_channels
 
 
 def buffer_create_post(
-    profile_ids: List[str],
+    channel_id: str,
     text: str,
-    media: Optional[Dict[str, str]] = None,
+    image_url: Optional[str] = None,
     scheduled_at: Optional[str] = None,
     now: bool = False,
 ) -> Dict:
-    """Unified post creator — handles text-only and media posts.
+    """Create a post on a social channel via Buffer.
 
     Args:
-        profile_ids: List of profile IDs from buffer_get_profiles()
-        text:        Post content
-        media:       Optional dict with keys 'photo' (URL) and/or 'thumbnail' (URL)
-        scheduled_at: ISO 8601 datetime; None = next queue slot
-        now:         If True, publish immediately
+        channel_id:   Channel ID from buffer_get_channels()
+        text:         Post content
+        image_url:    Optional publicly accessible image URL to attach
+        scheduled_at: ISO 8601 UTC datetime to schedule (e.g. "2024-06-15T09:00:00.000Z").
+                      If None and now=False, post is added to the queue at the next slot.
+        now:          If True, publish immediately instead of queuing.
 
     Returns:
-        Buffer API response.
+        Dict with keys: post_id, text, due_at, status
     """
-    data: Dict[str, Any] = {"text": text}
-    for i, pid in enumerate(profile_ids):
-        data[f"profile_ids[{i}]"] = pid
-    if media:
-        if "photo" in media:
-            data["media[photo]"] = media["photo"]
-        if "thumbnail" in media:
-            data["media[thumbnail]"] = media["thumbnail"]
-        if "link" in media:
-            data["media[link]"] = media["link"]
-        if "title" in media:
-            data["media[title]"] = media["title"]
-        if "description" in media:
-            data["media[description]"] = media["description"]
+    mode = "customScheduled" if scheduled_at else "addToQueue"
+    scheduling_type = "automatic"
+
+    variables: Dict[str, Any] = {
+        "input": {
+            "text": text,
+            "channelId": channel_id,
+            "schedulingType": scheduling_type,
+            "mode": mode,
+        }
+    }
     if scheduled_at:
-        data["scheduled_at"] = scheduled_at
-    if now:
-        data["now"] = "true"
-    return _req("POST", "/updates/create.json", data=data)
+        variables["input"]["dueAt"] = scheduled_at
+    if image_url:
+        variables["input"]["assets"] = [{"url": image_url, "type": "image"}]
+
+    query = """
+    mutation CreatePost($input: CreatePostInput!) {
+      createPost(input: $input) {
+        ... on PostActionSuccess {
+          post {
+            id
+            text
+            dueAt
+            status
+          }
+        }
+        ... on MutationError {
+          message
+        }
+      }
+    }
+    """
+    result = _gql(query, variables=variables)
+    post_result = result.get("createPost", {})
+    if "message" in post_result:
+        raise RuntimeError(f"[Buffer] Post creation failed: {post_result['message']}")
+    post = post_result.get("post", {})
+    return {
+        "post_id": post.get("id", ""),
+        "text": post.get("text", ""),
+        "due_at": post.get("dueAt"),
+        "status": post.get("status", ""),
+    }
 
 
-def buffer_get_pending(profile_id: str) -> List[Dict]:
-    """Get all pending (queued) updates for a specific profile.
+def buffer_post_to_multiple(
+    channel_ids: List[str],
+    text: str,
+    image_url: Optional[str] = None,
+    scheduled_at: Optional[str] = None,
+    now: bool = False,
+) -> List[Dict]:
+    """Post the same content to multiple channels.
 
     Args:
-        profile_id: Profile ID from buffer_get_profiles()
+        channel_ids:  List of channel IDs from buffer_get_channels()
+        text:         Post content
+        image_url:    Optional image URL
+        scheduled_at: ISO 8601 UTC datetime to schedule (optional)
+        now:          If True, publish all immediately
 
     Returns:
-        List of pending update dicts.
+        List of results, one per channel, with keys: channel_id, post_id, status, error
     """
-    data = _req("GET", f"/profiles/{profile_id}/updates/pending.json")
-    if isinstance(data, dict):
-        return data.get("updates", [])
-    return data if isinstance(data, list) else []
+    results = []
+    for cid in channel_ids:
+        try:
+            result = buffer_create_post(cid, text, image_url=image_url, scheduled_at=scheduled_at, now=now)
+            results.append({"channel_id": cid, **result})
+        except Exception as e:
+            results.append({"channel_id": cid, "error": str(e)})
+    return results
 
 
-def buffer_delete_update(update_id: str) -> Dict:
-    """Delete a queued (pending) update.
+def buffer_get_posts(channel_id: str, status: str = "queue", first: int = 20) -> List[Dict]:
+    """Get queued or sent posts for a channel.
 
     Args:
-        update_id: The update ID returned by buffer_post_text / buffer_post_image
+        channel_id: Channel ID from buffer_get_channels()
+        status:     'queue' (pending), 'sent', or 'draft'
+        first:      Max number of posts to return (default 20)
+
+    Returns:
+        List of post dicts with keys: id, text, due_at, status
+    """
+    status_map = {"queue": ["pending"], "sent": ["sent"], "draft": ["draft"]}
+    statuses = status_map.get(status, ["pending"])
+
+    result = _gql(
+        """
+        query GetPosts($first: Int, $input: PostsInput!) {
+          posts(first: $first, input: $input) {
+            edges {
+              node {
+                id
+                text
+                dueAt
+                status
+              }
+            }
+          }
+        }
+        """,
+        variables={
+            "first": first,
+            "input": {
+                "filter": {
+                    "status": statuses,
+                    "channelIds": [channel_id],
+                }
+            },
+        },
+    )
+    edges = result.get("posts", {}).get("edges", [])
+    return [
+        {
+            "id": e["node"].get("id", ""),
+            "text": e["node"].get("text", ""),
+            "due_at": e["node"].get("dueAt"),
+            "status": e["node"].get("status", ""),
+        }
+        for e in edges
+        if e.get("node")
+    ]
+
+
+def buffer_delete_post(post_id: str) -> Dict:
+    """Delete a post by ID.
+
+    Args:
+        post_id: Post ID returned by buffer_create_post()
 
     Returns:
         {"success": True} on success.
     """
-    return _req("POST", f"/updates/{update_id}/destroy.json")
+    result = _gql(
+        """
+        mutation DeletePost($input: DeletePostInput!) {
+          deletePost(input: $input) {
+            ... on PostActionSuccess {
+              post { id }
+            }
+            ... on MutationError {
+              message
+            }
+          }
+        }
+        """,
+        variables={"input": {"postId": post_id}},
+    )
+    delete_result = result.get("deletePost", {})
+    if "message" in delete_result:
+        raise RuntimeError(f"[Buffer] Delete failed: {delete_result['message']}")
+    return {"success": True, "deleted_id": post_id}

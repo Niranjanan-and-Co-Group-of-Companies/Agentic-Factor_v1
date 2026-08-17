@@ -311,13 +311,19 @@ async function verifyApiKey(
       case 'buffer': {
         const apiKey = fields.apiKey;
         if (!apiKey) return { verified: false, error: 'Access token is required' };
-        const res = await fetch('https://api.bufferapp.com/1/user.json', {
-          headers: { Authorization: `Bearer ${apiKey}` },
+        // Buffer's new API is GraphQL at api.buffer.com
+        const res = await fetch('https://api.buffer.com', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: '{ account { organizations { id name } } }' }),
         });
-        if (!res.ok) return { verified: false, error: 'Invalid Buffer access token — get one at buffer.com/developers/apps' };
-        const data = await res.json() as { name?: string; email?: string; plan?: string };
-        const plan = data.plan ? ` · Plan: ${data.plan}` : '';
-        return { verified: true, accountInfo: `Account: ${data.name || data.email || 'verified'}${plan}` };
+        if (!res.ok) return { verified: false, error: 'Invalid Buffer access token — get one at publish.buffer.com/settings/api' };
+        const data = await res.json() as { data?: { account?: { organizations?: Array<{ id: string; name: string }> } }; errors?: unknown[] };
+        if (data.errors?.length) return { verified: false, error: 'Invalid Buffer access token — get one at publish.buffer.com/settings/api' };
+        const orgs = data.data?.account?.organizations ?? [];
+        const orgName = orgs[0]?.name || 'Buffer';
+        const channelWord = orgs.length > 1 ? `${orgs.length} organizations` : orgName;
+        return { verified: true, accountInfo: `Connected: ${channelWord}` };
       }
 
       default:

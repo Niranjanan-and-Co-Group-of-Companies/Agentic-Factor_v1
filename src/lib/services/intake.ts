@@ -585,30 +585,90 @@ export async function generateMissionJSON(
     }
   }
 
-  async function getBufferConnected(): Promise<boolean> {
+  async function getBufferContext(): Promise<string> {
     try {
       const supabase = createServiceClient();
-      const { data } = await supabase
+      const { data: row } = await supabase
         .from('tenant_permissions')
-        .select('provider')
+        .select('access_token')
         .eq('tenant_id', tenantId)
         .eq('provider', 'buffer')
         .maybeSingle();
-      return !!data;
-    } catch {
-      return false;
+      if (!row?.access_token) return '';
+
+      const token = row.access_token as string;
+
+      // Step 1: get org IDs
+      const accountRes = await fetch('https://api.buffer.com', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: '{ account { organizations { id name } } }' }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!accountRes.ok) return '';
+      const accountData = await accountRes.json() as { data?: { account?: { organizations?: Array<{ id: string; name: string }> } } };
+      const orgs = accountData.data?.account?.organizations ?? [];
+      if (!orgs.length) return '';
+
+      // Step 2: get channels for each org
+      const allChannels: Array<{ id: string; service: string; name: string; displayName: string }> = [];
+      for (const org of orgs) {
+        const chRes = await fetch('https://api.buffer.com', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: `query { channels(input: { organizationId: "${org.id}" }) { id name displayName service isDisconnected } }`,
+          }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!chRes.ok) continue;
+        const chData = await chRes.json() as { data?: { channels?: Array<{ id: string; service: string; name: string; displayName: string; isDisconnected: boolean }> } };
+        const channels = (chData.data?.channels ?? []).filter(c => !c.isDisconnected);
+        allChannels.push(...channels.map(c => ({ id: c.id, service: c.service, name: c.name || c.displayName, displayName: c.displayName })));
+      }
+
+      if (!allChannels.length) return '';
+
+      // Build context string — analogous to buildComposioActionsContext()
+      const channelLines = allChannels.map(c =>
+        `  - ${c.service.toUpperCase()} "${c.displayName || c.name}" → channelId: "${c.id}"`
+      ).join('\n');
+
+      return `## BUFFER SOCIAL MEDIA — CONNECTED CHANNELS (live from Buffer API)
+The customer has Buffer connected with the following social channels:
+${channelLines}
+
+For ALL social media posting, use buffer.py GraphQL functions (NOT agenticfactor.social, NOT composio_execute):
+  from agenticfactor import buffer
+  # Use the exact channelIds above — no need to call buffer_get_channels() unless the mission is long-running
+  buffer.buffer_create_post("CHANNEL_ID_HERE", post_text)
+  buffer.buffer_post_to_multiple(["ID1", "ID2"], post_text)  # post to multiple at once
+
+Available functions:
+  buffer_get_channels() → list of {id, service, name, displayName}  (call at runtime for fresh IDs)
+  buffer_create_post(channel_id, text, image_url=None, scheduled_at=None) → {post_id, due_at, status}
+  buffer_post_to_multiple(channel_ids, text, image_url=None, scheduled_at=None) → list of results
+  buffer_get_posts(channel_id, status='queue', first=20) → list of queued/sent posts
+  buffer_delete_post(post_id) → {success: True}
+
+Permission: type "api_key", service "buffer". Token env var: BUFFER_API_KEY
+IMPORTANT: Do NOT use agenticfactor.social for posting when Buffer is connected.
+Use composio_execute() for LinkedIn ONLY for CRM/outreach (messages, lead search) — not for posting.`;
+    } catch (err) {
+      console.warn('[intake] Buffer channel fetch failed (non-fatal):', err);
+      return '';
     }
   }
 
   // Run ALL pre-checks in parallel instead of sequentially
-  const [memoryContext, agentTemplateContext, feedbackContext, globalMemory, planConfig, connectedProviders, bufferConnected] = await Promise.all([
+  const [memoryContext, agentTemplateContext, feedbackContext, globalMemory, planConfig, connectedProviders, bufferContext] = await Promise.all([
     searchSimilarMissions(intent, tenantId),
     searchAgentTemplates(intent, tenantId),
     searchFeedbackExamples(intent, tenantId),
     retrieveTenantMemory(tenantId),
     getPlanConfig(tenantId),
     getConnectedProviders(),
-    getBufferConnected(),
+    getBufferContext(),
   ]);
 
   // Fetch Composio action schemas for connected providers (non-blocking — empty string on failure)
@@ -674,37 +734,10 @@ export async function generateMissionJSON(
     messages.push({ role: 'user', content: composioActionsContext });
   }
 
-  // Inject Buffer context — overrides agenticfactor.social for all posting tasks
-  if (bufferConnected) {
-    messages.push({
-      role: 'user',
-      content: `## BUFFER SOCIAL MEDIA — CONNECTED
-The customer has connected Buffer. For ALL social media POSTING (publishing to feeds) — Facebook Pages, Instagram Business, LinkedIn, Twitter — use \`buffer.py\` functions. Do NOT use composio_execute() for social media posting, even if LinkedIn appears in the COMPOSIO ACTIONS section. Use composio_execute() for LinkedIn ONLY for CRM/outreach actions (messages, lead search, profile reads).
-
-Permission: type "api_key", service "buffer". Token env var: BUFFER_API_KEY
-
-Available buffer.py functions (import: \`from agenticfactor import buffer\`):
-- \`buffer.buffer_get_profiles()\` → list of {id, service, service_username, formatted_username}. service is 'facebook', 'instagram', 'linkedin', 'twitter'.
-- \`buffer.buffer_post_text(profile_ids: list, text: str, scheduled_at: str = None, now: bool = False)\` → post text to one or more profiles
-- \`buffer.buffer_post_image(profile_ids: list, text: str, image_url: str, scheduled_at: str = None, now: bool = False)\` → post with image
-- \`buffer.buffer_create_post(profile_ids: list, text: str, media: dict = None, scheduled_at: str = None, now: bool = False)\` → unified post creator
-- \`buffer.buffer_get_pending(profile_id: str)\` → get queued posts for a profile
-- \`buffer.buffer_delete_update(update_id: str)\` → remove a queued post
-
-Example — post to all connected platforms:
-\`\`\`python
-from agenticfactor import buffer
-profiles = buffer.buffer_get_profiles()
-all_ids = [p['id'] for p in profiles]
-linkedin_ids = [p['id'] for p in profiles if p['service'] == 'linkedin']
-facebook_ids = [p['id'] for p in profiles if p['service'] == 'facebook']
-instagram_ids = [p['id'] for p in profiles if p['service'] == 'instagram']
-buffer.buffer_post_text(linkedin_ids, linkedin_post_text)
-buffer.buffer_post_text(facebook_ids + instagram_ids, caption, now=True)
-\`\`\`
-
-IMPORTANT: Do NOT use agenticfactor.social.post_linkedin / post_facebook / post_instagram when Buffer is connected. Always use buffer.py for posting.`,
-    });
+  // Inject live Buffer channel context — replaces agenticfactor.social for all posting tasks.
+  // bufferContext is an empty string when Buffer is not connected (getBufferContext returns '').
+  if (bufferContext) {
+    messages.push({ role: 'user', content: bufferContext });
   }
 
   messages.push({

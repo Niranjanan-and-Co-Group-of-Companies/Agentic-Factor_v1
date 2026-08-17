@@ -174,24 +174,20 @@ __all__ = ["gmail","calendar","drive","sheets","search","files","api","social","
 
 const BUFFER_FALLBACK = `"""
 AgenticFactor SDK — Buffer Social Media Module
-Schedule and publish posts to Facebook Pages, Instagram Business, LinkedIn, and Twitter
-via Buffer's pre-approved social media API. No Meta app review required.
+Publish posts to Facebook Pages, Instagram Business, LinkedIn, Twitter, TikTok,
+Threads, Bluesky, Pinterest, and more via Buffer's GraphQL API.
+Buffer already has Meta's approval — no Facebook/Instagram app review needed.
 
 Usage:
     from agenticfactor import buffer
-
-    profiles = buffer.buffer_get_profiles()
-    linkedin_ids = [p['id'] for p in profiles if p['service'] == 'linkedin']
-    buffer.buffer_post_text(linkedin_ids, "Hello LinkedIn!")
+    channels = buffer.buffer_get_channels()
+    linkedin = [c for c in channels if c['service'] == 'linkedin']
+    buffer.buffer_create_post(linkedin[0]['id'], "Hello LinkedIn!")
 """
-import os
-import json
-import time
-import requests
+import os, json, time, requests
 from typing import Optional, List, Dict, Any
 
-BUFFER_BASE = "https://api.bufferapp.com/1"
-
+BUFFER_GQL = "https://api.buffer.com"
 
 def _token():
     token = os.environ.get("BUFFER_API_KEY", "")
@@ -201,90 +197,85 @@ def _token():
         raise PermissionError("BUFFER_API_KEY not set — connect Buffer in the Connectors page.")
     return token
 
-
-def _req(method, path, **kwargs):
+def _gql(query, variables=None):
     token = _token()
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"}
-    resp = requests.request(method, f"{BUFFER_BASE}{path}", headers=headers, timeout=30, **kwargs)
-    if resp.status_code >= 400:
-        try: err = resp.json()
-        except Exception: err = resp.text
-        raise RuntimeError(f"[Buffer] HTTP {resp.status_code}: {err}")
-    try: return resp.json()
-    except Exception: return {"status": resp.status_code}
+    resp = requests.post(BUFFER_GQL, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json={"query": query, "variables": variables or {}}, timeout=30)
+    if resp.status_code >= 400: raise RuntimeError(f"[Buffer] HTTP {resp.status_code}: {resp.text[:300]}")
+    data = resp.json()
+    if data.get("errors"): raise RuntimeError(f"[Buffer] GraphQL error: {data['errors']}")
+    return data.get("data", {})
 
-
-def buffer_get_profiles():
-    """Return all social media profiles connected to this Buffer account.
-    Returns list of dicts: {id, service, service_username, formatted_username, avatar}
-    service is one of: 'facebook', 'instagram', 'linkedin', 'twitter', 'pinterest'
+def buffer_get_channels():
+    """Return all social channels connected to this Buffer account.
+    First fetches org IDs, then fetches channels for each org.
+    Returns list of dicts: {id, service, name, displayName, avatar, organizationId, isDisconnected}
+    service is one of: 'facebook', 'instagram', 'linkedin', 'twitter', 'tiktok', 'threads', 'bluesky', 'pinterest', etc.
     """
-    data = _req("GET", "/profiles.json")
-    return [{"id": p.get("id",""), "service": p.get("service",""), "service_username": p.get("service_username",""), "formatted_username": p.get("formatted_username",""), "avatar": p.get("avatar","")} for p in (data if isinstance(data, list) else [])]
+    account_data = _gql("query { account { organizations { id name } } }")
+    orgs = account_data.get("account", {}).get("organizations", [])
+    all_channels = []
+    for org in orgs:
+        result = _gql("""
+            query GetChannels($input: ChannelsInput!) {
+              channels(input: $input) { id name displayName service type avatar organizationId isDisconnected }
+            }""", variables={"input": {"organizationId": org["id"]}})
+        all_channels.extend([{"id": c.get("id",""), "service": c.get("service",""), "name": c.get("name",""), "displayName": c.get("displayName",""), "avatar": c.get("avatar",""), "organizationId": c.get("organizationId",""), "isDisconnected": c.get("isDisconnected", False)} for c in result.get("channels", [])])
+    return all_channels
 
-
-def buffer_post_text(profile_ids, text, scheduled_at=None, now=False):
-    """Create a text post on one or more social profiles.
+def buffer_create_post(channel_id, text, image_url=None, scheduled_at=None, now=False):
+    """Create a post on a social channel via Buffer.
     Args:
-        profile_ids: list of profile IDs from buffer_get_profiles()
-        text: post content
-        scheduled_at: ISO 8601 datetime string (optional; None = next queue slot)
-        now: if True, publish immediately instead of queuing
+        channel_id: Channel ID from buffer_get_channels()
+        text: Post content
+        image_url: Optional publicly accessible image URL to attach
+        scheduled_at: ISO 8601 UTC datetime to schedule (optional; None = next queue slot)
+        now: If True, publish immediately
+    Returns dict: {post_id, text, due_at, status}
     """
-    data = {"text": text}
-    for i, pid in enumerate(profile_ids):
-        data[f"profile_ids[{i}]"] = pid
-    if scheduled_at: data["scheduled_at"] = scheduled_at
-    if now: data["now"] = "true"
-    return _req("POST", "/updates/create.json", data=data)
+    inp = {"text": text, "channelId": channel_id, "schedulingType": "automatic", "mode": "customScheduled" if scheduled_at else "addToQueue"}
+    if scheduled_at: inp["dueAt"] = scheduled_at
+    if image_url: inp["assets"] = [{"url": image_url, "type": "image"}]
+    result = _gql("""
+        mutation CreatePost($input: CreatePostInput!) {
+          createPost(input: $input) {
+            ... on PostActionSuccess { post { id text dueAt status } }
+            ... on MutationError { message }
+          }
+        }""", variables={"input": inp})
+    r = result.get("createPost", {})
+    if "message" in r: raise RuntimeError(f"[Buffer] Post failed: {r['message']}")
+    p = r.get("post", {})
+    return {"post_id": p.get("id",""), "text": p.get("text",""), "due_at": p.get("dueAt"), "status": p.get("status","")}
 
+def buffer_post_to_multiple(channel_ids, text, image_url=None, scheduled_at=None, now=False):
+    """Post to multiple channels at once. Returns list of {channel_id, post_id, status} or {channel_id, error}."""
+    results = []
+    for cid in channel_ids:
+        try: results.append({"channel_id": cid, **buffer_create_post(cid, text, image_url=image_url, scheduled_at=scheduled_at, now=now)})
+        except Exception as e: results.append({"channel_id": cid, "error": str(e)})
+    return results
 
-def buffer_post_image(profile_ids, text, image_url, scheduled_at=None, now=False):
-    """Create an image post on one or more social profiles.
-    Args:
-        profile_ids: list of profile IDs from buffer_get_profiles()
-        text: post caption
-        image_url: publicly accessible URL of the image
-        scheduled_at: ISO 8601 datetime string (optional)
-        now: if True, publish immediately
-    """
-    data = {"text": text, "media[photo]": image_url, "media[thumbnail]": image_url}
-    for i, pid in enumerate(profile_ids):
-        data[f"profile_ids[{i}]"] = pid
-    if scheduled_at: data["scheduled_at"] = scheduled_at
-    if now: data["now"] = "true"
-    return _req("POST", "/updates/create.json", data=data)
+def buffer_get_posts(channel_id, status="queue", first=20):
+    """Get queued or sent posts for a channel. status: 'queue', 'sent', or 'draft'. Returns list of {id, text, due_at, status}."""
+    status_map = {"queue": ["pending"], "sent": ["sent"], "draft": ["draft"]}
+    result = _gql("""
+        query GetPosts($first: Int, $input: PostsInput!) {
+          posts(first: $first, input: $input) { edges { node { id text dueAt status } } }
+        }""", variables={"first": first, "input": {"filter": {"status": status_map.get(status, ["pending"]), "channelIds": [channel_id]}}})
+    return [{"id": e["node"].get("id",""), "text": e["node"].get("text",""), "due_at": e["node"].get("dueAt"), "status": e["node"].get("status","")} for e in result.get("posts",{}).get("edges",[]) if e.get("node")]
 
-
-def buffer_create_post(profile_ids, text, media=None, scheduled_at=None, now=False):
-    """Unified post creator — handles text-only and media posts.
-    Args:
-        profile_ids: list of profile IDs from buffer_get_profiles()
-        text: post content
-        media: optional dict with keys photo, thumbnail, link, title, description
-        scheduled_at: ISO 8601 datetime string (optional)
-        now: if True, publish immediately
-    """
-    data = {"text": text}
-    for i, pid in enumerate(profile_ids):
-        data[f"profile_ids[{i}]"] = pid
-    if media:
-        for k in ("photo","thumbnail","link","title","description"):
-            if k in media: data[f"media[{k}]"] = media[k]
-    if scheduled_at: data["scheduled_at"] = scheduled_at
-    if now: data["now"] = "true"
-    return _req("POST", "/updates/create.json", data=data)
-
-
-def buffer_get_pending(profile_id):
-    """Get all pending (queued) updates for a specific profile."""
-    data = _req("GET", f"/profiles/{profile_id}/updates/pending.json")
-    return data.get("updates", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-
-
-def buffer_delete_update(update_id):
-    """Delete a queued update by its ID."""
-    return _req("POST", f"/updates/{update_id}/destroy.json")
+def buffer_delete_post(post_id):
+    """Delete a post by ID. Returns {"success": True}."""
+    result = _gql("""
+        mutation DeletePost($input: DeletePostInput!) {
+          deletePost(input: $input) {
+            ... on PostActionSuccess { post { id } }
+            ... on MutationError { message }
+          }
+        }""", variables={"input": {"postId": post_id}})
+    r = result.get("deletePost", {})
+    if "message" in r: raise RuntimeError(f"[Buffer] Delete failed: {r['message']}")
+    return {"success": True, "deleted_id": post_id}
 `;
 
 const GMAIL_FALLBACK = `"""
