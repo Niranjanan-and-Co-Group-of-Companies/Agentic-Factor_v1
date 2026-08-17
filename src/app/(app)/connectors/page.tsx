@@ -397,6 +397,7 @@ export default function ConnectorsPage() {
           className="input" type="text"
           placeholder={`🔍 Search ${totalItems || "850+"}  integrations (e.g. Gmail, Stripe, CRM...)`}
           value={search} onChange={e => setSearch(e.target.value)}
+          autoComplete="off" name="connector-search"
           style={{ fontSize: "0.9rem" }}
         />
       </div>
@@ -680,7 +681,7 @@ export default function ConnectorsPage() {
                 <label style={{ fontSize: "0.78rem", fontWeight: 600, display: "block", marginBottom: 6 }}>
                   {API_KEY_LABELS[apiKeyModal.slug] ?? "API Key"}
                 </label>
-                <input className="input" type="password" autoComplete="off"
+                <input className="input" type="password" autoComplete="new-password"
                   placeholder={`Paste your ${apiKeyModal.name} API key`}
                   value={apiKeyValue} onChange={e => setApiKeyValue(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && !savingKey && handleApiKeySave()}
