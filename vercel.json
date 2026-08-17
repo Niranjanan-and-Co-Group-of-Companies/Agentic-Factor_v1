@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/mission-watchdog",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/ads-governor",
+      "schedule": "30 1 * * *"
     }
   ]
 }

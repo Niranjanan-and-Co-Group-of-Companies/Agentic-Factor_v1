@@ -1,5 +1,4 @@
 import { callLLM, generateEmbedding } from '../llm-router';
-import { executeTool } from '../tools';
 import { createServiceClient } from '@/lib/supabase/server';
 import { Sandbox } from '@e2b/code-interpreter';
 import { robustJSONParse } from '@/lib/utils/json-parser';
@@ -1021,8 +1020,13 @@ CRITICAL FIX RULES (follow these EXACTLY):
         sandboxEnvs['INPUT_CONTEXT_B64'] = b64;
       }
       for (const token of tokens) {
-        const envKey = `${token.provider.toUpperCase()}_ACCESS_TOKEN`;
-        sandboxEnvs[envKey] = token.access_token;
+        const providerKey = token.provider.toUpperCase();
+        sandboxEnvs[`${providerKey}_ACCESS_TOKEN`] = token.access_token;
+        // For locally-stored API keys (not Composio-managed placeholders), also inject
+        // as _API_KEY so Python modules like creative.py can find them with either name.
+        if (token.access_token !== 'composio_managed') {
+          sandboxEnvs[`${providerKey}_API_KEY`] = token.access_token;
+        }
       }
       // Inject API keys for search and other services
       if (process.env.TAVILY_API_KEY) sandboxEnvs['TAVILY_API_KEY'] = process.env.TAVILY_API_KEY;

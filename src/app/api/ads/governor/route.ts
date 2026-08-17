@@ -2,8 +2,12 @@
  * Autonomous Paid Ads Budget Governor
  *
  * Called daily by the cron scheduler for any mission with type=paid_ads.
- * Reads live campaign stats from connected ad platforms, updates cumulative
- * spend state in the events table, and decides:
+ * Reads live campaign stats from connected ad platforms via dynamic Composio
+ * action discovery — no hardcoded action names. Discovers available toolkit
+ * actions at runtime, selects the best stats action, executes it, and uses
+ * the LLM to interpret the response into standard metrics.
+ *
+ * Decision logic:
  *   - CONTINUE: performance is acceptable, budget remaining
  *   - PAUSE:    budget exhausted or performance too poor for too long
  *   - REWRITE:  poor performance for N days → generate new ad copy
@@ -17,13 +21,18 @@ import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 import { inngest } from '@/lib/inngest/client';
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 // ── Thresholds ──────────────────────────────────────────────
-const POOR_CTR_THRESHOLD = 0.005;       // <0.5% CTR is poor
-const POOR_ROAS_THRESHOLD = 1.0;        // ROAS <1 means losing money
-const MAX_POOR_DAYS_BEFORE_REWRITE = 3; // Rewrite after 3 consecutive bad days
-const MIN_SPEND_FOR_JUDGEMENT = 500;    // Don't judge until ₹500+ spent
+const POOR_CTR_THRESHOLD = 0.005;
+const POOR_ROAS_THRESHOLD = 1.0;
+const MAX_POOR_DAYS_BEFORE_REWRITE = 3;
+const MIN_SPEND_FOR_JUDGEMENT = 500;
+
+const COMPOSIO_API_BASE = 'https://backend.composio.dev';
+
+// Keywords that identify campaign-stats actions in any toolkit
+const STATS_KEYWORDS = ['stat', 'insight', 'metric', 'report', 'spend', 'performance', 'analytic'];
 
 export interface AdsGovernorState {
   missionId: string;
@@ -120,7 +129,6 @@ export async function POST(request: NextRequest) {
 
 // ── PATCH — run the daily check ──────────────────────────────
 export async function PATCH(request: NextRequest) {
-  // Support internal cron calls that pass x-tenant-id header
   const internalTenantId = request.headers.get('x-tenant-id');
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = request.headers.get('authorization');
@@ -140,7 +148,6 @@ export async function PATCH(request: NextRequest) {
 
   const supabase = createServiceClient();
 
-  // Load current governor state
   const { data: stateRow } = await supabase
     .from('events')
     .select('payload')
@@ -160,11 +167,9 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ decision: state.status, message: 'Governor is not active', state });
   }
 
-  // Fetch live stats from ad platforms via Composio
   const stats = await fetchLiveCampaignStats(tenantId, state);
   const today = new Date().toISOString().split('T')[0];
 
-  // Determine today's performance
   const totalDailySpend = stats.googleSpend + stats.metaSpend;
   state.cumulativeSpend += totalDailySpend;
 
@@ -174,7 +179,6 @@ export async function PATCH(request: NextRequest) {
     stats.metaCtr < POOR_CTR_THRESHOLD &&
     (stats.googleRoas === null || stats.googleRoas < POOR_ROAS_THRESHOLD);
 
-  // Budget exhaustion check
   const budgetExhausted = state.cumulativeSpend >= state.totalBudget;
 
   let decision: AdsGovernorState['history'][0]['decision'] = 'continue';
@@ -186,7 +190,6 @@ export async function PATCH(request: NextRequest) {
     state.consecutivePoorDays++;
     if (state.consecutivePoorDays >= MAX_POOR_DAYS_BEFORE_REWRITE) {
       if (state.rewriteCount >= 2) {
-        // Already tried rewriting twice — pause and report
         decision = 'pause';
         state.status = 'paused';
       } else {
@@ -214,7 +217,6 @@ export async function PATCH(request: NextRequest) {
   });
   state.lastCheckAt = new Date().toISOString();
 
-  // Persist updated state
   await supabase.from('events').upsert({
     tenant_id: tenantId,
     event_type: 'ads.governor.state',
@@ -223,7 +225,6 @@ export async function PATCH(request: NextRequest) {
     payload: state,
   }, { onConflict: 'tenant_id,entity_id,event_type' });
 
-  // Log the check as an audit event
   await supabase.from('events').insert({
     tenant_id: tenantId,
     event_type: 'ads.governor.check',
@@ -238,9 +239,7 @@ export async function PATCH(request: NextRequest) {
     },
   });
 
-  // Act on the decision
   if (decision === 'pause' || decision === 'rewrite') {
-    // Fire a mission to pause campaigns via Composio + optionally trigger rewrite
     await inngest.send({
       name: 'mission.execute',
       data: {
@@ -258,14 +257,24 @@ export async function PATCH(request: NextRequest) {
         },
       },
     }).catch((err: unknown) => {
-      console.error('[Ads Governor] Failed to fire Inngest:', err);
+      console.error('[AdsGovernor] Failed to fire Inngest:', err);
     });
   }
 
   return NextResponse.json({ decision, state, stats });
 }
 
-// ── Helpers ──────────────────────────────────────────────────
+// ── Dynamic campaign stats fetching ──────────────────────────
+
+interface ComposioActionSchema {
+  slug: string;
+  name: string;
+  description: string;
+  input_parameters?: {
+    properties?: Record<string, { type?: string; description?: string }>;
+    required?: string[];
+  };
+}
 
 interface CampaignStats {
   googleSpend: number;
@@ -278,85 +287,270 @@ interface CampaignStats {
   error?: string;
 }
 
+// 30-minute cache for toolkit action lists (same TTL as composio-actions.ts)
+const governorActionCache = new Map<string, { actions: ComposioActionSchema[]; expiresAt: number }>();
+
+async function fetchToolkitActions(toolkit: string, apiKey: string): Promise<ComposioActionSchema[]> {
+  const cached = governorActionCache.get(toolkit);
+  if (cached && cached.expiresAt > Date.now()) return cached.actions;
+
+  const allActions: ComposioActionSchema[] = [];
+  const PAGE_SIZE = 100;
+  let offset = 0;
+
+  try {
+    while (true) {
+      const url = `${COMPOSIO_API_BASE}/api/v3.1/tools?toolkit_slug=${toolkit}&limit=${PAGE_SIZE}&offset=${offset}`;
+      const res = await fetch(url, {
+        headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) {
+        console.warn(`[AdsGovernor] ${toolkit} offset=${offset}: HTTP ${res.status}`);
+        break;
+      }
+      const data = await res.json() as { items?: ComposioActionSchema[] };
+      const items = data.items ?? [];
+      allActions.push(...items);
+      if (items.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+      if (allActions.length >= 1000) break;
+    }
+  } catch (err) {
+    console.warn(`[AdsGovernor] Error fetching ${toolkit} actions:`, err);
+  }
+
+  governorActionCache.set(toolkit, { actions: allActions, expiresAt: Date.now() + 30 * 60 * 1000 });
+  console.log(`[AdsGovernor] Discovered ${allActions.length} actions for ${toolkit}`);
+  return allActions;
+}
+
+/**
+ * Pick the best campaign-stats action from a toolkit's action list.
+ * Scores by keyword match in slug and description — no hardcoded names.
+ */
+function selectStatsAction(actions: ComposioActionSchema[]): ComposioActionSchema | null {
+  const scored = actions
+    .map(a => {
+      const text = `${a.slug} ${a.description ?? ''}`.toLowerCase();
+      const kwHits = STATS_KEYWORDS.filter(kw => text.includes(kw)).length;
+      // Bonus for slug-level matches (more specific)
+      const slugHits = STATS_KEYWORDS.filter(kw => a.slug.toLowerCase().includes(kw)).length;
+      return { action: a, score: kwHits + slugHits * 2 };
+    })
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0]?.action ?? null;
+}
+
+/**
+ * Build input parameters for any stats action using common parameter-name patterns.
+ * Covers the parameter schemas used by Google Ads, Meta Ads, and most ad platforms.
+ */
+function buildActionParams(
+  action: ComposioActionSchema,
+  campaignIds: string[],
+  dateRange: { start: string; end: string },
+): Record<string, unknown> {
+  const props = action.input_parameters?.properties ?? {};
+  const required = action.input_parameters?.required ?? [];
+  const params: Record<string, unknown> = {};
+
+  for (const param of required) {
+    const p = param.toLowerCase();
+    if (p.includes('campaign_id') || p.includes('campaignid') || p.includes('campaign_ids')) {
+      params[param] = campaignIds.length === 1 ? campaignIds[0] : campaignIds;
+    } else if (p === 'start_date' || p === 'start' || p === 'from' || p === 'date_from') {
+      params[param] = dateRange.start;
+    } else if (p === 'end_date' || p === 'end' || p === 'until' || p === 'to' || p === 'date_to') {
+      params[param] = dateRange.end;
+    } else if (p.includes('date_range') || p.includes('daterange')) {
+      params[param] = { start_date: dateRange.start, end_date: dateRange.end };
+    } else if (p.includes('time_range') || p.includes('timerange')) {
+      params[param] = { since: dateRange.start, until: dateRange.end };
+    } else if ((p.includes('date') && !p.includes('start') && !p.includes('end'))) {
+      params[param] = dateRange.start;
+    } else if (p === 'fields' || p === 'metrics' || p === 'columns') {
+      // Request the fields we care about — string or array depending on schema type
+      const fieldList = ['spend', 'impressions', 'clicks', 'actions', 'action_values', 'cost_micros', 'conversions_value'];
+      params[param] = props[param]?.type === 'string' ? fieldList.join(',') : fieldList;
+    }
+  }
+
+  return params;
+}
+
+/**
+ * Execute a Composio action via the REST API.
+ * Uses the tenant's Composio entity (user_id = tenantId set at connection time).
+ */
+async function executeComposioAction(
+  action: string,
+  params: Record<string, unknown>,
+  apiKey: string,
+  tenantId: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch(`${COMPOSIO_API_BASE}/api/v1/actions/${action}/execute`, {
+      method: 'POST',
+      headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connectedAccountId: tenantId, input: params }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) {
+      console.warn(`[AdsGovernor] Action ${action} returned HTTP ${res.status}`);
+      return null;
+    }
+    const data = await res.json() as { data?: Record<string, unknown> };
+    return data.data ?? null;
+  } catch (err) {
+    console.warn(`[AdsGovernor] Action ${action} failed:`, err);
+    return null;
+  }
+}
+
+/**
+ * Use the LLM to extract spend/impressions/clicks/roas from any ad platform
+ * API response — handles different field names across Google Ads, Meta, etc.
+ */
+async function interpretStatsWithLLM(
+  platform: string,
+  rawResponse: Record<string, unknown> | null,
+  date: string,
+): Promise<{ spend: number; impressions: number; clicks: number; roas: number | null } | null> {
+  if (!rawResponse) return null;
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!geminiKey && !openaiKey) return null;
+
+  const prompt = `You are extracting ad campaign performance metrics from a ${platform} API response for ${date}.
+
+Raw response:
+${JSON.stringify(rawResponse).slice(0, 3000)}
+
+Return ONLY valid JSON with these four fields. Use 0 for missing numbers, null for uncomputable roas:
+{"spend": <number>, "impressions": <number>, "clicks": <number>, "roas": <number|null>}
+
+Notes:
+- spend: total money spent (divide micros by 1,000,000 if needed)
+- roas: conversions_value / spend (null if no conversion data)`;
+
+  try {
+    let text = '';
+
+    if (geminiKey) {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 200 },
+          }),
+          signal: AbortSignal.timeout(15_000),
+        }
+      );
+      const data = await res.json() as { candidates?: Array<{ content: { parts: Array<{ text: string }> } }> };
+      text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    } else {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          response_format: { type: 'json_object' },
+          max_tokens: 200,
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const data = await res.json() as { choices?: Array<{ message: { content: string } }> };
+      text = data.choices?.[0]?.message?.content ?? '';
+    }
+
+    const parsed = JSON.parse(text) as { spend?: number; impressions?: number; clicks?: number; roas?: number | null };
+    return {
+      spend: Number(parsed.spend ?? 0),
+      impressions: Number(parsed.impressions ?? 0),
+      clicks: Number(parsed.clicks ?? 0),
+      roas: parsed.roas != null ? Number(parsed.roas) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch live campaign performance stats from any connected ad platform.
+ *
+ * Fully dynamic: discovers available actions from the Composio toolkit at
+ * runtime, selects the best stats action by keyword scoring, builds
+ * parameters from the action's schema, executes it, and uses the LLM to
+ * parse the raw response — no hardcoded action names or response fields.
+ */
 async function fetchLiveCampaignStats(
   tenantId: string,
   state: AdsGovernorState,
 ): Promise<CampaignStats> {
   const composioApiKey = process.env.COMPOSIO_API_KEY;
 
-  if (!composioApiKey || (!state.campaignIds.google?.length && !state.campaignIds.meta?.length)) {
-    return {
-      googleSpend: 0, metaSpend: 0,
-      googleCtr: 0, metaCtr: 0,
-      googleRoas: null, metaRoas: null,
-      source: 'unavailable',
-      error: 'No campaign IDs registered with governor or no Composio key',
-    };
+  if (!composioApiKey) {
+    return { googleSpend: 0, metaSpend: 0, googleCtr: 0, metaCtr: 0, googleRoas: null, metaRoas: null, source: 'unavailable', error: 'COMPOSIO_API_KEY not configured' };
+  }
+  if (!state.campaignIds.google?.length && !state.campaignIds.meta?.length) {
+    return { googleSpend: 0, metaSpend: 0, googleCtr: 0, metaCtr: 0, googleRoas: null, metaRoas: null, source: 'unavailable', error: 'No campaign IDs registered with governor' };
   }
 
-  // Use Composio to fetch spend and performance stats
-  const COMPOSIO_API_BASE = 'https://backend.composio.dev';
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().split('T')[0];
 
-  async function executeComposioAction(
-    action: string,
-    params: Record<string, unknown>,
-  ): Promise<Record<string, unknown> | null> {
-    try {
-      const res = await fetch(`${COMPOSIO_API_BASE}/api/v1/actions/${action}/execute`, {
-        method: 'POST',
-        headers: { 'x-api-key': composioApiKey!, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connectedAccountId: tenantId, input: params }),
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (!res.ok) return null;
-      const data = await res.json() as { data?: Record<string, unknown> };
-      return data.data ?? null;
-    } catch {
-      return null;
-    }
-  }
-
+  // ── Google Ads ────────────────────────────────────────────────
   let googleSpend = 0;
   let googleCtr = 0;
   let googleRoas: number | null = null;
 
   if (state.campaignIds.google?.length) {
-    // GOOGLEADS_LIST_CAMPAIGN_STATS or similar — fetch yesterday's metrics
-    const yesterday = new Date(Date.now() - 86_400_000).toISOString().split('T')[0];
-    const googleStats = await executeComposioAction('GOOGLEADS_GET_CAMPAIGN_STATS', {
-      campaign_ids: state.campaignIds.google,
-      date_range: { start_date: yesterday, end_date: yesterday },
-    });
+    const googleActions = await fetchToolkitActions('googleads', composioApiKey);
+    const statsAction = selectStatsAction(googleActions);
 
-    if (googleStats) {
-      googleSpend = Number(googleStats.cost_micros ?? 0) / 1_000_000;
-      const impressions = Number(googleStats.impressions ?? 0);
-      const clicks = Number(googleStats.clicks ?? 0);
-      googleCtr = impressions > 0 ? clicks / impressions : 0;
-      const conversionsValue = Number(googleStats.conversions_value ?? 0);
-      googleRoas = googleSpend > 0 ? conversionsValue / googleSpend : null;
+    if (statsAction) {
+      console.log(`[AdsGovernor] Google Ads → using action: ${statsAction.slug}`);
+      const params = buildActionParams(statsAction, state.campaignIds.google, { start: yesterday, end: yesterday });
+      const raw = await executeComposioAction(statsAction.slug, params, composioApiKey, tenantId);
+      const stats = await interpretStatsWithLLM('Google Ads', raw, yesterday);
+      if (stats) {
+        googleSpend = stats.spend;
+        googleCtr = stats.impressions > 0 ? stats.clicks / stats.impressions : 0;
+        googleRoas = stats.roas;
+      }
+    } else {
+      console.warn('[AdsGovernor] No stats action found in googleads toolkit');
     }
   }
 
+  // ── Meta / Facebook Ads ───────────────────────────────────────
   let metaSpend = 0;
   let metaCtr = 0;
   let metaRoas: number | null = null;
 
   if (state.campaignIds.meta?.length) {
-    const yesterday = new Date(Date.now() - 86_400_000).toISOString().split('T')[0];
-    const metaStats = await executeComposioAction('FACEBOOKADS_GET_CAMPAIGN_INSIGHTS', {
-      campaign_ids: state.campaignIds.meta,
-      time_range: { since: yesterday, until: yesterday },
-      fields: ['spend', 'impressions', 'clicks', 'actions', 'action_values'],
-    });
+    const metaActions = await fetchToolkitActions('facebookads', composioApiKey);
+    const statsAction = selectStatsAction(metaActions);
 
-    if (metaStats) {
-      metaSpend = Number(metaStats.spend ?? 0);
-      const impressions = Number(metaStats.impressions ?? 0);
-      const clicks = Number(metaStats.clicks ?? 0);
-      metaCtr = impressions > 0 ? clicks / impressions : 0;
-      const purchaseValue = Number(metaStats.purchase_value ?? 0);
-      metaRoas = metaSpend > 0 ? purchaseValue / metaSpend : null;
+    if (statsAction) {
+      console.log(`[AdsGovernor] Meta Ads → using action: ${statsAction.slug}`);
+      const params = buildActionParams(statsAction, state.campaignIds.meta, { start: yesterday, end: yesterday });
+      const raw = await executeComposioAction(statsAction.slug, params, composioApiKey, tenantId);
+      const stats = await interpretStatsWithLLM('Meta Ads', raw, yesterday);
+      if (stats) {
+        metaSpend = stats.spend;
+        metaCtr = stats.impressions > 0 ? stats.clicks / stats.impressions : 0;
+        metaRoas = stats.roas;
+      }
+    } else {
+      console.warn('[AdsGovernor] No stats action found in facebookads toolkit');
     }
   }
 

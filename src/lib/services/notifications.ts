@@ -132,7 +132,7 @@ export async function notifyConnectorRequest(
   userId: string,
   userEmail: string | null
 ): Promise<void> {
-  const adminEmail = process.env.ADMIN_EMAIL || process.env.SMTP2GO_SENDER || 'admin@agentfactory.dev';
+  const adminEmail = process.env.ADMIN_EMAIL || 'niranjanant7@gmail.com';
 
   await sendEmail({
     to: adminEmail,

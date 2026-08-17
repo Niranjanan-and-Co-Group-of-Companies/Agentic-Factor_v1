@@ -246,7 +246,7 @@ export default function DashboardPage() {
                     {m.score !== null && (
                       <div style={{ textAlign: "right" }}>
                         <div style={{ fontSize: "1.1rem", fontWeight: 800, color: m.score >= 0.8 ? "var(--emerald)" : m.score >= 0.6 ? "var(--amber)" : "var(--rose)" }}>{(m.score * 100).toFixed(0)}%</div>
-                        <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>success</div>
+                        <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>health</div>
                       </div>
                     )}
                   </div>

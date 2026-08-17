@@ -14,12 +14,18 @@ const KNOWN_PROVIDERS = [
   'slack', 'github', 'notion', 'discord', 'zoho',
   'whatsapp', 'messenger', 'azure', 'teams', 'stripe', 'shopify',
   'hubspot', 'salesforce', 'airtable', 'asana',
+  // Paid advertising + analytics
+  'google_ads', 'google_analytics', 'facebook_ads',
+  // Content, video & creative
+  'youtube', 'buffer', 'canva', 'elevenlabs', 'heygen', 'runwayml',
 ] as const;
 
 // Keywords → provider mappings. Order matters: more specific matches first.
 const PROVIDER_KEYWORDS: Array<{ keywords: string[]; provider: string }> = [
   { keywords: ['twitter', 'tweet', 'x.com', 'x/twitter', 'twitter/x'], provider: 'twitter' },
   { keywords: ['instagram', 'insta', 'ig '], provider: 'instagram' },
+  // facebook_ads before facebook so "facebook ads" / "meta ads" matches first
+  { keywords: ['facebook ads', 'meta ads', 'fb ads', 'facebookads'], provider: 'facebook_ads' },
   { keywords: ['facebook', 'fb ', 'graph api', 'meta '], provider: 'facebook' },
   { keywords: ['whatsapp', 'whats app'], provider: 'whatsapp' },
   { keywords: ['messenger', 'fb messenger'], provider: 'messenger' },
@@ -37,7 +43,16 @@ const PROVIDER_KEYWORDS: Array<{ keywords: string[]; provider: string }> = [
   { keywords: ['salesforce', 'sales force', 'sfdc'], provider: 'salesforce' },
   { keywords: ['airtable', 'air table'], provider: 'airtable' },
   { keywords: ['asana'], provider: 'asana' },
+  // google_ads and google_analytics before google so they match before the broad 'google' catch-all
+  { keywords: ['google ads', 'googleads', 'google adwords', 'adwords'], provider: 'google_ads' },
+  { keywords: ['google analytics', 'googleanalytics', 'ga4', 'google analytics 4'], provider: 'google_analytics' },
+  { keywords: ['youtube', 'yt channel', 'youtube channel', 'youtube automation'], provider: 'youtube' },
   { keywords: ['google', 'gmail', 'gdrive', 'google drive', 'google calendar', 'google sheets', 'gcp', 'workspace'], provider: 'google' },
+  { keywords: ['buffer'], provider: 'buffer' },
+  { keywords: ['canva'], provider: 'canva' },
+  { keywords: ['elevenlabs', 'eleven labs', 'eleven lab', 'el text to speech'], provider: 'elevenlabs' },
+  { keywords: ['heygen', 'hey gen', 'heygen ai'], provider: 'heygen' },
+  { keywords: ['runway', 'runwayml', 'runway ml', 'runway gen'], provider: 'runwayml' },
 ];
 
 /**
@@ -550,15 +565,21 @@ export async function generateMissionJSON(
   // ── LLM Path (always used — template hint gives it a head start) ──
   const { getPlanConfig } = await import('@/lib/middleware/billing');
 
-  // Fetch connected providers for this tenant (for Composio action schemas)
+  // Fetch connected providers for this tenant.
+  // Returns ONLY Composio-managed OAuth connections (access_token = 'composio_managed').
+  // API-key connectors are excluded: they don't have Composio action schemas, and
+  // composio_execute() would fail for them since there is no Composio OAuth session.
+  // Those connectors get their keys injected as env vars in agent-loop.ts instead.
   async function getConnectedProviders(): Promise<string[]> {
     try {
       const supabase = createServiceClient();
       const { data } = await supabase
         .from('tenant_permissions')
-        .select('provider')
+        .select('provider, access_token')
         .eq('tenant_id', tenantId);
-      return (data ?? []).map((r: { provider: string }) => r.provider);
+      return (data ?? [])
+        .filter((r: { provider: string; access_token: string }) => r.access_token === 'composio_managed')
+        .map((r: { provider: string }) => r.provider);
     } catch {
       return [];
     }
