@@ -585,14 +585,30 @@ export async function generateMissionJSON(
     }
   }
 
+  async function getBufferConnected(): Promise<boolean> {
+    try {
+      const supabase = createServiceClient();
+      const { data } = await supabase
+        .from('tenant_permissions')
+        .select('provider')
+        .eq('tenant_id', tenantId)
+        .eq('provider', 'buffer')
+        .maybeSingle();
+      return !!data;
+    } catch {
+      return false;
+    }
+  }
+
   // Run ALL pre-checks in parallel instead of sequentially
-  const [memoryContext, agentTemplateContext, feedbackContext, globalMemory, planConfig, connectedProviders] = await Promise.all([
+  const [memoryContext, agentTemplateContext, feedbackContext, globalMemory, planConfig, connectedProviders, bufferConnected] = await Promise.all([
     searchSimilarMissions(intent, tenantId),
     searchAgentTemplates(intent, tenantId),
     searchFeedbackExamples(intent, tenantId),
     retrieveTenantMemory(tenantId),
     getPlanConfig(tenantId),
     getConnectedProviders(),
+    getBufferConnected(),
   ]);
 
   // Fetch Composio action schemas for connected providers (non-blocking — empty string on failure)
@@ -656,6 +672,39 @@ export async function generateMissionJSON(
   // Inject Composio action schemas for the tenant's connected providers
   if (composioActionsContext) {
     messages.push({ role: 'user', content: composioActionsContext });
+  }
+
+  // Inject Buffer context — overrides agenticfactor.social for all posting tasks
+  if (bufferConnected) {
+    messages.push({
+      role: 'user',
+      content: `## BUFFER SOCIAL MEDIA — CONNECTED
+The customer has connected Buffer. For ALL social media POSTING (publishing to feeds) — Facebook Pages, Instagram Business, LinkedIn, Twitter — use \`buffer.py\` functions. Do NOT use composio_execute() for social media posting, even if LinkedIn appears in the COMPOSIO ACTIONS section. Use composio_execute() for LinkedIn ONLY for CRM/outreach actions (messages, lead search, profile reads).
+
+Permission: type "api_key", service "buffer". Token env var: BUFFER_API_KEY
+
+Available buffer.py functions (import: \`from agenticfactor import buffer\`):
+- \`buffer.buffer_get_profiles()\` → list of {id, service, service_username, formatted_username}. service is 'facebook', 'instagram', 'linkedin', 'twitter'.
+- \`buffer.buffer_post_text(profile_ids: list, text: str, scheduled_at: str = None, now: bool = False)\` → post text to one or more profiles
+- \`buffer.buffer_post_image(profile_ids: list, text: str, image_url: str, scheduled_at: str = None, now: bool = False)\` → post with image
+- \`buffer.buffer_create_post(profile_ids: list, text: str, media: dict = None, scheduled_at: str = None, now: bool = False)\` → unified post creator
+- \`buffer.buffer_get_pending(profile_id: str)\` → get queued posts for a profile
+- \`buffer.buffer_delete_update(update_id: str)\` → remove a queued post
+
+Example — post to all connected platforms:
+\`\`\`python
+from agenticfactor import buffer
+profiles = buffer.buffer_get_profiles()
+all_ids = [p['id'] for p in profiles]
+linkedin_ids = [p['id'] for p in profiles if p['service'] == 'linkedin']
+facebook_ids = [p['id'] for p in profiles if p['service'] == 'facebook']
+instagram_ids = [p['id'] for p in profiles if p['service'] == 'instagram']
+buffer.buffer_post_text(linkedin_ids, linkedin_post_text)
+buffer.buffer_post_text(facebook_ids + instagram_ids, caption, now=True)
+\`\`\`
+
+IMPORTANT: Do NOT use agenticfactor.social.post_linkedin / post_facebook / post_instagram when Buffer is connected. Always use buffer.py for posting.`,
+    });
   }
 
   messages.push({

@@ -167,9 +167,124 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
 
 const INIT_FALLBACK = `
 __version__ = "1.2.0"
-from . import gmail, calendar, drive, sheets, search, files, api, social, creative
+from . import gmail, calendar, drive, sheets, search, files, api, social, creative, buffer
 from ._core import ask_user, notify_user, schedule_check, composio_execute
-__all__ = ["gmail","calendar","drive","sheets","search","files","api","social","creative","ask_user","notify_user","schedule_check","composio_execute"]
+__all__ = ["gmail","calendar","drive","sheets","search","files","api","social","creative","buffer","ask_user","notify_user","schedule_check","composio_execute"]
+`;
+
+const BUFFER_FALLBACK = `"""
+AgenticFactor SDK — Buffer Social Media Module
+Schedule and publish posts to Facebook Pages, Instagram Business, LinkedIn, and Twitter
+via Buffer's pre-approved social media API. No Meta app review required.
+
+Usage:
+    from agenticfactor import buffer
+
+    profiles = buffer.buffer_get_profiles()
+    linkedin_ids = [p['id'] for p in profiles if p['service'] == 'linkedin']
+    buffer.buffer_post_text(linkedin_ids, "Hello LinkedIn!")
+"""
+import os
+import json
+import time
+import requests
+from typing import Optional, List, Dict, Any
+
+BUFFER_BASE = "https://api.bufferapp.com/1"
+
+
+def _token():
+    token = os.environ.get("BUFFER_API_KEY", "")
+    if not token:
+        signal = {"__missing_permission__": {"provider": "buffer", "timestamp": time.time()}}
+        print(f"__SIGNAL__:{json.dumps(signal)}")
+        raise PermissionError("BUFFER_API_KEY not set — connect Buffer in the Connectors page.")
+    return token
+
+
+def _req(method, path, **kwargs):
+    token = _token()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"}
+    resp = requests.request(method, f"{BUFFER_BASE}{path}", headers=headers, timeout=30, **kwargs)
+    if resp.status_code >= 400:
+        try: err = resp.json()
+        except Exception: err = resp.text
+        raise RuntimeError(f"[Buffer] HTTP {resp.status_code}: {err}")
+    try: return resp.json()
+    except Exception: return {"status": resp.status_code}
+
+
+def buffer_get_profiles():
+    """Return all social media profiles connected to this Buffer account.
+    Returns list of dicts: {id, service, service_username, formatted_username, avatar}
+    service is one of: 'facebook', 'instagram', 'linkedin', 'twitter', 'pinterest'
+    """
+    data = _req("GET", "/profiles.json")
+    return [{"id": p.get("id",""), "service": p.get("service",""), "service_username": p.get("service_username",""), "formatted_username": p.get("formatted_username",""), "avatar": p.get("avatar","")} for p in (data if isinstance(data, list) else [])]
+
+
+def buffer_post_text(profile_ids, text, scheduled_at=None, now=False):
+    """Create a text post on one or more social profiles.
+    Args:
+        profile_ids: list of profile IDs from buffer_get_profiles()
+        text: post content
+        scheduled_at: ISO 8601 datetime string (optional; None = next queue slot)
+        now: if True, publish immediately instead of queuing
+    """
+    data = {"text": text}
+    for i, pid in enumerate(profile_ids):
+        data[f"profile_ids[{i}]"] = pid
+    if scheduled_at: data["scheduled_at"] = scheduled_at
+    if now: data["now"] = "true"
+    return _req("POST", "/updates/create.json", data=data)
+
+
+def buffer_post_image(profile_ids, text, image_url, scheduled_at=None, now=False):
+    """Create an image post on one or more social profiles.
+    Args:
+        profile_ids: list of profile IDs from buffer_get_profiles()
+        text: post caption
+        image_url: publicly accessible URL of the image
+        scheduled_at: ISO 8601 datetime string (optional)
+        now: if True, publish immediately
+    """
+    data = {"text": text, "media[photo]": image_url, "media[thumbnail]": image_url}
+    for i, pid in enumerate(profile_ids):
+        data[f"profile_ids[{i}]"] = pid
+    if scheduled_at: data["scheduled_at"] = scheduled_at
+    if now: data["now"] = "true"
+    return _req("POST", "/updates/create.json", data=data)
+
+
+def buffer_create_post(profile_ids, text, media=None, scheduled_at=None, now=False):
+    """Unified post creator — handles text-only and media posts.
+    Args:
+        profile_ids: list of profile IDs from buffer_get_profiles()
+        text: post content
+        media: optional dict with keys photo, thumbnail, link, title, description
+        scheduled_at: ISO 8601 datetime string (optional)
+        now: if True, publish immediately
+    """
+    data = {"text": text}
+    for i, pid in enumerate(profile_ids):
+        data[f"profile_ids[{i}]"] = pid
+    if media:
+        for k in ("photo","thumbnail","link","title","description"):
+            if k in media: data[f"media[{k}]"] = media[k]
+    if scheduled_at: data["scheduled_at"] = scheduled_at
+    if now: data["now"] = "true"
+    return _req("POST", "/updates/create.json", data=data)
+
+
+def buffer_get_pending(profile_id):
+    """Get all pending (queued) updates for a specific profile."""
+    data = _req("GET", f"/profiles/{profile_id}/updates/pending.json")
+    return data.get("updates", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+
+
+def buffer_delete_update(update_id):
+    """Delete a queued update by its ID."""
+    return _req("POST", f"/updates/{update_id}/destroy.json")
 `;
 
 const GMAIL_FALLBACK = `"""
@@ -1967,6 +2082,7 @@ const SDK_FILES: { name: string; fallback: string }[] = [
   { name: 'files.py', fallback: FILES_FALLBACK },
   { name: 'social.py', fallback: SOCIAL_FALLBACK },
   { name: 'creative.py', fallback: CREATIVE_FALLBACK },
+  { name: 'buffer.py', fallback: BUFFER_FALLBACK },
 ];
 
 /**

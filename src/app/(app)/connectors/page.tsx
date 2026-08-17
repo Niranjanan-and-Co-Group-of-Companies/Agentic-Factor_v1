@@ -45,7 +45,23 @@ const API_KEY_LABELS: Record<string, string> = {
   zendesk: "API Token",
   bamboohr: "API Key",
   firebase: "Web API Key",
+  buffer: "Access Token (from buffer.com/developers/apps)",
 };
+
+// Hardcoded Buffer toolkit card — not in Composio catalog
+const BUFFER_TOOLKIT: Toolkit = {
+  slug: "buffer",
+  name: "Buffer",
+  logo: "https://buffer.com/favicon.ico",
+  description: "Schedule and publish to Facebook Pages, Instagram Business, LinkedIn, and Twitter. The recommended way to post to social media — no Meta app review required.",
+  categories: ["social-media"],
+  tools_count: 6,
+  auth_schemes: ["BEARER_TOKEN"],
+  no_auth: false,
+};
+
+// Search terms that should show the Buffer social media guidance banner
+const SOCIAL_SEARCH_TERMS = ["facebook", "instagram", "meta", "fb ", "insta"];
 
 function getSupabase() {
   return createBrowserClient(
@@ -194,6 +210,10 @@ export default function ConnectorsPage() {
   }, [toolkits, activeCategory, search, connectedSlugs]);
 
   const connectedCount = toolkits.filter(tk => connectedSlugs.has(tk.slug)).length;
+
+  const showSocialBanner = SOCIAL_SEARCH_TERMS.some(t => search.toLowerCase().includes(t));
+  const bufferConnected = connectedSlugs.has("buffer");
+  const showBufferCard = !search.trim() || search.toLowerCase().includes("buffer") || showSocialBanner;
 
   // ── Handlers ──────────────────────────────────────────────
   const handleConnect = async (tk: Toolkit) => {
@@ -393,8 +413,25 @@ export default function ConnectorsPage() {
         ))}
       </div>
 
+      {/* ── Social Media Guidance Banner ── */}
+      {showSocialBanner && (
+        <div className="card" style={{ marginBottom: "var(--space-lg)", borderColor: "hsla(38,92%,55%,0.3)", background: "hsla(38,92%,55%,0.06)" }}>
+          <div className="row" style={{ gap: "var(--space-md)" }}>
+            <span style={{ fontSize: "1.4rem", flexShrink: 0 }}>💡</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: "0.9rem", marginBottom: 4, color: "var(--amber)" }}>
+                For Facebook & Instagram posting, use Buffer
+              </div>
+              <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                Meta&apos;s API requires a verified Business Manager app to post to Facebook Pages or Instagram. Buffer already has this approval — connect Buffer once and your agents can post to Facebook, Instagram, LinkedIn, and Twitter without any extra setup.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── No results ── */}
-      {filtered.length === 0 && (
+      {filtered.length === 0 && !showBufferCard && (
         <div className="card" style={{ textAlign: "center", padding: "var(--space-2xl)" }}>
           <div style={{ fontSize: "2.5rem", marginBottom: "var(--space-md)" }}>🔍</div>
           <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}>No results for &ldquo;{search}&rdquo;</h2>
@@ -403,9 +440,72 @@ export default function ConnectorsPage() {
           </p>
         </div>
       )}
+      {filtered.length === 0 && showBufferCard && !showSocialBanner && (
+        <div className="card" style={{ textAlign: "center", padding: "var(--space-xl)", marginBottom: "var(--space-md)" }}>
+          <div style={{ fontSize: "2rem", marginBottom: "var(--space-sm)" }}>🔍</div>
+          <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>No other results for &ldquo;{search}&rdquo; — but Buffer is available below.</p>
+        </div>
+      )}
 
       {/* ── Toolkit Grid ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "var(--space-md)" }}>
+        {/* ── Pinned Buffer Card ── */}
+        {showBufferCard && (() => {
+          const tk = BUFFER_TOOLKIT;
+          return (
+            <div key="buffer" className="card" style={{
+              padding: "var(--space-lg)",
+              transition: "all 0.2s",
+              ...(bufferConnected ? { borderColor: "hsla(152,69%,50%,0.35)" } : { borderColor: "hsla(38,92%,55%,0.25)" }),
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--space-sm)" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={tk.logo}
+                    alt={tk.name}
+                    width={36} height={36}
+                    style={{ borderRadius: 8, objectFit: "contain", background: "var(--bg-glass)", padding: 2 }}
+                    onError={e => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=Buffer&size=36&background=3b82f6&color=fff&bold=true&length=2`; }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: "0.9rem", lineHeight: 1.2 }}>Buffer</div>
+                    <div style={{ fontSize: "0.65rem", color: "var(--amber)", textTransform: "uppercase", letterSpacing: "0.4px", marginTop: 2 }}>social media</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                  {bufferConnected
+                    ? <span className="badge badge-green" style={{ fontSize: "0.6rem" }}>✓ Connected</span>
+                    : <span className="badge" style={{ fontSize: "0.55rem", color: "var(--amber)", borderColor: "var(--amber)", padding: "1px 5px" }}>API Key</span>
+                  }
+                  <span className="badge" style={{ fontSize: "0.55rem", color: "var(--accent)", borderColor: "var(--accent)", padding: "1px 5px" }}>Recommended</span>
+                </div>
+              </div>
+              <p style={{ fontSize: "0.77rem", color: "var(--text-secondary)", lineHeight: 1.5, minHeight: 34, marginBottom: "var(--space-sm)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                {tk.description}
+              </p>
+              {bufferConnected && userEmail && (
+                <div style={{ padding: "4px 10px", background: "var(--emerald-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.7rem", color: "var(--emerald)", marginBottom: "var(--space-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  🔒 {userEmail}
+                </div>
+              )}
+              <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginBottom: "var(--space-sm)" }}>
+                Facebook · Instagram · LinkedIn · Twitter · Pinterest
+              </div>
+              {bufferConnected ? (
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "hsla(0,84%,60%,0.25)" }}
+                  onClick={() => handleDisconnect(tk)}>
+                  Disconnect
+                </button>
+              ) : (
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--amber)", borderColor: "hsla(38,92%,55%,0.3)" }}
+                  onClick={() => handleApiKeyOpen(tk)}>
+                  🔑 Add Access Token →
+                </button>
+              )}
+            </div>
+          );
+        })()}
         {filtered.map(tk => {
           const connected = connectedSlugs.has(tk.slug);
           const isConnecting = connecting === tk.slug;

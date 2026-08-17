@@ -308,6 +308,18 @@ async function verifyApiKey(
         return { verified: true, accountInfo: `Store: ${data.shop?.name ?? shop}` };
       }
 
+      case 'buffer': {
+        const apiKey = fields.apiKey;
+        if (!apiKey) return { verified: false, error: 'Access token is required' };
+        const res = await fetch('https://api.bufferapp.com/1/user.json', {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (!res.ok) return { verified: false, error: 'Invalid Buffer access token — get one at buffer.com/developers/apps' };
+        const data = await res.json() as { name?: string; email?: string; plan?: string };
+        const plan = data.plan ? ` · Plan: ${data.plan}` : '';
+        return { verified: true, accountInfo: `Account: ${data.name || data.email || 'verified'}${plan}` };
+      }
+
       default:
         // For providers without a verify endpoint, skip verification and trust the user
         return { verified: true, accountInfo: 'Credentials saved (not verified)' };
