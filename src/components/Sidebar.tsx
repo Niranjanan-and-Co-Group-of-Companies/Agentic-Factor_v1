@@ -19,13 +19,14 @@ const NAV_ITEMS = [
   { href: "/dashboard",       icon: "✦",  label: "Command Center" },
   { href: "/connectors",      icon: "🔌", label: "Connectors"     },
   { href: "/dashboard/usage", icon: "📈", label: "Usage & Credits" },
+  { href: "/pricing",         icon: "🏷️", label: "Plans & Pricing" },
   { href: "/permissions",     icon: "🔑", label: "Credentials"    },
   { href: "/audit-logs",      icon: "📜", label: "Audit Logs"     },
 ];
 
 const BOTTOM_LINKS = [
-  { href: "/settings/team", icon: "👥", label: "Team" },
-  { href: "/contact",       icon: "💬", label: "Support"          },
+  { href: "/settings/team", icon: "👥", label: "Team"    },
+  { href: "/contact",       icon: "💬", label: "Support" },
 ];
 
 export default function Sidebar() {
