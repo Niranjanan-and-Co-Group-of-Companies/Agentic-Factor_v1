@@ -12,6 +12,7 @@ const PLATFORM_CHAT_SENTINEL = '00000000-0000-0000-0000-000000000000';
 async function buildCommandContext(tenantId: string): Promise<{
   systemPrompt: string;
   proactiveAlert: string | null;
+  connectedProviders: string[];
 }> {
   const supabase = createServiceClient();
   const now = new Date();
@@ -135,7 +136,7 @@ Current state summary for your context:
 - Draft missions: ${draftMissions.length}
 - Total credits remaining: ${billing ? (billing.credits_remaining + (billing.credits_topup ?? 0)) : 'unknown'}`;
 
-  return { systemPrompt, proactiveAlert };
+  return { systemPrompt, proactiveAlert, connectedProviders };
 }
 
 function inferAgentIcon(role: string, toolTypes: string[]): string {
@@ -197,7 +198,7 @@ export async function POST(request: NextRequest) {
 
   // ── First-load probe: build context, emit proactive alert, no LLM call ──
   if (isFirstLoad && (!messages || messages.length === 0)) {
-    const { proactiveAlert } = await buildCommandContext(tenantId);
+    const { proactiveAlert } = await buildCommandContext(tenantId); // connectedProviders not needed for first-load probe
     const enc = new TextEncoder();
     const stream = new ReadableStream({
       start(controller) {
@@ -230,7 +231,7 @@ export async function POST(request: NextRequest) {
     return new Response(JSON.stringify({ error: 'LLM not configured' }), { status: 500 });
   }
 
-  const { systemPrompt } = await buildCommandContext(tenantId);
+  const { systemPrompt, connectedProviders: tenantProviders } = await buildCommandContext(tenantId);
   const recentMessages = messages.slice(-20);
   const encoder = new TextEncoder();
 
@@ -337,12 +338,25 @@ export async function POST(request: NextRequest) {
                   trustLevel: a.trustLevel,
                 }));
 
+              // Deterministically compute missing connectors from blueprint permissions
+              const seen = new Set<string>();
+              const missingConnectors = result.mission.permissions
+                .filter(p => !tenantProviders.includes(p.service))
+                .reduce<Array<{ service: string; reason: string }>>((acc, p) => {
+                  if (!seen.has(p.service)) {
+                    seen.add(p.service);
+                    acc.push({ service: p.service, reason: p.scope });
+                  }
+                  return acc;
+                }, []);
+
               actionPayload = {
                 type: 'mission_created',
                 missionId: saved.id,
                 missionTitle: saved.title,
                 agents: agentCards,
                 orchestrationPattern: result.mission.orchestration.pattern,
+                missingConnectors,
               };
             } else if (result.isDiscovery && result.question) {
               actionPayload = { type: 'discovery_question', question: result.question };

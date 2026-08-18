@@ -17,6 +17,7 @@ interface ChatMessage {
   ts?: number;
 }
 interface AgentCard { name: string; icon?: string; role: string; tool?: string; trustLevel?: string; }
+interface MissingConnector { service: string; reason: string; }
 interface ActionPayload {
   type: string;
   missionId?: string;
@@ -32,6 +33,7 @@ interface ActionPayload {
   error?: string;
   agents?: AgentCard[];
   orchestrationPattern?: string;
+  missingConnectors?: MissingConnector[];
 }
 interface MissionShortcut { id: string; title: string; status: string; }
 interface LiveRun {
@@ -99,6 +101,40 @@ const CONNECTOR_LABELS: Record<string, string> = {
   hubspot: 'HubSpot', shopify: 'Shopify', linkedin: 'LinkedIn',
   google: 'Google', sheets: 'Google Sheets', discord: 'Discord',
 };
+
+const CONNECTOR_META: Record<string, { label: string; icon: string }> = {
+  google: { label: 'Google', icon: '🔵' },
+  gmail: { label: 'Gmail', icon: '📧' },
+  buffer: { label: 'Buffer', icon: '📢' },
+  openai: { label: 'OpenAI', icon: '🤖' },
+  slack: { label: 'Slack', icon: '💬' },
+  github: { label: 'GitHub', icon: '🐙' },
+  notion: { label: 'Notion', icon: '📝' },
+  hubspot: { label: 'HubSpot', icon: '🎯' },
+  shopify: { label: 'Shopify', icon: '🛍️' },
+  linkedin_oidc: { label: 'LinkedIn', icon: '💼' },
+  linkedin: { label: 'LinkedIn', icon: '💼' },
+  discord: { label: 'Discord', icon: '🎮' },
+  youtube: { label: 'YouTube', icon: '🎬' },
+  twitter: { label: 'Twitter / X', icon: '🐦' },
+  facebook: { label: 'Facebook', icon: '📘' },
+  instagram: { label: 'Instagram', icon: '📸' },
+  canva: { label: 'Canva', icon: '🎨' },
+  stripe: { label: 'Stripe', icon: '💳' },
+  salesforce: { label: 'Salesforce', icon: '☁️' },
+  airtable: { label: 'Airtable', icon: '📊' },
+  asana: { label: 'Asana', icon: '✅' },
+  gemini: { label: 'Gemini', icon: '✦' },
+  elevenlabs: { label: 'ElevenLabs', icon: '🔊' },
+  heygen: { label: 'HeyGen', icon: '🎥' },
+  runwayml: { label: 'Runway ML', icon: '🎞️' },
+  facebook_ads: { label: 'Meta Ads', icon: '📣' },
+  google_ads: { label: 'Google Ads', icon: '📣' },
+  google_analytics: { label: 'Google Analytics', icon: '📈' },
+  whatsapp: { label: 'WhatsApp', icon: '💬' },
+  zoho: { label: 'Zoho', icon: '🗂️' },
+};
+const connectorMeta = (s: string) => CONNECTOR_META[s] ?? { label: s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), icon: '🔌' };
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
@@ -541,6 +577,54 @@ function CommandCenterPageInner() {
             )) : (
               <div style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--text-muted)', paddingLeft: 4 }}>
                 Agents will appear here after the mission is configured.
+              </div>
+            )}
+
+            {/* ── Connector status ── */}
+            {action.missingConnectors !== undefined && (
+              <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>
+                  Required Connectors
+                </div>
+                {action.missingConnectors.length === 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: 'var(--emerald)', fontWeight: 600 }}>
+                    <span>✅</span> All connectors ready — you can run now
+                  </div>
+                ) : (
+                  <>
+                    {action.missingConnectors.map((c, i) => {
+                      const meta = connectorMeta(c.service);
+                      return (
+                        <div key={i} style={{
+                          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5,
+                          padding: '7px 10px', borderRadius: 'var(--radius-sm)',
+                          background: 'hsla(0,84%,60%,0.06)',
+                          border: '1px solid hsla(0,84%,60%,0.18)',
+                        }}>
+                          <span style={{ fontSize: '1rem', flexShrink: 0 }}>{meta.icon}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '0.77rem', fontWeight: 700, color: 'var(--text-primary)' }}>{meta.label}</div>
+                            <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.reason}</div>
+                          </div>
+                          <button
+                            onClick={() => router.push('/connectors')}
+                            style={{
+                              background: 'none', border: '1px solid hsla(0,84%,60%,0.35)',
+                              color: 'var(--rose)', borderRadius: 'var(--radius-sm)',
+                              padding: '3px 10px', fontSize: '0.7rem', fontWeight: 700,
+                              cursor: 'pointer', flexShrink: 0, fontFamily: 'var(--font-sans)',
+                            }}
+                          >
+                            Connect →
+                          </button>
+                        </div>
+                      );
+                    })}
+                    <div style={{ fontSize: '0.68rem', color: 'var(--amber)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span>⚠️</span> Connect the above before running
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
