@@ -14,6 +14,7 @@ interface ChatMessage {
   content: string;
   action_payload?: ActionPayload | null;
   isStreaming?: boolean;
+  processingAction?: string;
   ts?: number;
 }
 interface AgentCard { name: string; icon?: string; role: string; tool?: string; trustLevel?: string; }
@@ -332,7 +333,18 @@ function CommandCenterPageInner() {
             };
             if (evt.type === 'delta' && evt.text) {
               streamed += evt.text;
-              setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: streamed, isStreaming: true }; return u; });
+              // Strip complete and incomplete <action> blocks — never show raw JSON to user
+              let displayText = streamed
+                .replace(/<action>[\s\S]*?<\/action>/g, '')
+                .replace(/<action>[\s\S]*$/, '')
+                .trim();
+              // Detect which action type is being generated so we can show the right loading card
+              let processingAction: string | undefined;
+              if (/<action>/.test(streamed)) {
+                const m = streamed.match(/"type"\s*:\s*"([^"]+)"/);
+                processingAction = m ? m[1] : 'pending';
+              }
+              setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: displayText, isStreaming: true, processingAction }; return u; });
             }
             if (evt.type === 'done') {
               const final = evt.cleanText ?? streamed;
@@ -420,6 +432,86 @@ function CommandCenterPageInner() {
   };
 
   // ── Action Card Renderer ───────────────────────────────────────────────────
+  // ── Processing card (shown while server builds the action result) ─────────────
+  const renderProcessingCard = (actionType: string) => {
+    type CfgEntry = { icon: string; title: string; sub: string; steps?: string[] };
+    const cfg: Record<string, CfgEntry> = {
+      create_mission: {
+        icon: '✨', title: 'Building Mission Blueprint',
+        sub: 'Designing your agent pipeline — takes 15–30 s',
+        steps: ['Structuring agent roles & capabilities', 'Wiring tool connections', 'Verifying required connectors'],
+      },
+      run_mission:      { icon: '▶',  title: 'Launching Mission',    sub: 'Dispatching your agents…' },
+      schedule_mission: { icon: '📅', title: 'Applying Schedule',     sub: 'Configuring run timing…' },
+      pause_mission:    { icon: '⏸',  title: 'Pausing Mission',       sub: 'Halting scheduled runs…' },
+      resume_mission:   { icon: '▶',  title: 'Resuming Mission',      sub: 'Re-enabling the schedule…' },
+      suggest_connector:{ icon: '🔗', title: 'Checking Connector',    sub: 'Looking up integration details…' },
+      pending:          { icon: '⟳',  title: 'Processing',            sub: 'One moment…' },
+    };
+    const c: CfgEntry = cfg[actionType] ?? cfg.pending;
+
+    return (
+      <div style={{ marginTop: 10, maxWidth: 520, animation: 'slideIn 0.3s ease', fontFamily: 'var(--font-sans)' }}>
+        <div style={{
+          background: 'var(--bg-card)', border: '1px solid hsla(217,91%,60%,0.2)',
+          borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10,
+        }}>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+              background: 'linear-gradient(135deg,#3B82F6,#8B5CF6)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '0.9rem', animation: 'pulse 1.5s ease-in-out infinite',
+            }}>{c.icon}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)' }}>{c.title}</div>
+              <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', marginTop: 2 }}>{c.sub}</div>
+            </div>
+            {/* Bouncing dots */}
+            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+              {[0, 1, 2].map(i => (
+                <div key={i} style={{
+                  width: 6, height: 6, borderRadius: '50%', background: '#3B82F6',
+                  animation: `af-dot 1.2s ease-in-out ${i * 0.18}s infinite`,
+                }} />
+              ))}
+            </div>
+          </div>
+
+          {/* Indeterminate progress bar */}
+          <div style={{ position: 'relative', height: 3, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
+            <div style={{
+              position: 'absolute', top: 0, height: '100%',
+              background: 'linear-gradient(90deg,#3B82F6,#8B5CF6)',
+              borderRadius: 99, animation: 'af-bar 1.6s cubic-bezier(0.4,0,0.6,1) infinite',
+            }} />
+          </div>
+
+          {/* Steps — only for create_mission */}
+          {c.steps && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {c.steps.map((step, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{
+                    width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                    background: i === 0 ? '#3B82F6' : 'var(--border)',
+                    animation: i === 0 ? 'pulse 1s ease-in-out infinite' : undefined,
+                  }} />
+                  <div style={{
+                    fontSize: '0.67rem', fontWeight: i === 0 ? 600 : 400,
+                    color: i === 0 ? 'var(--text-primary)' : 'var(--text-muted)',
+                    opacity: i === 0 ? 1 : 0.5,
+                  }}>{step}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderActionCard = (action: ActionPayload, msgIndex: number) => {
     const applying = applyingAction === msgIndex;
     const btnStyle: React.CSSProperties = {
@@ -922,8 +1014,9 @@ function CommandCenterPageInner() {
                     border: msg.role === 'assistant' ? '1px solid var(--border)' : 'none',
                   }}>
                     {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
-                    {msg.isStreaming && <span style={{ display: 'inline-block', width: 8, height: 16, background: 'var(--accent)', marginLeft: 3, borderRadius: 2, animation: 'pulse 1s infinite', verticalAlign: 'text-bottom' }} />}
+                    {msg.isStreaming && !msg.processingAction && <span style={{ display: 'inline-block', width: 8, height: 16, background: 'var(--accent)', marginLeft: 3, borderRadius: 2, animation: 'pulse 1s infinite', verticalAlign: 'text-bottom' }} />}
                   </div>
+                  {msg.role === 'assistant' && msg.isStreaming && msg.processingAction && renderProcessingCard(msg.processingAction)}
                   {msg.role === 'assistant' && msg.action_payload && !msg.isStreaming && renderActionCard(msg.action_payload as ActionPayload, i)}
                 </div>
               ))}
