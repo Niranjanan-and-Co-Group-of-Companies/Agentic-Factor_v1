@@ -41,7 +41,7 @@ export const CREDIT_COSTS = {
   embedding: 2,           // Embedding generation (was 0.5)
   ingest_chunk: 0.4,      // RAG document chunk (was 0.1)
   schedule_daily: 4,      // Per scheduled mission per day (was 1)
-  tool_call: 1,           // Composio API tool call (4x markup on ~₹0.012 cost = guaranteed 48x+ margin)
+  tool_call: 3,           // Composio API tool call (~$0.005/action × 4 markup × ₹86 ÷ ₹1/credit = 3 credits → 85% margin)
 } as const;
 
 // ── Token-Based Billing: Real Cost per 1K tokens (USD) ──

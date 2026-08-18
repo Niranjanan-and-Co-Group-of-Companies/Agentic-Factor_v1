@@ -24,6 +24,24 @@ export async function POST(
     isFirstLoad?: boolean;
   };
 
+  // First-load probe: build context, emit proactive alert if any, no LLM call, no credits
+  if (isFirstLoad && (!messages || messages.length === 0)) {
+    const { proactiveAlert } = await buildChatContext(missionId, tenantId, true);
+    const enc = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        if (proactiveAlert) {
+          controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'proactive_alert', proactiveAlert })}\n\n`));
+        }
+        controller.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+        controller.close();
+      },
+    });
+    return new Response(stream, {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+    });
+  }
+
   if (!messages || messages.length === 0) {
     return new Response(JSON.stringify({ error: 'messages required' }), { status: 400 });
   }
