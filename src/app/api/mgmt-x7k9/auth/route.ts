@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
         path: '/',
       });
       cookieStore.set('admin_email', email, {
-        httpOnly: false, // Readable by client for UI
+        httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         maxAge: 60 * 60 * 8,

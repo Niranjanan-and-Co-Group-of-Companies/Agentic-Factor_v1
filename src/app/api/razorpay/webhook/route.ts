@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
             await supabase.from('tenant_billing').insert({
               tenant_id: tenantId,
               plan: 'free',
-              billing_status: 'inactive',
+              billing_status: 'trialing',
               credits_remaining: 0,
               credits_total: 0,
               credits_topup: 0,

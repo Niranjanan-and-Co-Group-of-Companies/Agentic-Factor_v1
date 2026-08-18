@@ -61,9 +61,12 @@ export async function POST(request: NextRequest) {
 }
 
 // ============================================================
-// GET /api/approvals — Get circuit breaker status
+// GET /api/approvals — Get circuit breaker status (admin/internal only)
 // ============================================================
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const authResult = await extractTenantContext(request);
+  if (isAuthError(authResult)) return authResult;
+
   return NextResponse.json({
     circuitState: circuitBreaker.getState(),
     usage: circuitBreaker.getUsage(),

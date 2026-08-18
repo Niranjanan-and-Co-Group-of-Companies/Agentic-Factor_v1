@@ -27,6 +27,18 @@ export async function POST(request: NextRequest) {
     }
     const isSilentCheckin = message === SYSTEM_CHECKIN_TOKEN;
 
+    // ── Credit pre-check (skip for silent system check-ins) ──
+    if (!isSilentCheckin) {
+      const { checkCredits } = await import('@/lib/middleware/billing');
+      const creditCheck = await checkCredits(tenantId, 2);
+      if (!creditCheck.allowed) {
+        return NextResponse.json(
+          { error: 'Insufficient credits', reply: 'You have run out of credits. Please top up or upgrade your plan to continue.' },
+          { status: 402 }
+        );
+      }
+    }
+
     const supabase = createServiceClient();
 
     // Fetch the mission to ensure it belongs to the tenant
@@ -195,11 +207,21 @@ You MUST respond in valid JSON format matching this schema:
       { role: 'user', content: userTurnContent }
     ], { jsonMode: true, temperature: 0.2, tier: 2 });
 
+    // ── Deduct credits proportionally after LLM responds ──
+    if (!isSilentCheckin) {
+      const { calculateChatCreditCost, deductCredits } = await import('@/lib/middleware/billing');
+      const cost = await calculateChatCreditCost(
+        response.inputTokens ?? 0,
+        response.outputTokens ?? 0,
+        response.model ?? 'claude-sonnet-4-6',
+      );
+      deductCredits(tenantId, cost, 'mission_chat').catch(console.error);
+    }
+
     let parsedResponse: any;
     try {
       parsedResponse = safeJSONParse(response.content, { reply: response.content });
     } catch {
-      // LLM returned non-JSON, use content as-is
       parsedResponse = { reply: response.content };
     }
 

@@ -80,9 +80,9 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // 4. Transition status back to running
+    // 4. Transition status back to active (must match DB CHECK constraint)
     const { transitionMissionStatus } = await import('@/lib/services/orchestrator');
-    await transitionMissionStatus(missionId, tenantId, 'running');
+    await transitionMissionStatus(missionId, tenantId, 'active');
 
     // 5. Resume execution — inject the answer into context and continue from the paused agent
     // The answer gets appended to the previous output so the agent can use it
@@ -104,16 +104,17 @@ export async function POST(request: NextRequest) {
       payload: { missionId, output: enrichedContext },
     });
 
-    // 6. Trigger re-execution from the NEXT agent (the current agent already produced output)
-    // The Inngest scheduler or cron will pick this up, but we can also trigger it directly
+    // 6. Dispatch Inngest event to resume execution safely within Vercel's timeout limits.
+    //    Direct executeMission() call was removed — it bypasses Inngest and gets killed
+    //    by Vercel's 10-second serverless timeout on long-running missions.
     try {
-      const { executeMission } = await import('@/lib/services/runtime/executor');
-      // Fire and forget — don't wait for the full execution
-      executeMission(missionId, tenantId).catch((err) => {
-        console.error(`[Resume] Mission re-execution failed:`, err);
+      const { inngest } = await import('@/lib/inngest/client');
+      await inngest.send({
+        name: 'mission.execute',
+        data: { missionId, tenantId, resumedFrom: agentRole ?? agentId },
       });
     } catch (execErr) {
-      console.error('[Resume] Failed to trigger execution:', execErr);
+      console.error('[Resume] Failed to dispatch Inngest event:', execErr);
     }
 
     return NextResponse.json({ 

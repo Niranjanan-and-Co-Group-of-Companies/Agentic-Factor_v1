@@ -116,18 +116,21 @@ export default function DashboardPage() {
     setLoading(false);
   };
 
-  const handleStartMission = async (missionId: string) => {
+  const handleStartMission = async (missionId: string, missionStatus: string) => {
     try {
-      const res = await fetch(`/api/missions/${missionId}/execute`, { method: "POST" });
+      // Draft missions must go through /run (provisions agents first),
+      // all other statuses use /execute (re-run existing agents).
+      const endpoint = missionStatus === 'draft'
+        ? `/api/missions/${missionId}/run`
+        : `/api/missions/${missionId}/execute`;
+      const res = await fetch(endpoint, { method: "POST" });
       if (res.status === 403) {
-        // Missing permissions, redirect to detail page where JIT OAuth popup handles it
         window.location.href = `/dashboard/missions/${missionId}`;
         return;
       }
       if (!res.ok) {
         throw new Error("Failed to start mission");
       }
-      // Immediately refresh to see starting events
       fetchData();
     } catch (err) {
       console.error(err);
@@ -231,7 +234,7 @@ export default function DashboardPage() {
                       <div className="row" style={{ gap: "var(--space-sm)", alignItems: "center" }}>
                         <div style={{ fontWeight: 600, fontSize: "1rem" }}>{m.title}</div>
                         {m.status === "draft" ? (
-                          <button className="btn btn-primary btn-sm" onClick={(e) => { e.preventDefault(); handleStartMission(m.id); }}>
+                          <button className="btn btn-primary btn-sm" onClick={(e) => { e.preventDefault(); handleStartMission(m.id, m.status); }}>
                             ▶ Start Mission
                           </button>
                         ) : null}
