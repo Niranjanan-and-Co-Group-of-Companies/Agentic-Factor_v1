@@ -378,11 +378,12 @@ export async function POST(request: NextRequest) {
             chat_id: chatId, tenant_id: tenantId, role: userMsg.role, content: userMsg.content,
           });
           if (ue) { console.error('[command-chat/persist user]', ue); return; }
-          await supabase.from('mission_chat_messages').insert({
+          const { error: ae } = await supabase.from('mission_chat_messages').insert({
             chat_id: chatId, tenant_id: tenantId, role: 'assistant', content: cleanText,
             action_payload: actionPayload, input_tokens: inputTokens,
             output_tokens: outputTokens, credits_deducted: credits,
           });
+          if (ae) console.error('[command-chat/persist assistant]', ae);
           await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
         })().catch(console.error);
 

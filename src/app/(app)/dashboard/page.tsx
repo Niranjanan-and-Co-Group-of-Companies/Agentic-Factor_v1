@@ -479,171 +479,236 @@ function CommandCenterPageInner() {
         sequential: 'Sequential', parallel: 'Parallel',
         orchestrator_worker: 'Orchestrator + Workers', hierarchical: 'Hierarchical',
       };
-      const nodeStyle: React.CSSProperties = {
-        display: 'flex', alignItems: 'flex-start', gap: 10,
-        background: 'var(--bg-primary)', border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-md)', padding: '10px 12px',
-        transition: 'border-color 0.15s',
-      };
-      const toolPill = (label: string) => (
-        <span style={{
-          display: 'inline-block', marginTop: 4,
-          background: 'var(--accent-subtle)', color: 'var(--accent)',
-          fontSize: '0.62rem', fontWeight: 700, padding: '2px 7px',
-          borderRadius: 99, letterSpacing: '0.3px', textTransform: 'uppercase',
-        }}>{label}</span>
-      );
+      const agentAccent = (icon?: string): string => ({
+        '🧠': '#3B82F6', '🎨': '#8B5CF6', '📲': '#22C55E', '📧': '#F59E0B',
+        '🎬': '#F43F5E', '🔍': '#06B6D4', '📊': '#6366F1', '🎯': '#F97316',
+        '🔔': '#EC4899',
+      }[icon ?? ''] ?? '#64748B');
+
       return (
-        <div style={{ marginTop: 12, maxWidth: 500, animation: 'slideIn 0.3s ease' }}>
-          {/* Header */}
+        <div style={{ marginTop: 14, maxWidth: 520, animation: 'slideIn 0.3s ease', fontFamily: 'var(--font-sans)' }}>
+
+          {/* ── Blueprint Header ── */}
           <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            marginBottom: 10,
+            background: 'var(--bg-card)', border: '1px solid var(--border)',
+            borderBottom: 'none', borderRadius: '14px 14px 0 0',
+            padding: '12px 16px', display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between', gap: 8,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent)' }}>✨ Mission Created</span>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 400 }}>— {action.missionTitle}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{
+                width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+                background: 'linear-gradient(135deg,#3B82F6,#8B5CF6)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem',
+              }}>✨</div>
+              <div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>Mission Blueprint Ready</div>
+                <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', marginTop: 1 }}>{action.missionTitle}</div>
+              </div>
             </div>
             {action.orchestrationPattern && (
-              <span style={{ fontSize: '0.6rem', fontWeight: 700, color: 'var(--text-muted)', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 99, padding: '2px 8px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+              <div style={{
+                fontSize: '0.58rem', fontWeight: 800, color: '#3B82F6',
+                background: 'hsla(217,91%,60%,0.1)', border: '1px solid hsla(217,91%,60%,0.25)',
+                borderRadius: 99, padding: '3px 10px', textTransform: 'uppercase',
+                letterSpacing: '0.6px', flexShrink: 0,
+              }}>
                 {patternLabel[action.orchestrationPattern] ?? action.orchestrationPattern}
-              </span>
+              </div>
             )}
           </div>
 
-          {/* Pipeline canvas */}
+          {/* ── Pipeline Canvas ── */}
           <div style={{
-            background: 'linear-gradient(135deg, hsla(217,91%,60%,0.07), hsla(270,70%,60%,0.05))',
-            border: '1px solid hsla(217,91%,60%,0.3)',
-            borderRadius: 'var(--radius-lg)', padding: '14px 14px 10px',
+            background: 'var(--bg-secondary)',
+            border: '1px solid hsla(217,91%,60%,0.22)',
+            padding: '14px 14px 10px',
           }}>
 
-            {/* Trigger node */}
-            <div style={nodeStyle}>
+            {/* Trigger Node */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              background: 'var(--bg-card)',
+              border: '1px solid hsla(38,92%,55%,0.35)',
+              borderLeft: '3px solid #F59E0B',
+              borderRadius: 10, padding: '10px 12px',
+              boxShadow: '0 0 0 3px hsla(38,92%,55%,0.05)',
+            }}>
               <div style={{
-                width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                background: 'hsla(38,92%,55%,0.15)', border: '1px solid hsla(38,92%,55%,0.3)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.95rem',
+                width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                background: 'hsla(38,92%,55%,0.12)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem',
               }}>⏰</div>
-              <div>
-                <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Trigger</div>
-                <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)', marginTop: 1 }}>Schedule · Run Now</div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 1 }}>Mon, Wed, Sat · 1 PM IST — or fire manually</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '0.59rem', fontWeight: 800, color: '#F59E0B', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 2 }}>Entry Point · Trigger</div>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>Scheduled + Manual Run</div>
               </div>
+              <div style={{
+                fontSize: '0.59rem', fontWeight: 800, color: '#F59E0B',
+                background: 'hsla(38,92%,55%,0.1)', border: '1px solid hsla(38,92%,55%,0.25)',
+                borderRadius: 99, padding: '2px 8px', letterSpacing: '0.4px',
+              }}>ACTIVE</div>
             </div>
 
-            {/* Agents */}
-            {agents.length > 0 ? agents.map((agent, i) => (
-              <React.Fragment key={i}>
-                {/* Connector */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', paddingLeft: 22, margin: '2px 0' }}>
-                  <div style={{ width: 1, height: 8, background: 'hsla(217,91%,60%,0.4)' }} />
-                  <div style={{ fontSize: '0.6rem', color: 'var(--accent)', lineHeight: 1, marginLeft: -3 }}>▼</div>
-                  <div style={{ width: 1, height: 4, background: 'hsla(217,91%,60%,0.4)' }} />
-                </div>
-
-                {/* Agent card */}
-                <div style={{
-                  ...nodeStyle,
-                  borderColor: 'var(--border)',
-                  background: 'var(--bg-secondary)',
-                }}>
-                  {/* Number badge */}
-                  <div style={{
-                    width: 22, height: 22, borderRadius: '50%', flexShrink: 0, marginTop: 2,
-                    background: 'var(--accent)', color: '#fff',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '0.65rem', fontWeight: 800,
-                  }}>{i + 1}</div>
-
-                  {/* Icon */}
-                  <div style={{
-                    width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                    background: 'var(--bg-card)', border: '1px solid var(--border)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem',
-                  }}>{agent.icon ?? '🤖'}</div>
-
-                  {/* Info */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{agent.name}</div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 1, lineHeight: 1.4 }}>{agent.role}</div>
-                    {agent.tool && toolPill(agent.tool)}
+            {/* Agents with connectors */}
+            {agents.length > 0 ? agents.map((agent, i) => {
+              const accent = agentAccent(agent.icon);
+              return (
+                <React.Fragment key={i}>
+                  {/* Flow connector */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '0 auto', width: 'fit-content', marginLeft: 'calc(14px + 18px)' }}>
+                    <div style={{ width: 2, height: 10, background: `linear-gradient(to bottom,${accent}99,${accent}44)` }} />
+                    <svg width="12" height="7" viewBox="0 0 12 7" style={{ display: 'block' }}>
+                      <path d="M6 7 L0 0 L12 0 Z" fill={accent} fillOpacity="0.65" />
+                    </svg>
+                    <div style={{ width: 2, height: 6, background: `${accent}33` }} />
                   </div>
 
-                  {/* Status dot — idle */}
-                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--text-muted)', flexShrink: 0, marginTop: 4, opacity: 0.5 }} />
-                </div>
-              </React.Fragment>
-            )) : (
-              <div style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--text-muted)', paddingLeft: 4 }}>
+                  {/* Agent Card */}
+                  <div style={{
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border)',
+                    borderLeft: `3px solid ${accent}`,
+                    borderRadius: 10, padding: '10px 12px',
+                    display: 'flex', alignItems: 'flex-start', gap: 10,
+                    boxShadow: `0 0 0 3px ${accent}0a`,
+                  }}>
+                    {/* Number badge */}
+                    <div style={{
+                      width: 22, height: 22, borderRadius: '50%', flexShrink: 0, marginTop: 3,
+                      background: accent, color: '#fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '0.65rem', fontWeight: 800,
+                    }}>{i + 1}</div>
+
+                    {/* Role icon */}
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                      background: `${accent}18`, border: `1px solid ${accent}35`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem',
+                    }}>{agent.icon ?? '🤖'}</div>
+
+                    {/* Info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.3 }}>{agent.name}</div>
+                      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.5 }}>{agent.role}</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+                        {agent.tool && (
+                          <span style={{
+                            fontSize: '0.59rem', fontWeight: 700, padding: '2px 8px',
+                            background: `${accent}18`, color: accent,
+                            border: `1px solid ${accent}35`, borderRadius: 99, letterSpacing: '0.3px',
+                          }}>{agent.tool}</span>
+                        )}
+                        {agent.trustLevel && (
+                          <span style={{
+                            fontSize: '0.59rem', fontWeight: 700, padding: '2px 8px',
+                            background: 'var(--bg-secondary)', color: 'var(--text-muted)',
+                            border: '1px solid var(--border)', borderRadius: 99, letterSpacing: '0.3px',
+                          }}>{agent.trustLevel.toUpperCase()}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Status */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flexShrink: 0, paddingTop: 2 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--text-muted)', opacity: 0.35 }} />
+                      <div style={{ fontSize: '0.52rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Idle</div>
+                    </div>
+                  </div>
+                </React.Fragment>
+              );
+            }) : (
+              <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-muted)', paddingLeft: 4 }}>
                 Agents will appear here after the mission is configured.
               </div>
             )}
+          </div>
 
-            {/* ── Connector status ── */}
-            {action.missingConnectors !== undefined && (
-              <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>
-                  Required Connectors
-                </div>
-                {action.missingConnectors.length === 0 ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: 'var(--emerald)', fontWeight: 600 }}>
-                    <span>✅</span> All connectors ready — you can run now
-                  </div>
-                ) : (
-                  <>
-                    {action.missingConnectors.map((c, i) => {
-                      const meta = connectorMeta(c.service);
-                      return (
-                        <div key={i} style={{
-                          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5,
-                          padding: '7px 10px', borderRadius: 'var(--radius-sm)',
-                          background: 'hsla(0,84%,60%,0.06)',
-                          border: '1px solid hsla(0,84%,60%,0.18)',
-                        }}>
-                          <span style={{ fontSize: '1rem', flexShrink: 0 }}>{meta.icon}</span>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: '0.77rem', fontWeight: 700, color: 'var(--text-primary)' }}>{meta.label}</div>
-                            <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.reason}</div>
-                          </div>
-                          <button
-                            onClick={() => router.push('/connectors')}
-                            style={{
-                              background: 'none', border: '1px solid hsla(0,84%,60%,0.35)',
-                              color: 'var(--rose)', borderRadius: 'var(--radius-sm)',
-                              padding: '3px 10px', fontSize: '0.7rem', fontWeight: 700,
-                              cursor: 'pointer', flexShrink: 0, fontFamily: 'var(--font-sans)',
-                            }}
-                          >
-                            Connect →
-                          </button>
-                        </div>
-                      );
-                    })}
-                    <div style={{ fontSize: '0.68rem', color: 'var(--amber)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span>⚠️</span> Connect the above before running
-                    </div>
-                  </>
-                )}
+          {/* ── Required Connectors Section ── */}
+          {action.missingConnectors !== undefined && (
+            <div style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border)',
+              borderTop: action.missingConnectors.length > 0
+                ? '1px solid hsla(0,84%,60%,0.18)'
+                : '1px solid hsla(142,71%,45%,0.2)',
+              padding: '12px 14px',
+            }}>
+              <div style={{ fontSize: '0.59rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 8 }}>
+                Required Connectors
               </div>
-            )}
 
-            {/* Action buttons */}
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button
-                style={{ ...btnStyle, flex: 1, justifyContent: 'center' }}
-                onClick={() => applyAction({ type: 'run_mission', missionId: action.missionId, missionTitle: action.missionTitle, missionStatus: 'active' }, msgIndex)}
-                disabled={applying}
-              >
-                {applying ? 'Starting…' : '▶ Run Now'}
-              </button>
-              <button
-                style={{ ...ghostBtn, flex: 1, justifyContent: 'center' }}
-                onClick={() => router.push(`/dashboard/missions/${action.missionId}`)}
-              >
-                Configure →
-              </button>
+              {action.missingConnectors.length === 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: '0.78rem', color: '#22C55E', fontWeight: 600 }}>
+                  <span>✅</span> All connectors ready — you can run now
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {action.missingConnectors.map((c, idx) => {
+                    const meta = connectorMeta(c.service);
+                    return (
+                      <div key={idx} style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '8px 10px', borderRadius: 8,
+                        background: 'hsla(0,84%,60%,0.05)',
+                        border: '1px solid hsla(0,84%,60%,0.15)',
+                      }}>
+                        <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>{meta.icon}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-primary)' }}>{meta.label}</div>
+                          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.reason}</div>
+                        </div>
+                        <button
+                          onClick={() => router.push('/connectors')}
+                          style={{
+                            background: 'hsla(0,84%,60%,0.08)', border: '1px solid hsla(0,84%,60%,0.28)',
+                            color: '#EF4444', borderRadius: 6, padding: '4px 12px',
+                            fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
+                            flexShrink: 0, fontFamily: 'var(--font-sans)',
+                          }}
+                        >Connect →</button>
+                      </div>
+                    );
+                  })}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.67rem', color: '#F59E0B', marginTop: 2 }}>
+                    <span>⚠️</span> Connect the above before running this mission
+                  </div>
+                </div>
+              )}
             </div>
+          )}
+
+          {/* ── Action Buttons ── */}
+          <div style={{
+            background: 'var(--bg-card)', border: '1px solid var(--border)',
+            borderTop: 'none', borderRadius: '0 0 14px 14px',
+            padding: '12px 14px', display: 'flex', gap: 8,
+          }}>
+            <button
+              style={{
+                flex: 1, padding: '9px 0', borderRadius: 8,
+                background: 'linear-gradient(135deg,#3B82F6,#8B5CF6)', color: '#fff',
+                border: 'none', fontSize: '0.8rem', fontWeight: 700,
+                cursor: applying ? 'not-allowed' : 'pointer', opacity: applying ? 0.6 : 1,
+                fontFamily: 'var(--font-sans)',
+              }}
+              onClick={() => applyAction({ type: 'run_mission', missionId: action.missionId, missionTitle: action.missionTitle, missionStatus: 'active' }, msgIndex)}
+              disabled={applying}
+            >
+              {applying ? 'Starting…' : '▶ Run Now'}
+            </button>
+            <button
+              style={{
+                flex: 1, padding: '9px 0', borderRadius: 8,
+                background: 'var(--bg-secondary)', color: 'var(--text-primary)',
+                border: '1px solid var(--border)', fontSize: '0.8rem', fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'var(--font-sans)',
+              }}
+              onClick={() => router.push(`/dashboard/missions/${action.missionId}`)}
+            >
+              Configure Mission →
+            </button>
           </div>
         </div>
       );
