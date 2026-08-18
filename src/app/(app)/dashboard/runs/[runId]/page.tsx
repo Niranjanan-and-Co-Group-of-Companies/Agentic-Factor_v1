@@ -44,10 +44,15 @@ export default function RunDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [missionId, setMissionId] = useState<string | null>(null);
 
-  // Extract missionId from URL history or fetch via run lookup
+  // Resolve missionId: sessionStorage fast path, then API lookup fallback
   useEffect(() => {
     const stored = sessionStorage.getItem(`run_mission_${runId}`);
-    if (stored) setMissionId(stored);
+    if (stored) { setMissionId(stored); return; }
+    // No sessionStorage — look up via API (handles direct links, refreshes, shared URLs)
+    fetch(`/api/runs/${runId}`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() as Promise<{ missionId: string }> : Promise.reject())
+      .then(d => { if (d.missionId) setMissionId(d.missionId); else { setError('Run not found'); setLoading(false); } })
+      .catch(() => { setError('Run not found'); setLoading(false); });
   }, [runId]);
 
   const fetchRun = useCallback(async (mId: string) => {
@@ -75,25 +80,9 @@ export default function RunDetailPage() {
     borderRadius: 'var(--radius)', padding: 'var(--space-lg)',
   };
 
-  if (!missionId) {
-    return (
-      <div className="page-container stack" style={{ gap: 'var(--space-lg)', maxWidth: 900 }}>
-        <div style={{ fontWeight: 700, fontSize: '1.5rem' }}>Run Detail</div>
-        <div style={card}>
-          <div style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-md)' }}>
-            Enter the Mission ID to load this run's details:
-          </div>
-          <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-            <input
-              type="text"
-              placeholder="Mission ID (UUID)"
-              style={{ flex: 1, padding: 'var(--space-sm) var(--space-md)', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)' }}
-              onChange={e => setMissionId(e.target.value.trim())}
-            />
-          </div>
-        </div>
-      </div>
-    );
+  // missionId is being resolved (API lookup in progress) — show loader
+  if (!missionId && loading) {
+    return <div className="page-container"><div style={{ color: 'var(--text-muted)' }}>Loading run details…</div></div>;
   }
 
   if (loading) return <div className="page-container"><div style={{ color: 'var(--text-muted)' }}>Loading run details...</div></div>;

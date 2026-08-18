@@ -132,7 +132,8 @@ export async function notifyConnectorRequest(
   userId: string,
   userEmail: string | null
 ): Promise<void> {
-  const adminEmail = process.env.ADMIN_EMAIL || 'niranjanant7@gmail.com';
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (!adminEmail) { console.warn('[notifications] ADMIN_EMAIL not set — skipping connector request email'); return; }
 
   await sendEmail({
     to: adminEmail,

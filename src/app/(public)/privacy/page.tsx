@@ -86,7 +86,7 @@ export default function PrivacyPage() {
             <li><strong>Notion:</strong> Create or read pages and databases as directed by the user&apos;s mission.</li>
             <li><strong>Zoho:</strong> Used for account authentication and OAuth login.</li>
             <li><strong>Discord:</strong> Send messages to servers as directed by the user&apos;s mission.</li>
-            <li><strong>Stripe:</strong> Payment processing for Platform subscriptions; Stripe handles all card data directly.</li>
+            <li><strong>Stripe:</strong> If you connect your own Stripe account, your agents can read transaction data, create payment links, and manage subscriptions on your behalf. We do not use Stripe to bill you — see Razorpay below.</li>
             <li><strong>Razorpay:</strong> Payment processing for Indian customers; Razorpay handles all card data directly.</li>
             <li><strong>SendGrid:</strong> Delivery of transactional emails (mission notifications, OTP) on behalf of the Platform. No user personal data is shared with SendGrid beyond the recipient email address and message content.</li>
             <li><strong>Twilio:</strong> SMS or voice notification delivery if configured by the user&apos;s mission.</li>

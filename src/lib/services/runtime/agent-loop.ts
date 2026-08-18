@@ -1185,13 +1185,15 @@ ${pythonCode}`;
               
               try {
                 const { sendEmail } = await import('../notifications');
-                const adminEmail = process.env.ADMIN_EMAIL || 'niranjanant7@gmail.com';
+                const adminEmail = process.env.ADMIN_EMAIL;
                 const tenantEmail = await getTenantEmail();
-                await sendEmail({
-                  to: adminEmail,
-                  subject: `⚠️ Missing Permission — ${signal.__missing_permission__.provider}`,
-                  body: `A mission requires a connector that isn't configured.\n\nProvider: ${signal.__missing_permission__.provider}\nTenant: ${tenantEmail || tenantId}\nAgent: ${agent.role}\n\nPlease add this connector or contact the customer.`,
-                });
+                if (adminEmail) {
+                  await sendEmail({
+                    to: adminEmail,
+                    subject: `⚠️ Missing Permission — ${signal.__missing_permission__.provider}`,
+                    body: `A mission requires a connector that isn't configured.\n\nProvider: ${signal.__missing_permission__.provider}\nTenant: ${tenantEmail || tenantId}\nAgent: ${agent.role}\n\nPlease add this connector or contact the customer.`,
+                  });
+                }
                 if (tenantEmail) {
                   await sendEmail({
                     to: tenantEmail,

@@ -17,7 +17,8 @@ export async function encryptSecret(
   const encoder = new TextEncoder();
 
   // Derive a per-tenant key (PBKDF2 from tenant_id + master secret)
-  const masterSecret = process.env.JWT_SECRET || 'fallback-secret-min-32-chars-long!!';
+  const masterSecret = process.env.JWT_SECRET;
+  if (!masterSecret) throw new Error('JWT_SECRET env var is not set — cannot encrypt vault keys');
   const keyMaterial = await crypto.subtle.importKey(
     'raw', encoder.encode(masterSecret), 'PBKDF2', false, ['deriveKey']
   );

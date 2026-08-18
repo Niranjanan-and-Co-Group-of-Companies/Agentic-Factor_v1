@@ -23,7 +23,7 @@ const levelColors: Record<string, string> = {
 const PROVIDER_LABELS: Record<string, string> = {
   hunter: "Hunter.io", apollo: "Apollo.io", stripe: "Stripe", sendgrid: "SendGrid",
   twilio: "Twilio", openai_api: "OpenAI", anthropic_api: "Anthropic", replicate: "Replicate",
-  aws: "Amazon Web Services", vercel: "Vercel", supabase_ext: "Supabase", firebase: "Firebase",
+  aws: "Amazon Web Services", vercel: "Vercel", supabase_ext: "Database", firebase: "Firebase",
   segment: "Segment", mixpanel: "Mixpanel", make: "Make (Integromat)", woocommerce: "WooCommerce",
   bamboohr: "BambooHR", heygen: "HeyGen", langsmith: "LangSmith", shiprocket: "Shiprocket",
   razorpay: "Razorpay", calendly: "Calendly", typeform: "Typeform",
@@ -32,7 +32,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 const PROVIDER_ICONS: Record<string, string> = {
   hunter: "🎯", apollo: "🔭", stripe: "💳", sendgrid: "✉️", twilio: "📞",
   openai_api: "🤖", anthropic_api: "🧠", replicate: "🔬", aws: "🟧", vercel: "▲",
-  supabase_ext: "⚡", firebase: "🔥", segment: "📡", mixpanel: "📈", make: "🔄",
+  supabase_ext: "🗄️", firebase: "🔥", segment: "📡", mixpanel: "📈", make: "🔄",
   woocommerce: "🛒", bamboohr: "🎋", heygen: "🎬", langsmith: "🔗", shiprocket: "🚀",
   razorpay: "💸", calendly: "📅", typeform: "📝",
 };
