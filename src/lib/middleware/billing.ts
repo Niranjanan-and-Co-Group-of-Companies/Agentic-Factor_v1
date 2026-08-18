@@ -361,15 +361,28 @@ export async function deductCredits(
   }
 }
 
-// ── Chat credit pricing ──────────────────────────────────────────────────────
-// Credits are denominated in INR: 1 credit = ₹1 of customer value (derived
-// from plan pricing — Individual ₹999/mo for 1000 credits).
-// Chat markup: 3× our real USD cost, converted to INR at live rate.
-// Formula: credits = realCostUsd × 3 × (liveUsdInr / INR_PER_CREDIT)
-// When INR weakens (more ₹ per $), we automatically charge more credits,
-// so our USD margin stays protected without touching plan prices.
-const CHAT_MARKUP = 3;
-const INR_PER_CREDIT = 1; // ₹1 per credit — update if plan pricing changes
+// ── Credit pricing constants ─────────────────────────────────────────────────
+// 1 credit = ₹1 customer value (Individual plan: ₹999/mo ÷ 1000 credits).
+// Formula: credits = realCostUsd × MARKUP × (liveUsdInr / INR_PER_CREDIT)
+// When INR weakens, deductions rise automatically — margin stays protected.
+const INR_PER_CREDIT = 1;   // ₹1 per credit — update if plan pricing changes
+const AGENT_LLM_MARKUP = 4; // 4× on agent/mission LLM calls
+const CHAT_MARKUP = 3;      // 3× on conversational chat
+
+/**
+ * Token-proportional credit cost for a single LLM call inside an agent run.
+ * 4× markup on real provider cost, converted at live USD/INR. Min 1 credit.
+ */
+export async function calculateLLMCreditCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+): Promise<number> {
+  const realCostUsd = calculateRealCostUsd(model, inputTokens, outputTokens);
+  const usdToInr = await getUsdToInr();
+  const customerCostInr = realCostUsd * AGENT_LLM_MARKUP * usdToInr;
+  return Math.max(1, Math.ceil(customerCostInr / INR_PER_CREDIT));
+}
 
 /**
  * Calculate credits to charge for one chat exchange.

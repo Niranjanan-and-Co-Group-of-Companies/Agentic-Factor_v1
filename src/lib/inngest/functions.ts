@@ -221,7 +221,7 @@ export const executeMissionBackground = inngest.createFunction(
         // ── Orchestration: Determine next agent ──
         if (orchestration.pattern === 'supervisor' || orchestration.pattern === 'orchestrator_worker') {
           const nextAgent = await step.run(`supervisor-decision-after-${agent.role.replace(/\s+/g, '-')}`, async () => {
-            const { callLLM, getModelCreditCost } = await import('@/lib/services/llm-router');
+            const { callLLM } = await import('@/lib/services/llm-router');
             const availableAgents = agents
               .map((a: any) => ({ id: a.id, role: a.role }))
               .filter((a: any) => a.id !== agentId);
@@ -229,10 +229,11 @@ export const executeMissionBackground = inngest.createFunction(
               { role: 'system', content: `You are the Mission Supervisor. Based on the previous agent's output, decide which agent should run next. If the goal is fully achieved, return null. Return JSON: {"nextAgentId": "uuid-here" | null, "reasoning": "why"}` },
               { role: 'user', content: `Mission: ${mission.title}\n\nAvailable Agents:\n${JSON.stringify(availableAgents, null, 2)}\n\nPrevious Agent Output:\n${output}` }
             ], { jsonMode: true, tier: 2 });
-            // Bill supervisor routing call
+            // Bill supervisor routing call (token-proportional)
             try {
-              const { deductCredits } = await import('@/lib/middleware/billing');
-              await deductCredits(tenantId, getModelCreditCost(decision.model), `supervisor_routing:${agentId}`);
+              const { deductCredits, calculateLLMCreditCost } = await import('@/lib/middleware/billing');
+              const superCost = await calculateLLMCreditCost(decision.model, decision.inputTokens ?? 0, decision.outputTokens ?? 0);
+              await deductCredits(tenantId, superCost, `supervisor_routing:${agentId}`);
             } catch { /* non-fatal */ }
             return JSON.parse(decision.content);
           });

@@ -703,11 +703,11 @@ Fix the script. Rules:
           if (composioFixMatch) {
             pythonCode = sanitizePythonCode(composioFixMatch[1]);
             console.log(`[Agent ${agent.id}] Composio-aware correction applied (attempt ${attempts})`);
-            // Deduct LLM credit for this fix call
+            // Deduct LLM credit for this fix call (token-proportional)
             try {
-              const { deductCredits } = await import('@/lib/middleware/billing');
-              const { getModelCreditCost } = await import('@/lib/services/llm-router');
-              const fixCost = getModelCreditCost(composioFixResponse.model);
+              const { deductCredits, calculateLLMCreditCost } = await import('@/lib/middleware/billing');
+              const fixCostBase = await calculateLLMCreditCost(composioFixResponse.model, composioFixResponse.inputTokens ?? 0, composioFixResponse.outputTokens ?? 0);
+              const fixCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(fixCostBase / 2) : fixCostBase;
               await deductCredits(tenantId, fixCost, `llm_composio_fix:${agent.role}`);
             } catch { /* non-fatal */ }
           }
@@ -884,12 +884,11 @@ INSTRUCTIONS:
         { temperature: 0.1, jsonMode: false, tier: 2 }
       );
 
-      // ── Deduct LLM credit based on actual model used ──
-      // Always deduct — even if later E2B execution fails, we still paid the LLM provider
+      // ── Deduct LLM credit: token-proportional at 4× real cost via live USD/INR ──
+      // Always deduct — even if later E2B execution fails, we already paid the provider.
       try {
-        const { deductCredits } = await import('@/lib/middleware/billing');
-        const { getModelCreditCost } = await import('@/lib/services/llm-router');
-        const llmCostBase = getModelCreditCost(response.model);
+        const { deductCredits, calculateLLMCreditCost } = await import('@/lib/middleware/billing');
+        const llmCostBase = await calculateLLMCreditCost(response.model, response.inputTokens ?? 0, response.outputTokens ?? 0);
         const llmCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(llmCostBase / 2) : llmCostBase;
         await deductCredits(tenantId, llmCost, `llm_${response.provider}:${response.model}:${agent.role}`, {
           provider: response.provider,
@@ -897,7 +896,7 @@ INSTRUCTIONS:
           inputTokens: response.inputTokens,
           outputTokens: response.outputTokens,
         });
-        console.log(`[Agent ${agent.id}] LLM credit: ${llmCost} (model: ${response.model}, tokens: ${response.tokensUsed})`);
+        console.log(`[Agent ${agent.id}] LLM credit: ${llmCost} (model: ${response.model}, in:${response.inputTokens} out:${response.outputTokens})`);
       } catch (creditErr) {
         console.warn(`[Agent ${agent.id}] LLM credit deduction failed:`, creditErr);
       }
@@ -1384,8 +1383,9 @@ Be a real critic, not a rubber stamp — but don't be pedantic about minor forma
 
 Respond: {"valid": boolean, "reason": "string if invalid"}`;
           const criticResult = await callLLM([{ role: 'user', content: criticPrompt }], { temperature: 0, jsonMode: true, tier: 3 });
-          const { deductCredits: deductCritic, CREDIT_COSTS: CC } = await import('@/lib/middleware/billing');
-          const criticCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(CC.llm_call_flash / 2) : CC.llm_call_flash;
+          const { deductCredits: deductCritic, calculateLLMCreditCost: calcCriticCost } = await import('@/lib/middleware/billing');
+          const criticCostBase = await calcCriticCost(criticResult.model, criticResult.inputTokens ?? 0, criticResult.outputTokens ?? 0);
+          const criticCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(criticCostBase / 2) : criticCostBase;
           deductCritic(tenantId, criticCost, `critic_llm:${agent.role}`).catch(() => {});
           const criticParsed = robustJSONParse(criticResult.content);
           if (!criticParsed.valid) {
