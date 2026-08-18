@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
+import OnboardingTour from '@/components/OnboardingTour';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -110,8 +111,11 @@ function CommandCenterPageInner() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [proactiveAlert, setProactiveAlert] = useState<string | null>(null);
 
-  // UI state
+  // UI state — left rail hidden on mobile by default
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.innerWidth <= 768) setSidebarOpen(false);
+  }, []);
   const [missions, setMissions] = useState<MissionShortcut[]>([]);
   const [credits, setCredits] = useState<{ remaining: number; topup: number; plan: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -469,15 +473,18 @@ function CommandCenterPageInner() {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
+      {/* Onboarding tour — shown once on first login */}
+      <OnboardingTour />
+
       {/* Toast */}
       {toast && (
-        <div style={{ position: 'fixed', top: 20, right: 20, zIndex: 9999, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px 18px', fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-primary)', boxShadow: '0 4px 24px rgba(0,0,0,0.15)', animation: 'slideIn 0.2s ease' }}>
+        <div style={{ position: 'fixed', top: 20, right: 20, zIndex: 9998, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px 18px', fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-primary)', boxShadow: '0 4px 24px rgba(0,0,0,0.15)', animation: 'slideIn 0.2s ease' }}>
           {toast}
         </div>
       )}
 
       {/* Full-screen layout pinned past the app sidebar */}
-      <div style={{ position: 'fixed', top: 0, left: 'var(--sidebar-width, 260px)', right: 0, bottom: 0, display: 'flex', background: 'var(--bg-primary)', zIndex: 40, fontFamily: 'var(--font-sans)' }}>
+      <div className="cc-container" style={{ position: 'fixed', top: 0, left: 'var(--sidebar-width, 260px)', right: 0, bottom: 0, display: 'flex', background: 'var(--bg-primary)', zIndex: 40, fontFamily: 'var(--font-sans)' }}>
 
         {/* ── Left Rail ─────────────────────────────────────────────────── */}
         {sidebarOpen && (
@@ -567,14 +574,14 @@ function CommandCenterPageInner() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
 
           {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)', flexShrink: 0 }}>
-            <button onClick={() => setSidebarOpen(o => !o)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '1rem', lineHeight: 1 }} title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}>☰</button>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>Command Center</div>
-              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Your AI Chief of Staff</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)', flexShrink: 0, flexWrap: 'nowrap', minHeight: 52 }}>
+            <button onClick={() => setSidebarOpen(o => !o)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '1.1rem', lineHeight: 1, padding: '6px', flexShrink: 0 }} title={sidebarOpen ? 'Hide history' : 'Show history'}>☰</button>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Command Center</div>
+              <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>Your AI Chief of Staff</div>
             </div>
-            <button onClick={() => router.push('/dashboard/missions')} className="btn btn-ghost btn-sm" style={{ fontSize: '0.78rem' }}>All Missions →</button>
-            <button onClick={() => { setInput('Create a new mission: '); inputRef.current?.focus(); }} className="btn btn-primary btn-sm" style={{ fontSize: '0.78rem' }}>+ New Mission</button>
+            <button onClick={() => router.push('/dashboard/missions')} className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem', flexShrink: 0 }}>Missions</button>
+            <button onClick={() => { setInput('Create a new mission: '); inputRef.current?.focus(); }} className="btn btn-primary btn-sm" style={{ fontSize: '0.75rem', flexShrink: 0, whiteSpace: 'nowrap' }}>+ New</button>
           </div>
 
           {/* Live run ticker */}

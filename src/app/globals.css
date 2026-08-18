@@ -628,6 +628,21 @@ body {
   .command-popup { width: calc(100vw - 32px); left: 16px; transform: none; }
   .page-title { font-size: 1.4rem; }
   .stat-value { font-size: 1.5rem; }
+
+  /* Command Center: push below mobile topbar, start at left edge */
+  .cc-container {
+    top: 60px !important;
+    left: 0 !important;
+  }
+
+  /* Login page: reduce horizontal padding */
+  .login-wrap { padding: var(--space-lg) var(--space-md) !important; }
+
+  /* Card padding tighter on small screens */
+  .card { padding: var(--space-md); }
+
+  /* Buttons: full-width on mobile for easier tapping */
+  .btn-lg { padding: var(--space-md) var(--space-lg); font-size: 0.95rem; }
 }
 
 /* ── User Profile Card ── */
