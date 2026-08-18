@@ -83,10 +83,23 @@ const GEMINI_TOOLKIT: Toolkit = {
   no_auth: false,
 };
 
+const CANVA_TOOLKIT: Toolkit = {
+  slug: "canva",
+  name: "Canva",
+  logo: "https://logos.composio.dev/api/canva",
+  description: "Create and export designs, auto-fill brand templates, upload assets, list user designs, and export to PNG/PDF/MP4. Connect once — agents can design at scale via Canva's API.",
+  categories: ["images-&-design"],
+  tools_count: 46,
+  auth_schemes: ["OAUTH2"],
+  no_auth: false,
+};
+
 // Search terms that should show the Buffer social media guidance banner
 const SOCIAL_SEARCH_TERMS = ["facebook", "instagram", "meta", "fb ", "insta"];
 // Search terms that should surface the AI model connectors
 const AI_SEARCH_TERMS = ["openai", "dall", "whisper", "gpt", "image gen", "gemini", "google ai", "vertex", "google gemini"];
+// Search terms that should surface the Canva design connector
+const CANVA_SEARCH_TERMS = ["canva", "design", "graphic", "template", "presentation", "poster", "banner"];
 
 function getSupabase() {
   return createBrowserClient(
@@ -242,6 +255,8 @@ export default function ConnectorsPage() {
   const showAICards = !search.trim() || AI_SEARCH_TERMS.some(t => search.toLowerCase().includes(t));
   const openaiConnected = connectedSlugs.has("openai");
   const geminiConnected = connectedSlugs.has("gemini");
+  const showCanvaCard = !search.trim() || CANVA_SEARCH_TERMS.some(t => search.toLowerCase().includes(t));
+  const canvaConnected = connectedSlugs.has("canva");
 
   // ── Handlers ──────────────────────────────────────────────
   const handleConnect = async (tk: Toolkit) => {
@@ -460,7 +475,7 @@ export default function ConnectorsPage() {
       )}
 
       {/* ── No results ── */}
-      {filtered.length === 0 && !showBufferCard && !showAICards && (
+      {filtered.length === 0 && !showBufferCard && !showAICards && !showCanvaCard && (
         <div className="card" style={{ textAlign: "center", padding: "var(--space-2xl)" }}>
           <div style={{ fontSize: "2.5rem", marginBottom: "var(--space-md)" }}>🔍</div>
           <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}>No results for &ldquo;{search}&rdquo;</h2>
@@ -643,6 +658,64 @@ export default function ConnectorsPage() {
                 <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "hsla(214,89%,52%,1)", borderColor: "hsla(214,89%,52%,0.25)" }}
                   onClick={() => handleApiKeyOpen(tk)}>
                   🔑 Add API Key →
+                </button>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ── Pinned Canva Card ── */}
+        {showCanvaCard && (() => {
+          const tk = CANVA_TOOLKIT;
+          return (
+            <div key="canva" className="card" style={{
+              padding: "var(--space-lg)",
+              transition: "all 0.2s",
+              ...(canvaConnected ? { borderColor: "hsla(152,69%,50%,0.35)" } : { borderColor: "hsla(353,100%,50%,0.18)" }),
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--space-sm)" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={tk.logo}
+                    alt={tk.name}
+                    width={36} height={36}
+                    style={{ borderRadius: 8, objectFit: "contain", background: "var(--bg-glass)", padding: 2 }}
+                    onError={e => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=Canva&size=36&background=7d2ae8&color=fff&bold=true&length=2`; }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: "0.9rem", lineHeight: 1.2 }}>Canva</div>
+                    <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px", marginTop: 2 }}>Design · 46 actions</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                  {canvaConnected
+                    ? <span className="badge badge-green" style={{ fontSize: "0.6rem" }}>✓ Connected</span>
+                    : <span className="badge" style={{ fontSize: "0.55rem", color: "var(--accent)", borderColor: "var(--accent)", padding: "1px 5px" }}>OAuth</span>
+                  }
+                </div>
+              </div>
+              <p style={{ fontSize: "0.77rem", color: "var(--text-secondary)", lineHeight: 1.5, minHeight: 34, marginBottom: "var(--space-sm)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                {tk.description}
+              </p>
+              {canvaConnected && userEmail && (
+                <div style={{ padding: "4px 10px", background: "var(--emerald-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.7rem", color: "var(--emerald)", marginBottom: "var(--space-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  🔒 {userEmail}
+                </div>
+              )}
+              <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginBottom: "var(--space-sm)" }}>
+                Create designs · Export PNG/PDF/MP4 · Auto-fill templates · Upload assets
+              </div>
+              {canvaConnected ? (
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "hsla(0,84%,60%,0.25)" }}
+                  onClick={() => handleDisconnect(tk)}>
+                  Disconnect
+                </button>
+              ) : (
+                <button className="btn btn-primary btn-sm" style={{ width: "100%" }}
+                  onClick={() => handleConnect(tk)}
+                  disabled={connecting === tk.slug}>
+                  {connecting === tk.slug ? "Connecting…" : "Connect with Canva →"}
                 </button>
               )}
             </div>
