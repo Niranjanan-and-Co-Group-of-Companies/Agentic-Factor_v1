@@ -46,7 +46,7 @@ export async function POST(
   const authResult = await extractTenantContext(request);
   if (isAuthError(authResult)) return authResult;
   const { tenantId } = authResult;
-  await context.params; // consume params
+  const { id: missionId } = await context.params;
 
   const { sessionId } = await request.json() as { sessionId: string };
   if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 });
@@ -54,6 +54,16 @@ export async function POST(
   const supabase = createServiceClient();
 
   try {
+    // Verify session belongs to this tenant AND this specific mission
+    const { data: chatRow } = await supabase
+      .from('mission_chats')
+      .select('id')
+      .eq('id', sessionId)
+      .eq('tenant_id', tenantId)
+      .eq('mission_id', missionId)
+      .maybeSingle();
+    if (!chatRow) return NextResponse.json({ messages: [] });
+
     const { data, error } = await supabase
       .from('mission_chat_messages')
       .select('id, role, content, action_payload, action_applied, created_at')

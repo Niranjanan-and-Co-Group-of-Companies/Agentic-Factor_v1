@@ -306,8 +306,8 @@ export async function deductCredits(
     }
 
     // Two-bucket deduction: consume monthly credits FIRST, then top-up
-    let deductFromMonthly = Math.min(creditsMonthly, amount);
-    let deductFromTopup = amount - deductFromMonthly;
+    const deductFromMonthly = Math.min(creditsMonthly, amount);
+    const deductFromTopup = amount - deductFromMonthly;
 
     const newMonthly = creditsMonthly - deductFromMonthly;
     const newTopup = creditsTopup - deductFromTopup;

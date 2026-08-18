@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Resolve API key — tenant's own key preferred, then platform key
-    let apiKey = process.env.OPENAI_API_KEY ?? process.env.ANTHROPIC_API_KEY ?? '';
+    let apiKey = process.env.OPENAI_API_KEY ?? '';
     try {
       const supabase = createServiceClient();
       const { data } = await supabase

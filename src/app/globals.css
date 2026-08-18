@@ -102,6 +102,7 @@ body {
 }
 
 /* ── App Shell ── */
+:root { --sidebar-width: 260px; } /* consumed by chat overlay and any full-screen pages */
 .app-shell { display: flex; min-height: 100vh; }
 
 .sidebar {
@@ -604,6 +605,7 @@ body {
 
 /* ── Responsive ── */
 @media (max-width: 1024px) {
+  :root { --sidebar-width: 220px; }
   .sidebar { width: 220px; }
   .main-content { margin-left: 220px; padding: var(--space-lg); }
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
@@ -613,6 +615,7 @@ body {
   .command-popup { width: 280px; }
 }
 @media (max-width: 768px) {
+  :root { --sidebar-width: 0px; }
   .sidebar { display: none; }
   .mobile-topbar { display: flex; }
   .main-content {

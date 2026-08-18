@@ -1,7 +1,7 @@
 'use client';
 
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useState, useEffect, useRef, useCallback } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -28,6 +28,16 @@ interface ActionPayload {
   cron?: string;
   timezone?: string;
   provider?: string;
+}
+
+interface LiveRun {
+  run_number: number;
+  status: string;
+  agents_total: number;
+  agents_done: number;
+  agents_failed: number;
+  started_at: string;
+  duration_ms: number | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -153,8 +163,11 @@ export default function MissionChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const [applyingAction, setApplyingAction] = useState<number | null>(null);
+  const [liveRun, setLiveRun] = useState<LiveRun | null>(null);
+  const [liveRunDismissed, setLiveRunDismissed] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const runPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -192,6 +205,44 @@ export default function MissionChatPage() {
   }, [missionId]);
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  // ── Poll mission status every 8s to keep run_now routing correct ──
+  useEffect(() => {
+    const supabase = getSupabase();
+    const poll = setInterval(async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from('missions').select('status').eq('id', missionId).eq('tenant_id', user.id).single();
+      if (data?.status) setMissionStatus(data.status);
+    }, 8000);
+    return () => clearInterval(poll);
+  }, [missionId]);
+
+  // ── Live run status polling ──────────────────────────────────
+  const startRunPolling = useCallback(() => {
+    if (runPollRef.current) clearInterval(runPollRef.current);
+    setLiveRunDismissed(false);
+    runPollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/missions/${missionId}/runs`, { credentials: 'include' });
+        if (!res.ok) return;
+        const { runs } = await res.json() as { runs: LiveRun[] };
+        const latest = runs[0];
+        if (!latest) return;
+        setLiveRun(latest);
+        if (latest.status === 'completed' || latest.status === 'failed') {
+          if (runPollRef.current) clearInterval(runPollRef.current);
+          setMissionStatus(latest.status === 'completed' ? 'completed' : 'failed');
+        } else {
+          setMissionStatus('active');
+        }
+      } catch { /* non-fatal */ }
+    }, 3000);
+    // Safety stop after 15 minutes
+    setTimeout(() => { if (runPollRef.current) clearInterval(runPollRef.current); }, 15 * 60 * 1000);
+  }, [missionId]);
+
+  useEffect(() => () => { if (runPollRef.current) clearInterval(runPollRef.current); }, []);
 
   // ── Proactive alert on first open ──────────────────────────
   useEffect(() => {
@@ -403,14 +454,13 @@ export default function MissionChatPage() {
     try {
       if (action.type === 'run_now') {
         showToast('🚀 Starting mission run…');
-        // Draft missions use /run (first build + execute), others use /execute (re-run)
         const endpoint = missionStatus === 'draft'
           ? `/api/missions/${missionId}/run`
           : `/api/missions/${missionId}/execute`;
         const res = await fetch(endpoint, { method: 'POST', credentials: 'include' });
         if (res.ok) {
-          showToast('✅ Mission started! Check the status on your mission page.');
-          router.push(`/dashboard/missions/${missionId}`);
+          showToast('✅ Mission started!');
+          startRunPolling();
         } else {
           const err = await res.json() as { error?: string };
           showToast(`❌ ${err.error ?? 'Could not start run. Please try from the mission page.'}`);
@@ -497,7 +547,7 @@ export default function MissionChatPage() {
   return (
     <>
       <div style={{
-        position: 'fixed', top: 0, left: 260, right: 0, bottom: 0,
+        position: 'fixed', top: 0, left: 'var(--sidebar-width, 260px)', right: 0, bottom: 0,
         display: 'flex', background: 'var(--bg-primary)', zIndex: 40,
         fontFamily: 'var(--font-sans)',
       }}>
@@ -592,6 +642,58 @@ export default function MissionChatPage() {
               </button>
             </div>
           </div>
+
+          {/* Live run ticker */}
+          {liveRun && !liveRunDismissed && (
+            <div style={{
+              background: liveRun.status === 'completed' ? 'hsla(152,69%,50%,0.1)' : liveRun.status === 'failed' ? 'hsla(0,80%,60%,0.1)' : 'hsla(258,90%,66%,0.1)',
+              borderBottom: `1px solid ${liveRun.status === 'completed' ? 'hsla(152,69%,50%,0.25)' : liveRun.status === 'failed' ? 'hsla(0,80%,60%,0.25)' : 'hsla(258,90%,66%,0.25)'}`,
+              padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
+            }}>
+              {/* Spinner or status icon */}
+              {liveRun.status !== 'completed' && liveRun.status !== 'failed' ? (
+                <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--accent)', borderTopColor: 'transparent', display: 'inline-block', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+              ) : liveRun.status === 'completed' ? (
+                <span style={{ color: 'var(--emerald)', fontSize: '0.85rem', flexShrink: 0 }}>✓</span>
+              ) : (
+                <span style={{ color: 'var(--red)', fontSize: '0.85rem', flexShrink: 0 }}>✕</span>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {liveRun.status === 'completed' ? 'Run completed' : liveRun.status === 'failed' ? 'Run failed' : 'Run in progress'} — #{liveRun.run_number}
+                </div>
+                {liveRun.agents_total > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
+                    <div style={{ flex: 1, height: 4, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%', borderRadius: 4,
+                        background: liveRun.status === 'failed' ? 'var(--red)' : 'var(--accent)',
+                        width: `${Math.round((liveRun.agents_done / liveRun.agents_total) * 100)}%`,
+                        transition: 'width 0.4s ease',
+                      }} />
+                    </div>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', flexShrink: 0 }}>
+                      {liveRun.agents_done}/{liveRun.agents_total} agents
+                      {liveRun.agents_failed > 0 && ` · ${liveRun.agents_failed} failed`}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {(liveRun.status === 'completed' || liveRun.status === 'failed') && (
+                <button
+                  onClick={() => router.push(`/dashboard/missions/${missionId}`)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}
+                >
+                  View →
+                </button>
+              )}
+              <button
+                onClick={() => setLiveRunDismissed(true)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1rem', lineHeight: 1, padding: '0 4px', flexShrink: 0 }}
+                aria-label="Dismiss"
+              >×</button>
+            </div>
+          )}
 
           {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '24px 0' }}>
