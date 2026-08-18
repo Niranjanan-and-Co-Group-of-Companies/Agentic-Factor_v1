@@ -330,6 +330,7 @@ function CommandCenterPageInner() {
             const evt = JSON.parse(line.slice(6)) as {
               type: string; text?: string; cleanText?: string;
               action?: ActionPayload; sessionId?: string; missionCreated?: { id: string; title: string };
+              credits?: number; inputTokens?: number; outputTokens?: number;
             };
             if (evt.type === 'delta' && evt.text) {
               streamed += evt.text;
@@ -350,6 +351,12 @@ function CommandCenterPageInner() {
               const final = evt.cleanText ?? streamed;
               setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: final, action_payload: evt.action ?? null, isStreaming: false, ts: Date.now() }; return u; });
               if (evt.sessionId && !activeSessionId) { setActiveSessionId(evt.sessionId); loadSessions(); }
+              // Optimistically subtract deducted credits so balance updates instantly
+              if (evt.credits && evt.credits > 0) {
+                setCredits(prev => prev ? { ...prev, remaining: Math.max(0, prev.remaining - evt.credits!) } : prev);
+              }
+              // Re-fetch true balance from DB after deductCredits() has committed
+              setTimeout(() => loadCredits(), 1500);
             }
             if (evt.type === 'error') {
               setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: `⚠️ ${evt.text ?? 'Error'}` }; return u; });
