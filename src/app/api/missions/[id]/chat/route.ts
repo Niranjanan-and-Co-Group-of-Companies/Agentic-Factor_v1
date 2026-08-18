@@ -144,33 +144,25 @@ export async function POST(
           outputTokens,
         }).catch(console.error);
 
-        // Persist messages to DB (fire-and-forget)
+        // Persist messages to DB (fire-and-forget — async IIFE returns a real Promise)
         const supabase = createServiceClient();
         const chatId = sessionId ?? await ensureSession(supabase, missionId, tenantId, recentMessages);
 
-        // Save user message (last in array)
         const userMsg = recentMessages[recentMessages.length - 1];
-        await supabase.from('mission_chat_messages').insert({
-          chat_id: chatId,
-          tenant_id: tenantId,
-          role: userMsg.role,
-          content: userMsg.content,
-        }).then(() => {
-          // Save assistant message
-          supabase.from('mission_chat_messages').insert({
-            chat_id: chatId,
-            tenant_id: tenantId,
-            role: 'assistant',
-            content: cleanText,
-            action_payload: actionPayload,
-            input_tokens: inputTokens,
-            output_tokens: outputTokens,
-            credits_deducted: credits,
-          }).catch(console.error);
-          // Update session timestamp
-          supabase.from('mission_chats').update({ updated_at: new Date().toISOString() })
-            .eq('id', chatId).catch(console.error);
-        }).catch(console.error);
+        ;(async () => {
+          const { error: ue } = await supabase.from('mission_chat_messages').insert({
+            chat_id: chatId, tenant_id: tenantId, role: userMsg.role, content: userMsg.content,
+          });
+          if (ue) { console.error('[chat/persist user]', ue); return; }
+          await supabase.from('mission_chat_messages').insert({
+            chat_id: chatId, tenant_id: tenantId, role: 'assistant', content: cleanText,
+            action_payload: actionPayload, input_tokens: inputTokens,
+            output_tokens: outputTokens, credits_deducted: credits,
+          });
+          await supabase.from('mission_chats')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', chatId);
+        })().catch(console.error);
 
         // Send final done event with action and metadata
         send({
