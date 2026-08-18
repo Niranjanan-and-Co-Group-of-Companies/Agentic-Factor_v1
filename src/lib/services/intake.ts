@@ -532,6 +532,73 @@ function sanitizePlaceholders(obj: unknown): unknown {
 }
 
 // ============================================================
+// Permission Repair — catches connectors the LLM forgot to declare
+//
+// The LLM writes agents and their tools first, then fills the
+// permissions array. Occasionally it under-declares: it builds a
+// Buffer publishing agent but forgets to list "buffer" in
+// permissions. This pass scans every tool in every agent, infers
+// the required provider from the tool name (using the same
+// PROVIDER_KEYWORDS map the normalizer uses), and inserts any
+// missing permission entries before the mission is persisted.
+// Running after normalizePermissions means all existing entries
+// are already on canonical keys, so dedup is a clean Set lookup.
+// ============================================================
+type RawPermission = {
+  type: string; service: string; scope: string;
+  confidentialityLevel: string; granted: boolean;
+};
+
+// Tool types handled internally by the platform — no tenant connector needed
+const INTERNAL_TOOL_TYPES = new Set([
+  'file_system', 'web_search', 'llm_reasoning', 'database',
+]);
+
+// These providers use a direct API key rather than OAuth
+const API_KEY_PROVIDERS = new Set([
+  'openai', 'gemini', 'elevenlabs', 'runwayml', 'heygen',
+]);
+
+function repairMissionPermissions(
+  agents: Array<{ role: string; tools: Array<{ name: string; type: string }> }>,
+  permissions: RawPermission[]
+): RawPermission[] {
+  const declared = new Set(permissions.map(p => p.service.toLowerCase().trim()));
+  const repaired: RawPermission[] = [...permissions];
+
+  for (const agent of agents) {
+    for (const tool of agent.tools) {
+      // Skip tools the platform handles natively
+      if (INTERNAL_TOOL_TYPES.has(tool.type)) continue;
+
+      // Infer provider from tool name using the existing keyword map
+      const toolLower = tool.name.toLowerCase().trim();
+      let rawProvider = '';
+      for (const { keywords, provider } of PROVIDER_KEYWORDS) {
+        if (keywords.some(kw => toolLower.includes(kw))) { rawProvider = provider; break; }
+      }
+      if (!rawProvider) continue;
+
+      const canonical = normalizeServiceName(rawProvider);
+      if (!canonical || declared.has(canonical)) continue;
+
+      const authType = API_KEY_PROVIDERS.has(canonical) ? 'api_key' : 'composio_oauth';
+      declared.add(canonical);
+      repaired.push({
+        type: authType,
+        service: canonical,
+        scope: `${agent.role} — ${tool.name}`,
+        confidentialityLevel: 'confidential',
+        granted: false,
+      });
+      console.log(`[intake/repair] Added missing permission: ${canonical} (tool "${tool.name}" in agent "${agent.role}")`);
+    }
+  }
+
+  return repaired;
+}
+
+// ============================================================
 // Core: Generate Mission JSON from natural language
 // ============================================================
 export async function generateMissionJSON(
@@ -954,6 +1021,15 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
       return { ...perm, granted: connectedSlugs.has(service) };
     });
   }
+
+  // 4.5.2 Repair pass — infer any permissions the LLM missed from agent tool declarations.
+  // Runs after normalise (4.5) and auto-grant (4.5.1) so all existing entries are on
+  // canonical keys and newly-added entries start with granted: false (auto-grant will
+  // not rerun, so the command-chat route's own diff handles the connected check).
+  llmOutput.permissions = repairMissionPermissions(
+    llmOutput.agents as Array<{ role: string; tools: Array<{ name: string; type: string }> }>,
+    llmOutput.permissions as RawPermission[]
+  ) as typeof llmOutput.permissions;
 
   // 4.6 Validate composio_execute action names against Composio's live action list.
   // If the LLM invented a name (e.g. "TRELLO_ADD_CARDS" instead of "TRELLO_CREATE_TRELLO_CARD"),
