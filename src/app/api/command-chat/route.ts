@@ -138,6 +138,21 @@ Current state summary for your context:
   return { systemPrompt, proactiveAlert };
 }
 
+function inferAgentIcon(role: string, toolTypes: string[]): string {
+  const r = role.toLowerCase();
+  const t = toolTypes.join(' ').toLowerCase();
+  if (/image|photo|visual|dall|design|generat.*image/.test(`${r} ${t}`)) return '🎨';
+  if (/post|publish|buffer|social|facebook|instagram|twitter/.test(`${r} ${t}`)) return '📲';
+  if (/email|outreach|gmail|smtp/.test(`${r} ${t}`)) return '📧';
+  if (/video|youtube|render|edit/.test(`${r} ${t}`)) return '🎬';
+  if (/search|research|scrape|web/.test(`${r} ${t}`)) return '🔍';
+  if (/data|analyt|report|spread/.test(`${r} ${t}`)) return '📊';
+  if (/lead|crm|hubspot|salesforce/.test(`${r} ${t}`)) return '🎯';
+  if (/notify|alert|slack|discord/.test(`${r} ${t}`)) return '🔔';
+  if (/content|write|copy|caption|text/.test(`${r} ${t}`)) return '🧠';
+  return '🤖';
+}
+
 function formatAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -310,10 +325,26 @@ export async function POST(request: NextRequest) {
             if (result.mission && !result.isDiscovery) {
               const saved = await persistMission(result.mission, tenantId);
               missionCreated = { id: saved.id, title: saved.title };
-              // Override action with mission_created type
-              actionPayload = { type: 'mission_created', missionId: saved.id, missionTitle: saved.title };
+
+              // Extract agent cards for the visual pipeline rendered in chat
+              const agentCards = result.mission.agents
+                .sort((a, b) => a.agentIndex - b.agentIndex)
+                .map(a => ({
+                  name: a.role,
+                  icon: inferAgentIcon(a.role, a.tools.map(t => t.type)),
+                  role: a.capabilities.slice(0, 2).join(' · '),
+                  tool: a.tools[0]?.name ?? '',
+                  trustLevel: a.trustLevel,
+                }));
+
+              actionPayload = {
+                type: 'mission_created',
+                missionId: saved.id,
+                missionTitle: saved.title,
+                agents: agentCards,
+                orchestrationPattern: result.mission.orchestration.pattern,
+              };
             } else if (result.isDiscovery && result.question) {
-              // Intake needs more info — override the action to ask the question
               actionPayload = { type: 'discovery_question', question: result.question };
             }
           } catch (intakeErr) {

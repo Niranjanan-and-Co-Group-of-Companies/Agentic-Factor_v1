@@ -16,6 +16,7 @@ interface ChatMessage {
   isStreaming?: boolean;
   ts?: number;
 }
+interface AgentCard { name: string; icon?: string; role: string; tool?: string; trustLevel?: string; }
 interface ActionPayload {
   type: string;
   missionId?: string;
@@ -29,6 +30,8 @@ interface ActionPayload {
   intent?: string;
   question?: string;
   error?: string;
+  agents?: AgentCard[];
+  orchestrationPattern?: string;
 }
 interface MissionShortcut { id: string; title: string; status: string; }
 interface LiveRun {
@@ -434,16 +437,133 @@ function CommandCenterPageInner() {
       </div>
     );
 
-    if (action.type === 'mission_created') return (
-      <div style={{ ...card, borderColor: 'var(--accent)', background: 'hsla(258,90%,66%,0.06)' }}>
-        <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent)' }}>✨ Mission Created!</div>
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }}>"{action.missionTitle}"</div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button style={btnStyle} onClick={() => applyAction(action, msgIndex)}>View & Configure →</button>
-          <button style={ghostBtn} onClick={() => { applyAction({ type: 'run_mission', missionId: action.missionId, missionTitle: action.missionTitle, missionStatus: 'draft' }, msgIndex); }}>Run Now</button>
+    if (action.type === 'mission_created') {
+      const agents: AgentCard[] = action.agents ?? [];
+      const patternLabel: Record<string, string> = {
+        sequential: 'Sequential', parallel: 'Parallel',
+        orchestrator_worker: 'Orchestrator + Workers', hierarchical: 'Hierarchical',
+      };
+      const nodeStyle: React.CSSProperties = {
+        display: 'flex', alignItems: 'flex-start', gap: 10,
+        background: 'var(--bg-primary)', border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-md)', padding: '10px 12px',
+        transition: 'border-color 0.15s',
+      };
+      const toolPill = (label: string) => (
+        <span style={{
+          display: 'inline-block', marginTop: 4,
+          background: 'var(--accent-subtle)', color: 'var(--accent)',
+          fontSize: '0.62rem', fontWeight: 700, padding: '2px 7px',
+          borderRadius: 99, letterSpacing: '0.3px', textTransform: 'uppercase',
+        }}>{label}</span>
+      );
+      return (
+        <div style={{ marginTop: 12, maxWidth: 500, animation: 'slideIn 0.3s ease' }}>
+          {/* Header */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 10,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent)' }}>✨ Mission Created</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 400 }}>— {action.missionTitle}</span>
+            </div>
+            {action.orchestrationPattern && (
+              <span style={{ fontSize: '0.6rem', fontWeight: 700, color: 'var(--text-muted)', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 99, padding: '2px 8px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                {patternLabel[action.orchestrationPattern] ?? action.orchestrationPattern}
+              </span>
+            )}
+          </div>
+
+          {/* Pipeline canvas */}
+          <div style={{
+            background: 'linear-gradient(135deg, hsla(217,91%,60%,0.07), hsla(270,70%,60%,0.05))',
+            border: '1px solid hsla(217,91%,60%,0.3)',
+            borderRadius: 'var(--radius-lg)', padding: '14px 14px 10px',
+          }}>
+
+            {/* Trigger node */}
+            <div style={nodeStyle}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                background: 'hsla(38,92%,55%,0.15)', border: '1px solid hsla(38,92%,55%,0.3)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.95rem',
+              }}>⏰</div>
+              <div>
+                <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Trigger</div>
+                <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)', marginTop: 1 }}>Schedule · Run Now</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 1 }}>Mon, Wed, Sat · 1 PM IST — or fire manually</div>
+              </div>
+            </div>
+
+            {/* Agents */}
+            {agents.length > 0 ? agents.map((agent, i) => (
+              <React.Fragment key={i}>
+                {/* Connector */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', paddingLeft: 22, margin: '2px 0' }}>
+                  <div style={{ width: 1, height: 8, background: 'hsla(217,91%,60%,0.4)' }} />
+                  <div style={{ fontSize: '0.6rem', color: 'var(--accent)', lineHeight: 1, marginLeft: -3 }}>▼</div>
+                  <div style={{ width: 1, height: 4, background: 'hsla(217,91%,60%,0.4)' }} />
+                </div>
+
+                {/* Agent card */}
+                <div style={{
+                  ...nodeStyle,
+                  borderColor: 'var(--border)',
+                  background: 'var(--bg-secondary)',
+                }}>
+                  {/* Number badge */}
+                  <div style={{
+                    width: 22, height: 22, borderRadius: '50%', flexShrink: 0, marginTop: 2,
+                    background: 'var(--accent)', color: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '0.65rem', fontWeight: 800,
+                  }}>{i + 1}</div>
+
+                  {/* Icon */}
+                  <div style={{
+                    width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                    background: 'var(--bg-card)', border: '1px solid var(--border)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem',
+                  }}>{agent.icon ?? '🤖'}</div>
+
+                  {/* Info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{agent.name}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 1, lineHeight: 1.4 }}>{agent.role}</div>
+                    {agent.tool && toolPill(agent.tool)}
+                  </div>
+
+                  {/* Status dot — idle */}
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--text-muted)', flexShrink: 0, marginTop: 4, opacity: 0.5 }} />
+                </div>
+              </React.Fragment>
+            )) : (
+              <div style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--text-muted)', paddingLeft: 4 }}>
+                Agents will appear here after the mission is configured.
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button
+                style={{ ...btnStyle, flex: 1, justifyContent: 'center' }}
+                onClick={() => applyAction({ type: 'run_mission', missionId: action.missionId, missionTitle: action.missionTitle, missionStatus: 'active' }, msgIndex)}
+                disabled={applying}
+              >
+                {applying ? 'Starting…' : '▶ Run Now'}
+              </button>
+              <button
+                style={{ ...ghostBtn, flex: 1, justifyContent: 'center' }}
+                onClick={() => router.push(`/dashboard/missions/${action.missionId}`)}
+              >
+                Configure →
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
 
     if (action.type === 'show_missions') return (
       <div style={card}>
