@@ -610,7 +610,8 @@ function CommandCenterPageInner() {
               {/* Welcome / empty state */}
               {messages.length === 0 && !proactiveAlert && (
                 <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-                  <div style={{ fontSize: '2.8rem', marginBottom: 16 }}>✦</div>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo.png" alt="Agentic Factor" style={{ height: 56, objectFit: 'contain', marginBottom: 20, display: 'inline-block' }} />
                   <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>Command Center</h2>
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', lineHeight: 1.7, maxWidth: 440, margin: '0 auto 28px' }}>
                     Run missions, check status, create automations, connect integrations — all by just saying what you need.

@@ -16,7 +16,7 @@ function getSupabase() {
 
 // Core nav — lean and purposeful
 const NAV_ITEMS = [
-  { href: "/dashboard",       icon: "✦",  label: "Command Center" },
+  { href: "/dashboard",       icon: "⌂",  label: "Command Center" },
   { href: "/connectors",      icon: "🔌", label: "Connectors"     },
   { href: "/dashboard/usage", icon: "📈", label: "Usage & Credits" },
   { href: "/pricing",         icon: "🏷️", label: "Plans & Pricing" },
@@ -138,15 +138,15 @@ export default function Sidebar() {
   const SidebarContent = ({ mobile = false }: { mobile?: boolean }) => (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Logo + collapse toggle */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: collapsed && !mobile ? "center" : "space-between", padding: collapsed && !mobile ? "14px 0" : "14px 16px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: collapsed && !mobile ? "center" : "space-between", padding: collapsed && !mobile ? "10px 0" : "12px 16px 10px", borderBottom: "1px solid var(--border)", flexShrink: 0, minHeight: collapsed && !mobile ? 56 : 72 }}>
         {(!collapsed || mobile) && (
-          <Link href="/dashboard">
-            <Image src="/logo.png" alt="Agentic Factor" width={120} height={32} style={{ objectFit: "contain", display: "block" }} />
+          <Link href="/dashboard" style={{ display: "flex", alignItems: "center" }}>
+            <Image src="/logo.png" alt="Agentic Factor" width={160} height={44} style={{ objectFit: "contain", display: "block" }} />
           </Link>
         )}
         {collapsed && !mobile && (
-          <Link href="/dashboard" title="Command Center">
-            <span style={{ fontSize: "1.3rem", lineHeight: 1 }}>✦</span>
+          <Link href="/dashboard" title="Command Center" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Image src="/logo.png" alt="AF" width={36} height={36} style={{ objectFit: "contain", display: "block", borderRadius: 6 }} />
           </Link>
         )}
         {!mobile && (
@@ -250,7 +250,7 @@ export default function Sidebar() {
             <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
           </svg>
         </button>
-        <Image src="/logo.png" alt="Agentic Factor" width={90} height={32} style={{ objectFit: "contain" }} />
+        <Image src="/logo.png" alt="Agentic Factor" width={110} height={36} style={{ objectFit: "contain" }} />
         <button onClick={() => router.push("/dashboard?new=1")} style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 12px", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" }}>+ New</button>
       </div>
 
