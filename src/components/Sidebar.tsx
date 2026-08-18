@@ -162,10 +162,25 @@ export default function Sidebar() {
         {loadingAuth ? <MissionSkeleton /> : user ? (
           loadingMissions ? <MissionSkeleton /> :
           missions.length > 0 ? missions.map(m => (
-            <Link key={m.id} href={`/dashboard?mission=${m.id}`} className="mission-link">
-              <div className="ml-dot" style={{ background: STATUS_COLORS[m.status] || "var(--text-muted)" }} />
-              {m.title}
-            </Link>
+            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 0 }}>
+              <Link href={`/dashboard/missions/${m.id}`} className="mission-link" style={{ flex: 1, minWidth: 0 }}>
+                <div className="ml-dot" style={{ background: STATUS_COLORS[m.status] || "var(--text-muted)", flexShrink: 0 }} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.title}</span>
+              </Link>
+              <Link
+                href={`/dashboard/missions/${m.id}/chat`}
+                title="Open AI chat for this mission"
+                style={{
+                  flexShrink: 0, padding: "2px 6px", borderRadius: "var(--radius-sm)",
+                  color: "var(--text-muted)", fontSize: "0.8rem", textDecoration: "none",
+                  lineHeight: 1, opacity: 0.6, transition: "opacity 0.15s",
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = "1"; (e.currentTarget as HTMLAnchorElement).style.color = "var(--accent)"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = "0.6"; (e.currentTarget as HTMLAnchorElement).style.color = "var(--text-muted)"; }}
+              >
+                💬
+              </Link>
+            </div>
           )) : (
             <Link href="/dashboard/creator" className="mission-link" style={{ color: "var(--emerald)" }}>
               <span style={{ fontSize: "0.9rem" }}>✨</span> Create Your First Mission

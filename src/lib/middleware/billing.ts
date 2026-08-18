@@ -360,6 +360,27 @@ export async function deductCredits(
   }
 }
 
+// ── Chat credit pricing ──────────────────────────────────────────────────────
+// 1 credit ≈ $0.011 customer-facing value (derived from llm_call_pro=12 at 4x markup).
+// Chat uses 3x markup (lower than 4x for missions) — still profitable since
+// context windows are large and usage is frequent.
+const CHAT_CREDIT_PER_USD = 90.9; // 1 / 0.011 ≈ 90.9 credits per $1 customer value
+
+/**
+ * Calculate credits to charge for one chat exchange.
+ * Proportional to actual token usage at 3× our real cost.
+ * Never shown to the customer — balance just decreases naturally.
+ */
+export function calculateChatCreditCost(
+  inputTokens: number,
+  outputTokens: number,
+  model: string
+): number {
+  const realCostUsd = calculateRealCostUsd(model, inputTokens, outputTokens);
+  const customerCostUsd = realCostUsd * 3; // 3× markup
+  return Math.max(2, Math.ceil(customerCostUsd * CHAT_CREDIT_PER_USD));
+}
+
 /**
  * Get the credit cost for an LLM model.
  */

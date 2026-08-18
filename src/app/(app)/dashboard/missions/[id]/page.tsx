@@ -711,6 +711,13 @@ export default function MissionDetailPage() {
             <p className="page-subtitle">Mission ID: {mission.id}</p>
           </div>
           <div className="row">
+            <Link
+              href={`/dashboard/missions/${missionId}/chat`}
+              className="btn btn-ghost btn-sm"
+              style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--accent)", borderColor: "var(--accent-glow)" }}
+            >
+              💬 Chat
+            </Link>
             <span className="badge badge-purple" style={{ textTransform: "capitalize" }}>{mission.status}</span>
             {mission.training_enabled && (
               <>
