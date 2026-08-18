@@ -133,6 +133,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ connectors: data || [] });
     }
 
+    case 'templates': {
+      const { data } = await supabase
+        .from('mission_templates')
+        .select('id, slug, title, description, category, icon, tags, is_featured, use_count, mission_json, created_at')
+        .order('is_featured', { ascending: false })
+        .order('use_count', { ascending: false });
+      return NextResponse.json({ templates: data || [] });
+    }
+
     default:
       return NextResponse.json({ error: 'Invalid view' }, { status: 400 });
   }

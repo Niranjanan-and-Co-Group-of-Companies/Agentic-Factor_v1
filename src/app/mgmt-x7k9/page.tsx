@@ -6,7 +6,7 @@ import { useState, useEffect } from "react";
 // With Add/Remove Admin Users popup.
 // ============================================================
 
-type Tab = "dashboard" | "connectors" | "tenants" | "missions" | "models" | "connector_defs";
+type Tab = "dashboard" | "connectors" | "tenants" | "missions" | "models" | "connector_defs" | "templates";
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -32,6 +32,11 @@ export default function AdminPage() {
   // Edit Model/Connector modals
   const [editingModel, setEditingModel] = useState<any>(null);
   const [editingConnector, setEditingConnector] = useState<any>(null);
+
+  // Template management
+  const [showAddTemplate, setShowAddTemplate] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<any>(null);
+  const [newTemplate, setNewTemplate] = useState({ slug: '', title: '', description: '', category: 'productivity', icon: '🎯', tags: '', is_featured: false, mission_json: '' });
 
   // Password reset
   const [currentPassword, setCurrentPassword] = useState("");
@@ -224,6 +229,7 @@ export default function AdminPage() {
     { key: "missions", label: "Missions", icon: "🎯" },
     { key: "models", label: "LLM Models", icon: "🧠" },
     { key: "connector_defs", label: "Connector Defs", icon: "⚙️" },
+    { key: "templates", label: "Templates", icon: "📋" },
   ];
 
   return (
@@ -488,7 +494,159 @@ export default function AdminPage() {
               </table>
             </div>
           )}
+
+          {/* TEMPLATES TAB */}
+          {tab === "templates" && (
+            <div>
+              <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-md)", alignItems: "center" }}>
+                <h3 style={{ fontSize: "0.95rem", fontWeight: 700 }}>Mission Templates ({(data?.templates || []).length})</h3>
+                <button className="btn btn-primary btn-sm" onClick={() => setShowAddTemplate(true)}>+ Add Template</button>
+              </div>
+              {(!data?.templates || data.templates.length === 0) && (
+                <div style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                  No templates yet. Add the first one!
+                </div>
+              )}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
+                {(data?.templates || []).map((t: any) => (
+                  <div key={t.id} className="card" style={{ padding: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
+                      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                        <span style={{ fontSize: "1.4rem" }}>{t.icon ?? "🎯"}</span>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: "0.85rem", color: "var(--text-primary)" }}>{t.title}</div>
+                          <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", marginTop: 2 }}>{t.category} · {t.use_count ?? 0} uses</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {t.is_featured && <span className="badge badge-purple" style={{ fontSize: "0.6rem" }}>Featured</span>}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: 10, lineHeight: 1.4 }}>{t.description}</div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="btn btn-ghost btn-sm" style={{ fontSize: "0.72rem" }} onClick={() => setEditingTemplate({ ...t, mission_json: JSON.stringify(t.mission_json, null, 2) })}>✏️ Edit</button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontSize: "0.72rem", color: "var(--ruby)" }}
+                        onClick={async () => {
+                          if (!confirm(`Delete template "${t.title}"?`)) return;
+                          await fetch(`/api/mgmt-x7k9/templates?id=${t.id}`, { method: "DELETE" });
+                          fetchData();
+                        }}
+                      >🗑 Delete</button>
+                      <button
+                        className={`btn btn-sm ${t.is_featured ? "btn-primary" : "btn-ghost"}`}
+                        style={{ fontSize: "0.72rem", marginLeft: "auto" }}
+                        onClick={async () => {
+                          await fetch("/api/mgmt-x7k9/templates", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: t.id, is_featured: !t.is_featured }) });
+                          fetchData();
+                        }}
+                      >
+                        {t.is_featured ? "★ Featured" : "☆ Feature"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
+      )}
+
+      {/* ADD TEMPLATE MODAL */}
+      {showAddTemplate && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} onClick={() => setShowAddTemplate(false)}>
+          <div className="card" style={{ maxWidth: 560, width: "90%", padding: "var(--space-xl)", maxHeight: "85vh", overflow: "auto" }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "var(--space-lg)" }}>📋 Add Mission Template</h3>
+            {[
+              { label: "Slug (unique ID)", key: "slug", placeholder: "eg: daily-sales-report" },
+              { label: "Title", key: "title", placeholder: "Daily Sales Report" },
+              { label: "Description", key: "description", placeholder: "Generates a daily sales summary from CRM and emails the team" },
+              { label: "Category", key: "category", placeholder: "productivity, sales, marketing, operations" },
+              { label: "Icon (emoji)", key: "icon", placeholder: "📊" },
+              { label: "Tags (comma-separated)", key: "tags", placeholder: "sales, crm, email" },
+            ].map(f => (
+              <div key={f.key} style={{ marginBottom: "var(--space-sm)" }}>
+                <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: 4 }}>{f.label}</label>
+                <input
+                  value={(newTemplate as any)[f.key]}
+                  onChange={e => setNewTemplate(prev => ({ ...prev, [f.key]: e.target.value }))}
+                  placeholder={f.placeholder}
+                  style={{ width: "100%", padding: "7px 10px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.82rem" }}
+                />
+              </div>
+            ))}
+            <div style={{ marginBottom: "var(--space-sm)" }}>
+              <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: 4 }}>Mission JSON (agents, orchestration, etc.)</label>
+              <textarea
+                value={newTemplate.mission_json}
+                onChange={e => setNewTemplate(prev => ({ ...prev, mission_json: e.target.value }))}
+                placeholder='{}'
+                rows={6}
+                style={{ width: "100%", padding: "7px 10px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.78rem", fontFamily: "monospace", resize: "vertical" }}
+              />
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "var(--space-md)", fontSize: "0.82rem", cursor: "pointer" }}>
+              <input type="checkbox" checked={newTemplate.is_featured} onChange={e => setNewTemplate(prev => ({ ...prev, is_featured: e.target.checked }))} />
+              Featured (shown on dashboard welcome)
+            </label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-primary btn-sm" onClick={async () => {
+                try {
+                  const payload = { ...newTemplate, tags: newTemplate.tags.split(',').map(s => s.trim()).filter(Boolean), mission_json: JSON.parse(newTemplate.mission_json || '{}') };
+                  const res = await fetch("/api/mgmt-x7k9/templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+                  if (res.ok) { setShowAddTemplate(false); setToast("✅ Template added!"); fetchData(); }
+                  else { const e = await res.json(); setToast(`❌ ${e.error}`); }
+                } catch { setToast("❌ Invalid JSON in mission_json"); }
+              }}>Save Template</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowAddTemplate(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT TEMPLATE MODAL */}
+      {editingTemplate && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} onClick={() => setEditingTemplate(null)}>
+          <div className="card" style={{ maxWidth: 560, width: "90%", padding: "var(--space-xl)", maxHeight: "85vh", overflow: "auto" }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "var(--space-lg)" }}>✏️ Edit Template</h3>
+            {[
+              { label: "Title", key: "title" },
+              { label: "Description", key: "description" },
+              { label: "Category", key: "category" },
+              { label: "Icon (emoji)", key: "icon" },
+            ].map(f => (
+              <div key={f.key} style={{ marginBottom: "var(--space-sm)" }}>
+                <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: 4 }}>{f.label}</label>
+                <input
+                  value={editingTemplate[f.key] ?? ""}
+                  onChange={e => setEditingTemplate((prev: any) => ({ ...prev, [f.key]: e.target.value }))}
+                  style={{ width: "100%", padding: "7px 10px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.82rem" }}
+                />
+              </div>
+            ))}
+            <div style={{ marginBottom: "var(--space-md)" }}>
+              <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block", marginBottom: 4 }}>Mission JSON</label>
+              <textarea
+                value={editingTemplate.mission_json ?? "{}"}
+                onChange={e => setEditingTemplate((prev: any) => ({ ...prev, mission_json: e.target.value }))}
+                rows={6}
+                style={{ width: "100%", padding: "7px 10px", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "0.78rem", fontFamily: "monospace", resize: "vertical" }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-primary btn-sm" onClick={async () => {
+                try {
+                  const payload = { id: editingTemplate.id, title: editingTemplate.title, description: editingTemplate.description, category: editingTemplate.category, icon: editingTemplate.icon, mission_json: JSON.parse(editingTemplate.mission_json || '{}') };
+                  const res = await fetch("/api/mgmt-x7k9/templates", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+                  if (res.ok) { setEditingTemplate(null); setToast("✅ Template updated!"); fetchData(); }
+                  else { const e = await res.json(); setToast(`❌ ${e.error}`); }
+                } catch { setToast("❌ Invalid JSON in mission_json"); }
+              }}>Save Changes</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setEditingTemplate(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ADD ADMIN MODAL */}

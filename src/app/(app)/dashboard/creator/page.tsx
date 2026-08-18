@@ -571,6 +571,9 @@ function MissionCreatorInner() {
             </div>
           </div>
         </div>
+
+        {/* Templates strip */}
+        <TemplatesStrip onFork={(missionId: string) => router.push(`/dashboard/missions/${missionId}`)} />
       </>
     );
   }
@@ -1029,5 +1032,56 @@ export default function MissionCreator() {
     <Suspense fallback={<div style={{ padding: "var(--space-2xl)", textAlign: "center", color: "var(--text-muted)" }}>Loading Mission Architect...</div>}>
       <MissionCreatorInner />
     </Suspense>
+  );
+}
+
+// ── Templates strip shown below the creator form ──
+function TemplatesStrip({ onFork }: { onFork: (missionId: string) => void }) {
+  const [templates, setTemplates] = useState<{ id: string; slug: string; title: string; description: string; icon: string; category: string }[]>([]);
+  const [forking, setForking] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/templates?featured=true')
+      .then(r => r.json())
+      .then((d: { templates?: typeof templates }) => setTemplates(d.templates?.slice(0, 6) ?? []))
+      .catch(() => {});
+  }, []);
+
+  const handleFork = async (slug: string) => {
+    setForking(slug);
+    try {
+      const res = await fetch('/api/templates', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) });
+      if (res.ok) {
+        const d = await res.json() as { mission_id: string };
+        setToast('✅ Mission created! Redirecting…');
+        setTimeout(() => onFork(d.mission_id), 800);
+      } else { setToast('❌ Could not create from template.'); }
+    } catch { setToast('❌ Connection error.'); }
+    setForking(null);
+  };
+
+  if (!templates.length) return null;
+
+  return (
+    <div style={{ marginTop: 40, paddingTop: 30, borderTop: '1px solid var(--border)' }}>
+      {toast && <div style={{ position: 'fixed', top: 20, right: 20, zIndex: 9999, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px 18px', fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-primary)', boxShadow: '0 4px 24px rgba(0,0,0,0.15)' }}>{toast}</div>}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>Or start from a template</div>
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Pre-built automations ready to deploy</div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
+        {templates.map(t => (
+          <div key={t.id} className="card" style={{ padding: 12, display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer' }} onClick={() => handleFork(t.slug)}>
+            <div style={{ fontSize: '1.4rem', flexShrink: 0 }}>{t.icon ?? '🎯'}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--text-primary)', marginBottom: 2 }}>{t.title}</div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{t.description}</div>
+              <div style={{ marginTop: 6, fontSize: '0.72rem', color: 'var(--accent)', fontWeight: 600 }}>{forking === t.slug ? 'Creating…' : 'Use template →'}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

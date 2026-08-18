@@ -1206,26 +1206,48 @@ ${pythonCode}`;
             if (signal.__social_api_call__) {
               const { provider, action, cost_credits } = signal.__social_api_call__;
               console.log(`[Agent ${agent.id}] Social API call: ${provider}/${action} (${cost_credits} credits)`);
-              
-              // Log the billing event for credit deduction
               try {
                 await supabase.from('events').insert({
                   tenant_id: tenantId,
                   event_type: 'billing.social_api_call',
                   entity_type: 'agent',
                   entity_id: agent.id,
-                  payload: {
-                    missionId,
-                    provider,
-                    action,
-                    cost_credits,
-                    agentRole: agent.role,
-                    timestamp: new Date().toISOString(),
-                  },
+                  payload: { missionId, provider, action, cost_credits, agentRole: agent.role, timestamp: new Date().toISOString() },
                 });
               } catch (billingErr) {
                 console.warn(`[Agent ${agent.id}] Billing event insert failed (non-fatal):`, billingErr);
               }
+            }
+
+            // ── schedule_check() SDK call — pause mission and register a wake-up event ──
+            if (signal.__schedule__) {
+              const { delay, context: schedCtx, reason } = signal.__schedule__;
+              console.log(`[Agent ${agent.id}] Schedule signal: delay=${delay} reason="${reason}"`);
+              try {
+                // Insert mission.wait event — the cron scheduler (api/cron/scheduler) reads these
+                // and wakes the mission when the delay has elapsed.
+                await supabase.from('events').insert({
+                  tenant_id: tenantId,
+                  event_type: 'mission.wait',
+                  entity_type: 'mission',
+                  entity_id: missionId,
+                  payload: {
+                    action: 'sleep',
+                    duration: delay,
+                    context: schedCtx ?? {},
+                    agentId: agent.id,
+                    agentRole: agent.role,
+                    reason: reason ?? '',
+                    scheduledAt: new Date().toISOString(),
+                  },
+                });
+                // Transition mission to paused so executor stops here
+                const { transitionMissionStatus } = await import('../orchestrator');
+                await transitionMissionStatus(missionId, tenantId, 'paused');
+              } catch (schedErr) {
+                console.warn(`[Agent ${agent.id}] schedule_check persistence failed:`, schedErr);
+              }
+              detectedSignal = { type: 'schedule', delay };
             }
           } catch (sigErr) {
             console.warn(`[Agent ${agent.id}] Signal parse error:`, sigErr);
