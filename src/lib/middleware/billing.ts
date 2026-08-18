@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server';
+import { getUsdToInr } from '@/lib/services/fx-rate';
 
 // ============================================================
 // Billing Enforcement — Credit-Based Plan System
@@ -361,24 +362,29 @@ export async function deductCredits(
 }
 
 // ── Chat credit pricing ──────────────────────────────────────────────────────
-// 1 credit ≈ $0.011 customer-facing value (derived from llm_call_pro=12 at 4x markup).
-// Chat uses 3x markup (lower than 4x for missions) — still profitable since
-// context windows are large and usage is frequent.
-const CHAT_CREDIT_PER_USD = 90.9; // 1 / 0.011 ≈ 90.9 credits per $1 customer value
+// Credits are denominated in INR: 1 credit = ₹1 of customer value (derived
+// from plan pricing — Individual ₹999/mo for 1000 credits).
+// Chat markup: 3× our real USD cost, converted to INR at live rate.
+// Formula: credits = realCostUsd × 3 × (liveUsdInr / INR_PER_CREDIT)
+// When INR weakens (more ₹ per $), we automatically charge more credits,
+// so our USD margin stays protected without touching plan prices.
+const CHAT_MARKUP = 3;
+const INR_PER_CREDIT = 1; // ₹1 per credit — update if plan pricing changes
 
 /**
  * Calculate credits to charge for one chat exchange.
- * Proportional to actual token usage at 3× our real cost.
+ * Proportional to actual token usage × 3× markup, converted via live USD/INR.
  * Never shown to the customer — balance just decreases naturally.
  */
-export function calculateChatCreditCost(
+export async function calculateChatCreditCost(
   inputTokens: number,
   outputTokens: number,
   model: string
-): number {
+): Promise<number> {
   const realCostUsd = calculateRealCostUsd(model, inputTokens, outputTokens);
-  const customerCostUsd = realCostUsd * 3; // 3× markup
-  return Math.max(2, Math.ceil(customerCostUsd * CHAT_CREDIT_PER_USD));
+  const usdToInr = await getUsdToInr();
+  const customerCostInr = realCostUsd * CHAT_MARKUP * usdToInr;
+  return Math.max(2, Math.ceil(customerCostInr / INR_PER_CREDIT));
 }
 
 /**

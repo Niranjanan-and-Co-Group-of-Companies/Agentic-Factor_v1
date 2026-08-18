@@ -136,7 +136,7 @@ export async function POST(
         }
 
         // Deduct credits proportionally (fire-and-forget, non-blocking)
-        const credits = calculateChatCreditCost(inputTokens, outputTokens, 'claude-sonnet-4-6');
+        const credits = await calculateChatCreditCost(inputTokens, outputTokens, 'claude-sonnet-4-6');
         deductCredits(tenantId, credits, 'chat_message', {
           provider: 'anthropic',
           model: 'claude-sonnet-4-6',
