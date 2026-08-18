@@ -102,17 +102,18 @@ body {
 }
 
 /* ── App Shell ── */
-:root { --sidebar-width: 260px; } /* consumed by chat overlay and any full-screen pages */
+:root { --sidebar-width: 260px; } /* set dynamically by Sidebar.tsx via JS; consumed by Command Center + full-screen pages */
 .app-shell { display: flex; min-height: 100vh; }
 
 .sidebar {
-  width: 260px;
+  width: var(--sidebar-width, 260px); /* JS overrides this; CSS var is the live source of truth */
   background: var(--bg-nav);
   backdrop-filter: blur(20px);
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
   position: fixed; top: 0; left: 0; bottom: 0; z-index: 50;
-  overflow: hidden; /* inner sections handle scrolling, not the sidebar itself */
+  overflow: hidden;
+  transition: width 0.2s ease;
 }
 
 /* Pinned logo at top */
@@ -173,7 +174,7 @@ body {
 }
 .nav-link .icon { font-size: 1.1rem; width: 24px; text-align: center; }
 
-.main-content { flex: 1; margin-left: 260px; padding: var(--space-2xl); }
+.main-content { flex: 1; margin-left: var(--sidebar-width, 260px); padding: var(--space-2xl); transition: margin-left 0.2s ease; }
 .page-header { margin-bottom: var(--space-xl); }
 .page-title { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.5px; }
 .page-subtitle { color: var(--text-secondary); margin-top: var(--space-xs); font-size: 0.95rem; }
@@ -605,9 +606,7 @@ body {
 
 /* ── Responsive ── */
 @media (max-width: 1024px) {
-  :root { --sidebar-width: 220px; }
-  .sidebar { width: 220px; }
-  .main-content { margin-left: 220px; padding: var(--space-lg); }
+  .main-content { padding: var(--space-lg); }
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .gemini-panel { width: 300px; right: 16px; bottom: 80px; }
@@ -615,13 +614,13 @@ body {
   .command-popup { width: 280px; }
 }
 @media (max-width: 768px) {
-  :root { --sidebar-width: 0px; }
+  :root { --sidebar-width: 0px !important; }
   .sidebar { display: none; }
   .mobile-topbar { display: flex; }
   .main-content {
-    margin-left: 0;
+    margin-left: 0 !important;
     padding: var(--space-md);
-    padding-top: calc(60px + var(--space-md)); /* clear mobile top bar */
+    padding-top: calc(60px + var(--space-md));
   }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
   .gemini-panel { width: calc(100vw - 32px); right: 16px; }

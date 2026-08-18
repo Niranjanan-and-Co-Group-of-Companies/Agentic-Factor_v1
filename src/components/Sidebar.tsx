@@ -1,35 +1,11 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 
-interface Mission { id: string; title: string; status: string; }
 interface UserProfile { name: string; email: string; avatar: string | null; }
-
-const STATUS_COLORS: Record<string, string> = {
-  active: "var(--emerald)", building: "var(--amber)", pending_approval: "var(--accent)",
-  draft: "var(--purple)", deadlocked: "var(--amber)",
-};
-
-// Zone 1 — always visible, never scroll
-const PINNED_LINKS = [
-  { href: "/dashboard",       icon: "📊", label: "Dashboard" },
-  { href: "/connectors",      icon: "🔌", label: "Connectors" },
-  { href: "/permissions",     icon: "🔑", label: "Credentials" },
-  { href: "/dashboard/usage", icon: "📈", label: "Usage & Credits" },
-  { href: "/settings/team",   icon: "👥", label: "Team" },
-  { href: "/templates",       icon: "📋", label: "Templates" },
-  { href: "/audit-logs",      icon: "📜", label: "Audit Logs" },
-];
-
-// Zone 2 — scrollable section (above missions)
-const SCROLL_LINKS = [
-  { href: "/pricing",    icon: "🏷️", label: "Pricing" },
-  { href: "/onboarding", icon: "🚀", label: "Get Started" },
-  { href: "/contact",    icon: "💬", label: "Support" },
-];
 
 function getSupabase() {
   return createBrowserClient(
@@ -38,208 +14,229 @@ function getSupabase() {
   );
 }
 
-export default function Sidebar() {
-  const [user, setUser]                       = useState<UserProfile | null>(null);
-  const [missions, setMissions]               = useState<Mission[]>([]);
-  const [loadingAuth, setLoadingAuth]         = useState(true);
-  const [loadingMissions, setLoadingMissions] = useState(false);
-  const [mobileOpen, setMobileOpen]           = useState(false);
-  const [isDark, setIsDark]                   = useState(true);
-  const pathname = usePathname();
+// Core nav — lean and purposeful
+const NAV_ITEMS = [
+  { href: "/dashboard",       icon: "✦",  label: "Command Center" },
+  { href: "/connectors",      icon: "🔌", label: "Connectors"     },
+  { href: "/dashboard/usage", icon: "📈", label: "Usage & Credits" },
+  { href: "/permissions",     icon: "🔑", label: "Credentials"    },
+  { href: "/audit-logs",      icon: "📜", label: "Audit Logs"     },
+];
 
+const BOTTOM_LINKS = [
+  { href: "/settings/team", icon: "👥", label: "Team" },
+  { href: "/contact",       icon: "💬", label: "Support"          },
+];
+
+export default function Sidebar() {
+  const pathname = usePathname();
+  const router = useRouter();
+
+  const [user, setUser]           = useState<UserProfile | null>(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed]  = useState(false);
+  const [isDark, setIsDark]        = useState(true);
+
+  // Persist collapse state
   useEffect(() => {
-    const saved = localStorage.getItem('af-theme');
-    setIsDark(saved !== 'light');
+    const saved = localStorage.getItem("af-sidebar-collapsed");
+    const col = saved === "true";
+    setCollapsed(col);
+    document.documentElement.style.setProperty("--sidebar-width", col ? "64px" : "260px");
+  }, []);
+
+  const toggleCollapse = useCallback(() => {
+    setCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem("af-sidebar-collapsed", String(next));
+      document.documentElement.style.setProperty("--sidebar-width", next ? "64px" : "260px");
+      return next;
+    });
+  }, []);
+
+  // Theme
+  useEffect(() => {
+    const saved = localStorage.getItem("af-theme");
+    setIsDark(saved !== "light");
   }, []);
 
   const toggleTheme = () => {
-    const next = isDark ? 'light' : 'dark';
+    const next = isDark ? "light" : "dark";
     setIsDark(!isDark);
-    if (next === 'light') {
-      document.documentElement.setAttribute('data-theme', 'light');
-      localStorage.setItem('af-theme', 'light');
-    } else {
-      document.documentElement.removeAttribute('data-theme');
-      localStorage.setItem('af-theme', 'dark');
-    }
+    document.documentElement.setAttribute("data-theme", next === "light" ? "light" : "");
+    if (next === "light") document.documentElement.setAttribute("data-theme", "light");
+    else document.documentElement.removeAttribute("data-theme");
+    localStorage.setItem("af-theme", next);
   };
 
+  // Close mobile drawer on route change
   useEffect(() => { setMobileOpen(false); }, [pathname]);
-
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
   }, [mobileOpen]);
 
+  // Auth
   useEffect(() => {
     const supabase = getSupabase();
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-
     supabase.auth.getUser().then(({ data: { user: u } }) => {
-      if (u) {
-        setUser({
-          name:   u.user_metadata?.full_name || u.user_metadata?.name || u.email?.split("@")[0] || "User",
-          email:  u.email || "",
-          avatar: u.user_metadata?.avatar_url || u.user_metadata?.picture || null,
-        });
-        fetchMissions(u.id);
-        channel = supabase.channel("sidebar-missions")
-          .on("postgres_changes", { event: "*", schema: "public", table: "missions", filter: `tenant_id=eq.${u.id}` },
-            () => fetchMissions(u.id))
-          .subscribe();
-      }
+      if (u) setUser({ name: u.user_metadata?.full_name || u.user_metadata?.name || u.email?.split("@")[0] || "User", email: u.email || "", avatar: u.user_metadata?.avatar_url || u.user_metadata?.picture || null });
       setLoadingAuth(false);
     });
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      if (session?.user) {
-        setUser({
-          name:   session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split("@")[0] || "User",
-          email:  session.user.email || "",
-          avatar: session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || null,
-        });
-        fetchMissions(session.user.id);
-      } else { setUser(null); setMissions([]); }
+      if (session?.user) setUser({ name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split("@")[0] || "User", email: session.user.email || "", avatar: session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || null });
+      else setUser(null);
     });
-
-    return () => { subscription.unsubscribe(); if (channel) supabase.removeChannel(channel); };
+    return () => subscription.unsubscribe();
   }, []);
-
-  const fetchMissions = async (userId: string) => {
-    setLoadingMissions(true);
-    try {
-      const { data, error } = await getSupabase()
-        .from("missions").select("id, title, status")
-        .eq("tenant_id", userId).order("created_at", { ascending: false }).limit(20);
-      if (!error && data) setMissions(data);
-    } catch { /* silent */ }
-    setLoadingMissions(false);
-  };
 
   const handleSignOut = async () => {
     await getSupabase().auth.signOut();
-    setUser(null); setMissions([]);
+    setUser(null);
     window.location.href = "/";
   };
 
-  // ── Shared sub-components ────────────────────────────────────
+  const isActive = (href: string) =>
+    href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
 
-  const MissionSkeleton = () => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "0 4px" }}>
-      {[1, 2, 3].map(i => (
-        <div key={i} className="mission-link" style={{ opacity: 0.3 }}>
-          <div className="ml-dot animate-glow" style={{ background: "var(--text-muted)" }} />
-          <div className="animate-glow" style={{ height: 11, width: `${55 + i * 15}%`, borderRadius: 4, background: "var(--border)" }} />
-        </div>
-      ))}
-    </div>
-  );
+  // ── Nav link (works in both collapsed and expanded) ──
+  const NavLink = ({ href, icon, label }: { href: string; icon: string; label: string }) => {
+    const active = isActive(href);
+    return (
+      <Link
+        href={href}
+        title={collapsed ? label : undefined}
+        style={{
+          display: "flex", alignItems: "center",
+          gap: collapsed ? 0 : "10px",
+          justifyContent: collapsed ? "center" : "flex-start",
+          padding: collapsed ? "10px 0" : "8px 14px",
+          borderRadius: "var(--radius-sm)",
+          textDecoration: "none",
+          fontSize: "0.82rem",
+          fontWeight: active ? 600 : 400,
+          color: active ? "var(--accent)" : "var(--text-secondary)",
+          background: active ? "var(--accent-subtle)" : "transparent",
+          transition: "all 0.15s",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          minWidth: 0,
+          width: "100%",
+        }}
+        onMouseEnter={e => { if (!active) (e.currentTarget as HTMLAnchorElement).style.background = "var(--bg-card)"; }}
+        onMouseLeave={e => { if (!active) (e.currentTarget as HTMLAnchorElement).style.background = "transparent"; }}
+      >
+        <span style={{ fontSize: "1rem", flexShrink: 0, lineHeight: 1, width: collapsed ? "100%" : "auto", textAlign: collapsed ? "center" : "left" }}>{icon}</span>
+        {!collapsed && <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>}
+      </Link>
+    );
+  };
 
-  // Zone 1 — pinned nav links (Dashboard → Audit Logs)
-  const PinnedNav = () => (
-    <div className="sidebar-top-nav">
-      {PINNED_LINKS.map(l => (
-        <Link key={l.href} href={l.href} className="nav-link">
-          <span className="icon">{l.icon}</span>{l.label}
-        </Link>
-      ))}
-    </div>
-  );
-
-  // Zone 2 — scrollable area (Pricing/Get Started/Support + Missions sub-scroll)
-  const ScrollArea = () => (
-    <div className="sidebar-scroll-area">
-      <div className="sidebar-divider" />
-      {SCROLL_LINKS.map(l => (
-        <Link key={l.href} href={l.href} className="nav-link">
-          <span className="icon">{l.icon}</span>{l.label}
-        </Link>
-      ))}
-
-      {/* Missions — height-capped, sub-scrolls within the scroll area */}
-      <div className="missions-folder">
-        <div className="missions-folder-title">📁 My Missions</div>
-        {loadingAuth ? <MissionSkeleton /> : user ? (
-          loadingMissions ? <MissionSkeleton /> :
-          missions.length > 0 ? missions.map(m => (
-            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 0 }}>
-              <Link href={`/dashboard/missions/${m.id}`} className="mission-link" style={{ flex: 1, minWidth: 0 }}>
-                <div className="ml-dot" style={{ background: STATUS_COLORS[m.status] || "var(--text-muted)", flexShrink: 0 }} />
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.title}</span>
-              </Link>
-              <Link
-                href={`/dashboard/missions/${m.id}/chat`}
-                title="Open AI chat for this mission"
-                style={{
-                  flexShrink: 0, padding: "2px 6px", borderRadius: "var(--radius-sm)",
-                  color: "var(--text-muted)", fontSize: "0.8rem", textDecoration: "none",
-                  lineHeight: 1, opacity: 0.6, transition: "opacity 0.15s",
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = "1"; (e.currentTarget as HTMLAnchorElement).style.color = "var(--accent)"; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.opacity = "0.6"; (e.currentTarget as HTMLAnchorElement).style.color = "var(--text-muted)"; }}
-              >
-                💬
-              </Link>
-            </div>
-          )) : (
-            <Link href="/dashboard/creator" className="mission-link" style={{ color: "var(--emerald)" }}>
-              <span style={{ fontSize: "0.9rem" }}>✨</span> Create Your First Mission
-            </Link>
-          )
-        ) : (
-          <Link href="/login" className="mission-link" style={{ color: "var(--accent)" }}>
-            <span style={{ fontSize: "0.9rem" }}>🔒</span> Sign in to see your missions
+  // ── Shared inner content ──
+  const SidebarContent = ({ mobile = false }: { mobile?: boolean }) => (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* Logo + collapse toggle */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: collapsed && !mobile ? "center" : "space-between", padding: collapsed && !mobile ? "14px 0" : "14px 16px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+        {(!collapsed || mobile) && (
+          <Link href="/dashboard">
+            <Image src="/logo.png" alt="Agentic Factor" width={120} height={32} style={{ objectFit: "contain", display: "block" }} />
           </Link>
+        )}
+        {collapsed && !mobile && (
+          <Link href="/dashboard" title="Command Center">
+            <span style={{ fontSize: "1.3rem", lineHeight: 1 }}>✦</span>
+          </Link>
+        )}
+        {!mobile && (
+          <button
+            onClick={toggleCollapse}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "0.9rem", lineHeight: 1, padding: "4px", borderRadius: "var(--radius-sm)", flexShrink: 0, display: "flex", alignItems: "center" }}
+          >
+            {collapsed ? "›" : "‹"}
+          </button>
+        )}
+      </div>
+
+      {/* Main nav */}
+      <div style={{ flex: 1, overflowY: "auto", padding: collapsed && !mobile ? "8px 4px" : "8px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
+        {NAV_ITEMS.map(item => <NavLink key={item.href} {...item} />)}
+
+        {/* Divider */}
+        <div style={{ height: 1, background: "var(--border)", margin: "8px 0" }} />
+
+        {BOTTOM_LINKS.map(item => <NavLink key={item.href} {...item} />)}
+
+        {/* New Mission CTA */}
+        {!collapsed && (
+          <button
+            onClick={() => router.push("/dashboard?new=1")}
+            style={{ marginTop: 8, width: "100%", background: "var(--accent)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", padding: "8px 14px", fontSize: "0.8rem", fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8, transition: "opacity 0.15s" }}
+            onMouseEnter={e => (e.currentTarget.style.opacity = "0.88")}
+            onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+          >
+            <span>+</span> New Mission
+          </button>
+        )}
+        {collapsed && (
+          <button
+            onClick={() => router.push("/dashboard?new=1")}
+            title="New Mission"
+            style={{ width: "100%", background: "var(--accent)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", padding: "10px 0", fontSize: "1rem", cursor: "pointer", textAlign: "center", marginTop: 8 }}
+          >
+            +
+          </button>
+        )}
+      </div>
+
+      {/* Footer: user + theme */}
+      <div style={{ borderTop: "1px solid var(--border)", padding: collapsed && !mobile ? "8px 4px" : "8px 10px", flexShrink: 0 }}>
+        {/* Theme toggle */}
+        <div style={{ display: "flex", justifyContent: collapsed && !mobile ? "center" : "flex-end", marginBottom: 6 }}>
+          <button
+            onClick={toggleTheme}
+            title={isDark ? "Light mode" : "Dark mode"}
+            style={{ background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "3px 7px", cursor: "pointer", fontSize: "0.78rem", color: "var(--text-secondary)" }}
+          >
+            {isDark ? "☀️" : "🌙"}
+          </button>
+        </div>
+
+        {/* User */}
+        {loadingAuth ? null : user ? (
+          <div style={{ display: "flex", alignItems: "center", gap: collapsed && !mobile ? 0 : 8, justifyContent: collapsed && !mobile ? "center" : "flex-start" }}>
+            {user.avatar
+              // eslint-disable-next-line @next/next/no-img-element
+              ? <img src={user.avatar} alt={user.name} style={{ width: 30, height: 30, borderRadius: "50%", flexShrink: 0, objectFit: "cover" }} />
+              : <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--accent)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.82rem", fontWeight: 700, flexShrink: 0 }}>{user.name.charAt(0).toUpperCase()}</div>
+            }
+            {(!collapsed || mobile) && (
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.name}</div>
+                <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
+              </div>
+            )}
+            {(!collapsed || mobile) && (
+              <button onClick={handleSignOut} title="Sign out" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "0.85rem", padding: "2px 4px", flexShrink: 0 }}>↪</button>
+            )}
+          </div>
+        ) : (
+          <Link href="/login" style={{ display: "flex", alignItems: "center", justifyContent: collapsed && !mobile ? "center" : "flex-start", gap: 8, textDecoration: "none", color: "var(--accent)", fontSize: "0.8rem" }}>
+            <span>👤</span>{(!collapsed || mobile) && "Sign in"}
+          </Link>
+        )}
+
+        {/* System status */}
+        {!collapsed && (
+          <div style={{ marginTop: 8, fontSize: "0.65rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 5, paddingLeft: 2 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--emerald)", display: "inline-block" }} />
+            System Online · v8.0
+          </div>
         )}
       </div>
     </div>
   );
-
-  // Zone 3 — pinned footer (user profile + system status)
-  const Footer = () => (
-    <div className="sidebar-footer">
-      {loadingAuth ? (
-        <div className="nav-link" style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
-          <span className="icon animate-glow" style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: "var(--text-muted)" }} />
-          Loading...
-        </div>
-      ) : user ? (
-        <div className="user-profile-card">
-          <div className="user-profile-row">
-            {user.avatar
-              // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={user.avatar} alt={user.name} className="user-avatar" />
-              : <div className="user-avatar user-avatar-fallback">{user.name.charAt(0).toUpperCase()}</div>
-            }
-            <div className="user-info">
-              <div className="user-name">{user.name}</div>
-              <div className="user-email">{user.email}</div>
-            </div>
-          </div>
-          <button className="btn-sign-out" onClick={handleSignOut} title="Sign out">↪</button>
-        </div>
-      ) : (
-        <Link href="/login" className="nav-link" style={{ color: "var(--accent)" }}>
-          <span className="icon">👤</span> Login / Sign Up
-        </Link>
-      )}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "var(--space-xs) var(--space-md)" }}>
-        <div className="sidebar-status" style={{ margin: 0 }}>
-          <span className="status-dot active" style={{ display: "inline-block", marginRight: 6 }} />
-          System Online &nbsp;·&nbsp; v7.1
-        </div>
-        <button
-          onClick={toggleTheme}
-          title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-          style={{ background: "var(--bg-glass)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "3px 8px", cursor: "pointer", fontSize: "0.82rem", color: "var(--text-secondary)", transition: "all 0.2s" }}
-        >
-          {isDark ? "☀️" : "🌙"}
-        </button>
-      </div>
-    </div>
-  );
-
-  // ── Render ───────────────────────────────────────────────────
 
   return (
     <>
@@ -252,31 +249,29 @@ export default function Sidebar() {
             <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
           </svg>
         </button>
-        <Image src="/logo.png" alt="Agentic Factor" width={90} height={49} style={{ objectFit: "contain" }} />
-        <div style={{ width: 44 }} />
+        <Image src="/logo.png" alt="Agentic Factor" width={90} height={32} style={{ objectFit: "contain" }} />
+        <button onClick={() => router.push("/dashboard?new=1")} style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 12px", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" }}>+ New</button>
       </div>
 
-      {/* Desktop sidebar — three-zone layout */}
-      <nav className="sidebar">
-        <div className="sidebar-header">
-          <Image src="/logo.png" alt="Agentic Factor" width={160} height={87} style={{ objectFit: "contain" }} />
-        </div>
-        <PinnedNav />
-        <ScrollArea />
-        <Footer />
+      {/* Desktop sidebar */}
+      <nav
+        className="sidebar"
+        style={{ width: collapsed ? 64 : 260, transition: "width 0.2s ease" }}
+      >
+        <SidebarContent />
       </nav>
 
-      {/* Mobile slide-in drawer — same three-zone layout */}
+      {/* Mobile slide-in drawer */}
       {mobileOpen && (
         <div className="mobile-drawer-overlay" onClick={() => setMobileOpen(false)}>
           <nav className="mobile-drawer" onClick={e => e.stopPropagation()}>
             <div className="mobile-drawer-head">
-              <Image src="/logo.png" alt="Agentic Factor" width={110} height={60} style={{ objectFit: "contain" }} />
+              <Image src="/logo.png" alt="Agentic Factor" width={110} height={30} style={{ objectFit: "contain" }} />
               <button className="mobile-close-btn" onClick={() => setMobileOpen(false)} aria-label="Close menu">✕</button>
             </div>
-            <PinnedNav />
-            <ScrollArea />
-            <Footer />
+            <div style={{ flex: 1, overflow: "auto" }}>
+              <SidebarContent mobile />
+            </div>
           </nav>
         </div>
       )}

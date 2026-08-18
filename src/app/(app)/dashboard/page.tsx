@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -98,8 +98,9 @@ const CONNECTOR_LABELS: Record<string, string> = {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
-export default function CommandCenterPage() {
+function CommandCenterPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Chat state
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -136,6 +137,22 @@ export default function CommandCenterPage() {
     loadCredits();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Auto-focus + pre-fill when ?new=1 is in URL (from "New Mission" button) ──
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      setInput('Create a mission that ');
+      setTimeout(() => {
+        inputRef.current?.focus();
+        // Move cursor to end
+        const el = inputRef.current;
+        if (el) { el.selectionStart = el.selectionEnd = el.value.length; }
+      }, 150);
+      // Clean up URL without triggering a re-render
+      router.replace('/dashboard', { scroll: false });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const loadSessions = useCallback(async () => {
     const res = await fetch('/api/command-chat/sessions', { credentials: 'include' });
@@ -438,8 +455,8 @@ export default function CommandCenterPage() {
 
     if (action.type === 'mission_create_error') return (
       <div style={{ ...card, borderColor: 'var(--red,#ef4444)' }}>
-        <div style={{ fontSize: '0.78rem', color: 'var(--red,#ef4444)' }}>⚠️ Could not create mission. Please try again or use the creator.</div>
-        <button style={{ ...btnStyle, alignSelf: 'flex-start', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }} onClick={() => router.push('/dashboard/creator')}>Open Creator →</button>
+        <div style={{ fontSize: '0.78rem', color: 'var(--red,#ef4444)' }}>⚠️ Could not create mission. Try describing it differently or add more detail.</div>
+        <button style={{ ...btnStyle, alignSelf: 'flex-start', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }} onClick={() => { setInput('Create a mission that '); inputRef.current?.focus(); }}>Try Again →</button>
       </div>
     );
 
@@ -557,7 +574,7 @@ export default function CommandCenterPage() {
               <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Your AI Chief of Staff</div>
             </div>
             <button onClick={() => router.push('/dashboard/missions')} className="btn btn-ghost btn-sm" style={{ fontSize: '0.78rem' }}>All Missions →</button>
-            <button onClick={() => router.push('/dashboard/creator')} className="btn btn-primary btn-sm" style={{ fontSize: '0.78rem' }}>+ New Mission</button>
+            <button onClick={() => { setInput('Create a new mission: '); inputRef.current?.focus(); }} className="btn btn-primary btn-sm" style={{ fontSize: '0.78rem' }}>+ New Mission</button>
           </div>
 
           {/* Live run ticker */}
@@ -676,5 +693,14 @@ export default function CommandCenterPage() {
         </div>
       </div>
     </>
+  );
+}
+
+// Suspense wrapper required for useSearchParams()
+export default function CommandCenterPage() {
+  return (
+    <Suspense fallback={null}>
+      <CommandCenterPageInner />
+    </Suspense>
   );
 }

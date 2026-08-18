@@ -47,7 +47,7 @@ const STEPS: Step[] = [
     title: 'Create your first mission',
     description: 'Describe what you want to automate in plain English. The AI builds a multi-agent blueprint for you to review before anything runs.',
     action: 'Create Mission',
-    actionHref: '/dashboard/creator',
+    actionHref: '/dashboard?new=1',
     icon: '🚀',
   },
   {

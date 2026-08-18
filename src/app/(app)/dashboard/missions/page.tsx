@@ -158,7 +158,7 @@ export default function MissionsPage() {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button className="btn btn-ghost btn-sm" onClick={() => router.push('/dashboard')}>← Command Center</button>
             <button className="btn btn-ghost btn-sm" onClick={() => router.push('/dashboard/runs')}>Run History</button>
-            <button className="btn btn-primary btn-sm" onClick={() => router.push('/dashboard/creator')}>+ New Mission</button>
+            <button className="btn btn-primary btn-sm" onClick={() => router.push('/dashboard?new=1')}>+ New Mission</button>
           </div>
         </div>
       </div>
@@ -199,7 +199,7 @@ export default function MissionsPage() {
           <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>No missions yet</h3>
           <p style={{ fontSize: '0.88rem', marginBottom: 24 }}>Create your first AI automation in minutes.</p>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-            <button className="btn btn-primary" onClick={() => router.push('/dashboard/creator')}>+ Create Mission</button>
+            <button className="btn btn-primary" onClick={() => router.push('/dashboard?new=1')}>+ Create Mission</button>
             <button className="btn btn-ghost" onClick={() => router.push('/dashboard')}>Ask AI →</button>
           </div>
         </div>
@@ -305,7 +305,7 @@ export default function MissionsPage() {
             <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>Start from a template</div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Pre-built automations you can deploy in seconds</div>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={() => router.push('/dashboard/creator')}>Browse all →</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => router.push('/dashboard?new=1')}>Browse all →</button>
         </div>
         <TemplatesPreview onFork={loadMissions} />
       </div>
