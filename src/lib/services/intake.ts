@@ -18,6 +18,8 @@ const KNOWN_PROVIDERS = [
   'google_ads', 'google_analytics', 'facebook_ads',
   // Content, video & creative
   'youtube', 'buffer', 'canva', 'elevenlabs', 'heygen', 'runwayml',
+  // AI model providers (hardcoded connectors — not Composio)
+  'openai', 'gemini',
 ] as const;
 
 // Keywords → provider mappings. Order matters: more specific matches first.
@@ -53,6 +55,8 @@ const PROVIDER_KEYWORDS: Array<{ keywords: string[]; provider: string }> = [
   { keywords: ['elevenlabs', 'eleven labs', 'eleven lab', 'el text to speech'], provider: 'elevenlabs' },
   { keywords: ['heygen', 'hey gen', 'heygen ai'], provider: 'heygen' },
   { keywords: ['runway', 'runwayml', 'runway ml', 'runway gen'], provider: 'runwayml' },
+  { keywords: ['openai', 'open ai', 'dall-e', 'dalle', 'gpt-4', 'gpt4', 'whisper'], provider: 'openai' },
+  { keywords: ['gemini', 'google gemini', 'google ai', 'google generative'], provider: 'gemini' },
 ];
 
 /**
@@ -209,7 +213,7 @@ You must decompose the user's intent into:
 9. **Validation Checklist**: 3-8 specific assertions to verify the mission output quality.
 10. **Permissions**: All credentials the agents will need. Each permission MUST have:
    - "type": one of "api_key", "oauth_token", "composio_oauth", "database_credential", "file_access", "service_account", "webhook"
-   - "service": For COMPOSIO services (listed in the COMPOSIO ACTIONS section injected above): use type "composio_oauth" and service = the exact Composio slug (e.g. "trello", "youtube", "gmail"). The scope field must contain only the specific action slugs this agent calls, comma-separated (e.g. "TRELLO_CREATE_TRELLO_CARD,TRELLO_GET_BOARDS"). NEVER use "custom_*" or "api_key" for Composio-connected services. For native OAuth providers: MUST be one of these EXACT keys: "google", "twitter", "facebook", "instagram", "linkedin_oidc", "slack", "github", "notion", "discord", "zoho", "whatsapp", "messenger", "azure", "teams", "stripe", "shopify", "hubspot", "salesforce", "airtable", "asana". For API key services: "zendesk", "linear", "hunter_io", "apollo", "twilio", "sendgrid", "aws", "openai_api", "anthropic_api", "replicate", "segment", "mixpanel", "heygen", "langsmith", "bamboohr", "woocommerce", "make", "firebase", "vercel", "supabase_ext", "shiprocket", "razorpay". For ANY service not in any of these lists, use type "api_key" and service "custom_<slug>" — the customer will be prompted to add their API key. Do NOT use full names like "Hunter.io" or "Apollo.io" — use ONLY the short key.
+   - "service": For COMPOSIO services (listed in the COMPOSIO ACTIONS section injected above): use type "composio_oauth" and service = the exact Composio slug (e.g. "trello", "youtube", "gmail"). The scope field must contain only the specific action slugs this agent calls, comma-separated (e.g. "TRELLO_CREATE_TRELLO_CARD,TRELLO_GET_BOARDS"). NEVER use "custom_*" or "api_key" for Composio-connected services. For native OAuth providers: MUST be one of these EXACT keys: "google", "twitter", "facebook", "instagram", "linkedin_oidc", "slack", "github", "notion", "discord", "zoho", "whatsapp", "messenger", "azure", "teams", "stripe", "shopify", "hubspot", "salesforce", "airtable", "asana". For API key services: "zendesk", "linear", "hunter_io", "apollo", "twilio", "sendgrid", "aws", "openai", "gemini", "anthropic_api", "replicate", "segment", "mixpanel", "heygen", "langsmith", "bamboohr", "woocommerce", "make", "firebase", "vercel", "supabase_ext", "shiprocket", "razorpay", "buffer". For ANY service not in any of these lists, use type "api_key" and service "custom_<slug>" — the customer will be prompted to add their API key. Do NOT use full names like "Hunter.io" or "Apollo.io" — use ONLY the short key.
    - "scope": string (e.g., "tweet.write", "pages_manage_posts", "chat:write")
    - "confidentialityLevel": one of "public", "internal", "confidential", "restricted"
 11. **Discovery Questions**: Generate 3 or more highly specific "discoveryQuestions" to ask the user. These questions must gather missing context or exact preferences needed to refine the agents' system prompts before deployment.
@@ -231,6 +235,8 @@ IMPORTANT RULES:
 - LINEAR: Use api_key type, service "linear". Call api.call('linear', 'POST', 'https://api.linear.app/graphql', json_data={"query": "..."}).
 - AIRTABLE: Use oauth_token type, service "airtable". Call api.call('airtable', 'GET', f'/v0/{base_id}/{table_name}').
 - ASANA: Use oauth_token type, service "asana". Call api.call('asana', 'GET', '/tasks', ...).
+- OPENAI (when connected, service "openai"): Use the openai Python package. Read key from env: \`openai_key = os.environ.get("OPENAI_ACCESS_TOKEN", "")\`. For DALL-E 3 image generation: \`import openai; client = openai.OpenAI(api_key=openai_key); resp = client.images.generate(model="dall-e-3", prompt=prompt, n=1, size="1024x1024"); image_url = resp.data[0].url\`. For Whisper transcription: \`audio_file = open("audio.mp3", "rb"); transcript = client.audio.transcriptions.create(model="whisper-1", file=audio_file).text\`. For GPT-4o Vision: \`resp = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":[{"type":"image_url","image_url":{"url":img_url}},{"type":"text","text":prompt}]}]); result = resp.choices[0].message.content\`. NEVER call api.call('openai', ...) — use the openai package directly.
+- GEMINI (when connected, service "gemini"): Use google-generativeai Python package. Read key from env: \`gemini_key = os.environ.get("GEMINI_ACCESS_TOKEN", "")\`. Usage: \`import google.generativeai as genai; genai.configure(api_key=gemini_key); model = genai.GenerativeModel("gemini-2.0-flash-exp"); response = model.generate_content(prompt); result = response.text\`. For longer documents/vision: use \`"gemini-1.5-pro"\` instead. NEVER call api.call('gemini', ...) — use google.generativeai directly.
 - CUSTOM/UNLISTED CONNECTORS: For any service not in the provider list, use type "api_key" and service "custom_<slug>" (e.g., "custom_jira" for Jira). In pythonScript, read the token: token = os.environ.get('CUSTOM_<SLUG>_ACCESS_TOKEN', ''); base_url = os.environ.get('CUSTOM_<SLUG>_BASE_URL', ''); auth_type = os.environ.get('CUSTOM_<SLUG>_AUTH_TYPE', 'bearer'). Build the auth header based on auth_type (bearer → "Authorization: Bearer {token}", apikey → "X-API-Key: {token}", basic → "Authorization: Basic {b64(token)}"). Use full URLs in every request. Example for Jira: token = os.environ.get('CUSTOM_JIRA_ACCESS_TOKEN', ''); base_url = os.environ.get('CUSTOM_JIRA_BASE_URL', ''); resp = requests.get(f"{base_url}/rest/api/3/issue/{issue_id}", headers={"Authorization": f"Bearer {token}"}).
 
 OUTPUT SIZE CONSTRAINTS (CRITICAL):
@@ -660,8 +666,91 @@ Use composio_execute() for LinkedIn ONLY for CRM/outreach (messages, lead search
     }
   }
 
+  async function getOpenAIContext(): Promise<string> {
+    try {
+      const supabase = createServiceClient();
+      const { data } = await supabase
+        .from('tenant_permissions')
+        .select('provider')
+        .eq('tenant_id', tenantId)
+        .eq('provider', 'openai')
+        .maybeSingle();
+      if (!data) return '';
+      return `## OPENAI — CONNECTED
+The customer has an OpenAI API key connected (service: "openai"). Use the openai Python package for any image generation, audio transcription, or vision task:
+
+  import openai, os
+  client = openai.OpenAI(api_key=os.environ.get("OPENAI_ACCESS_TOKEN", ""))
+
+  # DALL-E 3 image generation
+  resp = client.images.generate(model="dall-e-3", prompt=prompt, n=1, size="1024x1024")
+  image_url = resp.data[0].url
+
+  # Whisper audio transcription
+  with open("audio.mp3", "rb") as audio_file:
+      transcript = client.audio.transcriptions.create(model="whisper-1", file=audio_file).text
+
+  # GPT-4o Vision (analyse an image)
+  resp = client.chat.completions.create(model="gpt-4o",
+      messages=[{"role":"user","content":[
+          {"type":"image_url","image_url":{"url":image_url}},
+          {"type":"text","text":prompt}
+      ]}])
+  result = resp.choices[0].message.content
+
+  # Text-to-speech
+  resp = client.audio.speech.create(model="tts-1", voice="alloy", input=text)
+  resp.stream_to_file("output.mp3")
+
+Permission: type "api_key", service "openai". Token env var: OPENAI_ACCESS_TOKEN
+IMPORTANT: NEVER call api.call('openai', ...) — use the openai package directly.`;
+    } catch {
+      return '';
+    }
+  }
+
+  async function getGeminiContext(): Promise<string> {
+    try {
+      const supabase = createServiceClient();
+      const { data } = await supabase
+        .from('tenant_permissions')
+        .select('provider')
+        .eq('tenant_id', tenantId)
+        .eq('provider', 'gemini')
+        .maybeSingle();
+      if (!data) return '';
+      return `## GOOGLE GEMINI — CONNECTED
+The customer has a Gemini API key connected (service: "gemini"). Use google-generativeai Python package for fast AI reasoning, long-document analysis, and vision:
+
+  import google.generativeai as genai, os
+  genai.configure(api_key=os.environ.get("GEMINI_ACCESS_TOKEN", ""))
+
+  # Fast reasoning / content generation (Gemini 2.0 Flash)
+  model = genai.GenerativeModel("gemini-2.0-flash-exp")
+  response = model.generate_content(prompt)
+  result = response.text
+
+  # Long document or complex reasoning (Gemini 1.5 Pro — 1M token context)
+  model = genai.GenerativeModel("gemini-1.5-pro")
+  response = model.generate_content(prompt)
+  result = response.text
+
+  # Vision / image understanding
+  import PIL.Image
+  image = PIL.Image.open("image.png")
+  model = genai.GenerativeModel("gemini-1.5-pro")
+  response = model.generate_content([image, prompt])
+  result = response.text
+
+Permission: type "api_key", service "gemini". Token env var: GEMINI_ACCESS_TOKEN
+IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai directly.`;
+    } catch {
+      return '';
+    }
+  }
+
   // Run ALL pre-checks in parallel instead of sequentially
-  const [memoryContext, agentTemplateContext, feedbackContext, globalMemory, planConfig, connectedProviders, bufferContext] = await Promise.all([
+  const [memoryContext, agentTemplateContext, feedbackContext, globalMemory, planConfig, connectedProviders, bufferContext, openaiContext, geminiContext] = await Promise.all([
     searchSimilarMissions(intent, tenantId),
     searchAgentTemplates(intent, tenantId),
     searchFeedbackExamples(intent, tenantId),
@@ -669,6 +758,8 @@ Use composio_execute() for LinkedIn ONLY for CRM/outreach (messages, lead search
     getPlanConfig(tenantId),
     getConnectedProviders(),
     getBufferContext(),
+    getOpenAIContext(),
+    getGeminiContext(),
   ]);
 
   // Fetch Composio action schemas for connected providers (non-blocking — empty string on failure)
@@ -738,6 +829,14 @@ Use composio_execute() for LinkedIn ONLY for CRM/outreach (messages, lead search
   // bufferContext is an empty string when Buffer is not connected (getBufferContext returns '').
   if (bufferContext) {
     messages.push({ role: 'user', content: bufferContext });
+  }
+
+  // Inject OpenAI and Gemini capabilities when connected (static — no live API discovery needed).
+  if (openaiContext) {
+    messages.push({ role: 'user', content: openaiContext });
+  }
+  if (geminiContext) {
+    messages.push({ role: 'user', content: geminiContext });
   }
 
   messages.push({

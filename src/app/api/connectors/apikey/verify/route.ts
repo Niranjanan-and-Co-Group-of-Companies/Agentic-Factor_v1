@@ -80,14 +80,29 @@ async function verifyApiKey(
         return { verified: true, accountInfo: `Account: ${data.username || 'verified'}` };
       }
 
-      case 'openai_api': {
+      case 'openai': {
         const apiKey = fields.apiKey;
         if (!apiKey) return { verified: false, error: 'API key is required' };
         const res = await fetch('https://api.openai.com/v1/models', {
           headers: { Authorization: `Bearer ${apiKey}` },
         });
-        if (!res.ok) return { verified: false, error: 'Invalid OpenAI API key' };
-        return { verified: true, accountInfo: 'OpenAI API key verified' };
+        if (!res.ok) return { verified: false, error: 'Invalid OpenAI API key — get one at platform.openai.com/api-keys' };
+        const data = await res.json() as { data?: Array<{ id: string }> };
+        const hasDALLE = data.data?.some(m => m.id.includes('dall-e')) ?? false;
+        return { verified: true, accountInfo: hasDALLE ? 'OpenAI verified · DALL-E 3 available' : 'OpenAI API key verified' };
+      }
+
+      case 'gemini': {
+        const apiKey = fields.apiKey;
+        if (!apiKey) return { verified: false, error: 'API key is required' };
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`);
+        if (!res.ok) return { verified: false, error: 'Invalid Gemini API key — get one at aistudio.google.com/apikey' };
+        const data = await res.json() as { models?: Array<{ name: string }> };
+        const models = data.models ?? [];
+        const hasFlash = models.some(m => m.name.includes('flash'));
+        const hasPro = models.some(m => m.name.includes('pro'));
+        const info = [hasFlash && 'Flash', hasPro && 'Pro'].filter(Boolean).join(' + ');
+        return { verified: true, accountInfo: `Gemini verified${info ? ` · ${info} available` : ''}` };
       }
 
       case 'twilio': {

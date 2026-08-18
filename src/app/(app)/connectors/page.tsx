@@ -46,9 +46,10 @@ const API_KEY_LABELS: Record<string, string> = {
   bamboohr: "API Key",
   firebase: "Web API Key",
   buffer: "Access Token (from buffer.com/developers/apps)",
+  gemini: "API Key (from aistudio.google.com)",
 };
 
-// Hardcoded Buffer toolkit card — not in Composio catalog
+// Hardcoded connector cards — not in Composio catalog
 const BUFFER_TOOLKIT: Toolkit = {
   slug: "buffer",
   name: "Buffer",
@@ -60,8 +61,32 @@ const BUFFER_TOOLKIT: Toolkit = {
   no_auth: false,
 };
 
+const OPENAI_TOOLKIT: Toolkit = {
+  slug: "openai",
+  name: "OpenAI",
+  logo: "https://openai.com/favicon.ico",
+  description: "DALL-E 3 image generation, Whisper audio transcription, GPT-4o Vision image analysis, and text-to-speech. Required for any mission that generates or analyses images.",
+  categories: ["artificial-intelligence"],
+  tools_count: 5,
+  auth_schemes: ["BEARER_TOKEN"],
+  no_auth: false,
+};
+
+const GEMINI_TOOLKIT: Toolkit = {
+  slug: "gemini",
+  name: "Google Gemini",
+  logo: "https://www.gstatic.com/lamda/images/favicon_v1_150160cddff7f294ce30.svg",
+  description: "Gemini 2.0 Flash for fast AI reasoning, Gemini 1.5 Pro for 1-million-token document analysis, and Gemini Vision for image and PDF understanding inside agent code.",
+  categories: ["artificial-intelligence"],
+  tools_count: 4,
+  auth_schemes: ["API_KEY"],
+  no_auth: false,
+};
+
 // Search terms that should show the Buffer social media guidance banner
 const SOCIAL_SEARCH_TERMS = ["facebook", "instagram", "meta", "fb ", "insta"];
+// Search terms that should surface the AI model connectors
+const AI_SEARCH_TERMS = ["openai", "dall", "whisper", "gpt", "image gen", "gemini", "google ai", "vertex", "google gemini"];
 
 function getSupabase() {
   return createBrowserClient(
@@ -214,6 +239,9 @@ export default function ConnectorsPage() {
   const showSocialBanner = SOCIAL_SEARCH_TERMS.some(t => search.toLowerCase().includes(t));
   const bufferConnected = connectedSlugs.has("buffer");
   const showBufferCard = !search.trim() || search.toLowerCase().includes("buffer") || showSocialBanner;
+  const showAICards = !search.trim() || AI_SEARCH_TERMS.some(t => search.toLowerCase().includes(t));
+  const openaiConnected = connectedSlugs.has("openai");
+  const geminiConnected = connectedSlugs.has("gemini");
 
   // ── Handlers ──────────────────────────────────────────────
   const handleConnect = async (tk: Toolkit) => {
@@ -432,7 +460,7 @@ export default function ConnectorsPage() {
       )}
 
       {/* ── No results ── */}
-      {filtered.length === 0 && !showBufferCard && (
+      {filtered.length === 0 && !showBufferCard && !showAICards && (
         <div className="card" style={{ textAlign: "center", padding: "var(--space-2xl)" }}>
           <div style={{ fontSize: "2.5rem", marginBottom: "var(--space-md)" }}>🔍</div>
           <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}>No results for &ldquo;{search}&rdquo;</h2>
@@ -441,7 +469,7 @@ export default function ConnectorsPage() {
           </p>
         </div>
       )}
-      {filtered.length === 0 && showBufferCard && !showSocialBanner && (
+      {filtered.length === 0 && (showBufferCard || showAICards) && !showSocialBanner && !showAICards && (
         <div className="card" style={{ textAlign: "center", padding: "var(--space-xl)", marginBottom: "var(--space-md)" }}>
           <div style={{ fontSize: "2rem", marginBottom: "var(--space-sm)" }}>🔍</div>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>No other results for &ldquo;{search}&rdquo; — but Buffer is available below.</p>
@@ -507,6 +535,120 @@ export default function ConnectorsPage() {
             </div>
           );
         })()}
+        {/* ── Pinned OpenAI Card ── */}
+        {showAICards && (() => {
+          const tk = OPENAI_TOOLKIT;
+          return (
+            <div key="openai" className="card" style={{
+              padding: "var(--space-lg)",
+              transition: "all 0.2s",
+              ...(openaiConnected ? { borderColor: "hsla(152,69%,50%,0.35)" } : { borderColor: "hsla(267,83%,65%,0.2)" }),
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--space-sm)" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={tk.logo}
+                    alt={tk.name}
+                    width={36} height={36}
+                    style={{ borderRadius: 8, objectFit: "contain", background: "var(--bg-glass)", padding: 2 }}
+                    onError={e => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=OpenAI&size=36&background=10a37f&color=fff&bold=true&length=2`; }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: "0.9rem", lineHeight: 1.2 }}>OpenAI</div>
+                    <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px", marginTop: 2 }}>AI Models</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                  {openaiConnected
+                    ? <span className="badge badge-green" style={{ fontSize: "0.6rem" }}>✓ Connected</span>
+                    : <span className="badge" style={{ fontSize: "0.55rem", color: "var(--amber)", borderColor: "var(--amber)", padding: "1px 5px" }}>API Key</span>
+                  }
+                </div>
+              </div>
+              <p style={{ fontSize: "0.77rem", color: "var(--text-secondary)", lineHeight: 1.5, minHeight: 34, marginBottom: "var(--space-sm)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                {tk.description}
+              </p>
+              {openaiConnected && userEmail && (
+                <div style={{ padding: "4px 10px", background: "var(--emerald-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.7rem", color: "var(--emerald)", marginBottom: "var(--space-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  🔒 {userEmail}
+                </div>
+              )}
+              <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginBottom: "var(--space-sm)" }}>
+                DALL-E 3 · Whisper · GPT-4o Vision · TTS
+              </div>
+              {openaiConnected ? (
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "hsla(0,84%,60%,0.25)" }}
+                  onClick={() => handleDisconnect(tk)}>
+                  Disconnect
+                </button>
+              ) : (
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--accent)", borderColor: "hsla(267,83%,65%,0.25)" }}
+                  onClick={() => handleApiKeyOpen(tk)}>
+                  🔑 Add API Key →
+                </button>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ── Pinned Gemini Card ── */}
+        {showAICards && (() => {
+          const tk = GEMINI_TOOLKIT;
+          return (
+            <div key="gemini" className="card" style={{
+              padding: "var(--space-lg)",
+              transition: "all 0.2s",
+              ...(geminiConnected ? { borderColor: "hsla(152,69%,50%,0.35)" } : { borderColor: "hsla(214,89%,52%,0.2)" }),
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--space-sm)" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={tk.logo}
+                    alt={tk.name}
+                    width={36} height={36}
+                    style={{ borderRadius: 8, objectFit: "contain", background: "var(--bg-glass)", padding: 2 }}
+                    onError={e => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=Gemini&size=36&background=4285f4&color=fff&bold=true&length=2`; }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: "0.9rem", lineHeight: 1.2 }}>Google Gemini</div>
+                    <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px", marginTop: 2 }}>AI Models</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                  {geminiConnected
+                    ? <span className="badge badge-green" style={{ fontSize: "0.6rem" }}>✓ Connected</span>
+                    : <span className="badge" style={{ fontSize: "0.55rem", color: "var(--amber)", borderColor: "var(--amber)", padding: "1px 5px" }}>API Key</span>
+                  }
+                </div>
+              </div>
+              <p style={{ fontSize: "0.77rem", color: "var(--text-secondary)", lineHeight: 1.5, minHeight: 34, marginBottom: "var(--space-sm)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                {tk.description}
+              </p>
+              {geminiConnected && userEmail && (
+                <div style={{ padding: "4px 10px", background: "var(--emerald-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.7rem", color: "var(--emerald)", marginBottom: "var(--space-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  🔒 {userEmail}
+                </div>
+              )}
+              <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginBottom: "var(--space-sm)" }}>
+                Gemini 2.0 Flash · Gemini 1.5 Pro · Vision · 1M context
+              </div>
+              {geminiConnected ? (
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "hsla(0,84%,60%,0.25)" }}
+                  onClick={() => handleDisconnect(tk)}>
+                  Disconnect
+                </button>
+              ) : (
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "hsla(214,89%,52%,1)", borderColor: "hsla(214,89%,52%,0.25)" }}
+                  onClick={() => handleApiKeyOpen(tk)}>
+                  🔑 Add API Key →
+                </button>
+              )}
+            </div>
+          );
+        })()}
+
         {filtered.map(tk => {
           const connected = connectedSlugs.has(tk.slug);
           const isConnecting = connecting === tk.slug;

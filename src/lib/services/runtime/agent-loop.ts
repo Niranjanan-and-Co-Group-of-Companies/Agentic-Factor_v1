@@ -442,6 +442,8 @@ function getRequiredPackages(code: string): string[] {
     'google_auth_oauthlib': ['google-auth-oauthlib'],
     'google':               ['google-api-python-client', 'google-auth-oauthlib'],
     'openai':               ['openai'],
+    'google.generativeai':  ['google-generativeai'],
+    'generativeai':         ['google-generativeai'],
     'anthropic':            ['anthropic'],
     'matplotlib':           ['matplotlib'],
     'pandas':               ['pandas'],
