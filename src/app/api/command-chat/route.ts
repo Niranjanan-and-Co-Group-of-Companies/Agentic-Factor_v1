@@ -8,6 +8,79 @@ export const maxDuration = 120;
 // Sentinel UUID used as mission_id for platform-level (non-mission) chat sessions
 const PLATFORM_CHAT_SENTINEL = '00000000-0000-0000-0000-000000000000';
 
+// ── Static platform capability catalog injected into every system prompt ──────
+const PLATFORM_CATALOG = `
+═══ AGENT TYPES YOU CAN DEPLOY ═══
+• Research Agent — web search, competitive analysis, market intelligence, news monitoring, SERP analysis
+• Content Writer Agent — blog posts, social captions, ad copy, email sequences, product descriptions, newsletters
+• Image Generation Agent — DALL-E 3 images (1080×1080 social posts, banners, thumbnails, product shots)
+• Social Publisher Agent — schedule & post to Instagram, Facebook, LinkedIn, Twitter/X, YouTube via Buffer or direct API
+• Email Agent — send via Gmail/Outlook, read & parse inbound emails, trigger automated sequences
+• Lead Enrichment Agent — find company data, decision-makers, LinkedIn profiles, ICP scoring (Tier 1/2/3)
+• CRM Agent — update HubSpot / Salesforce / Airtable contacts, log activities, move pipeline stages
+• Web Scraper / Data Collector — extract structured data from any website, monitor for changes
+• SEO Agent — keyword research, intent classification, topic clusters, content calendar, article outlines
+• Paid Ads Agent — expert ad copy (Google + Meta), audience targeting, keyword research, campaign launch with human approval gate
+• HR Recruitment Agent — source candidates, screen resumes, rank by tier, draft outreach, schedule interviews
+• Data Analyst Agent — Google Sheets reports, data processing, summaries, formatted dashboards
+• YouTube Automation Agent — research topics, write scripts, generate thumbnails, schedule uploads
+• Voice & Video Creator Agent — ElevenLabs voice synthesis, HeyGen AI avatar video, Runway ML video generation
+• Scheduler / Orchestrator Agent — coordinate multi-agent pipelines, conditional logic, retries, timing
+
+═══ INTEGRATIONS AVAILABLE (30+) ═══
+Email & Productivity : Gmail · Outlook / Microsoft 365 · Google Sheets · Google Drive · Google Calendar · Notion
+Social Media         : Instagram · Facebook (Meta Graph API) · Twitter/X · LinkedIn · YouTube · Buffer
+AI Models            : OpenAI GPT-4o + DALL-E 3 · Gemini · ElevenLabs (voice) · HeyGen (AI video) · Runway ML (video)
+CRM & Sales          : HubSpot · Salesforce · Airtable · Zoho · Asana
+Ads & Analytics      : Google Ads (Keyword Planner) · Meta Ads (Audience Insights) · Google Analytics (GA4)
+Communication        : Slack · Discord · WhatsApp Business · Microsoft Teams
+E-commerce           : Shopify · Stripe
+Dev & Project        : GitHub · Canva
+
+═══ PROVEN MISSION TEMPLATES ═══
+1. Research → Report → Email       : Research any topic → compile structured report → send via Gmail + Google Sheet
+2. Social Media Content Pipeline   : Generate captions + DALL-E 3 images → post to Instagram/Facebook on schedule
+3. Lead Enrichment & Outreach Prep : Enrich company list with firmographic data + decision-maker contacts + ICP scores → Google Sheet with Tier 1/2/3
+4. HR Recruitment Pipeline         : Source candidates → screen & rank → draft personalised outreach → schedule interviews → full tracker sheet
+5. Ad Copy + Email Nurture Sequence: Audience research → 5 ad variations (Google/Meta) → 5-email nurture sequence → Notion page
+6. SEO Keyword Research & Calendar : Keyword expansion → topic clusters → 3-month content calendar → article outlines → Google Sheet
+7. Paid Ads Campaign Manager       : Pull GA4 + Google Ads keyword data + Meta audience data → expert ad copy → launch with human approval gate
+8. YouTube Channel Automation      : Research topics → write scripts → generate thumbnails → upload and schedule on YouTube
+
+═══ USE CASES BY BUSINESS TYPE ═══
+Indian SMBs & Startups    : Lead generation, social media posting, email outreach, competitor tracking, market research
+E-commerce / D2C brands   : Product description writing, social ad copy, customer review analysis, inventory reporting, influencer research
+SaaS / Tech companies     : Lead enrichment → CRM, email sequences, content calendar, competitor monitoring, paid ad campaigns
+Agencies                  : Client reporting, multi-client social posting, ad copy generation, SEO calendars
+HR / Recruiters           : Candidate sourcing, resume screening, outreach emails, interview scheduling, tracker sheets
+Real estate               : Lead research, property description writing, social posting, client follow-up email sequences
+Coaches / Consultants     : Newsletter writing, LinkedIn content, lead research, onboarding email automation
+Retail / Restaurants      : Social media content, promotional copy, Google review monitoring, WhatsApp broadcast drafts
+`;
+
+// ── Context-aware suggestions based on what the customer has connected ─────────
+function buildContextualSuggestions(connectedProviders: string[]): string {
+  if (connectedProviders.length === 0) {
+    return `\nThis customer has NO integrations connected yet. Guide them warmly: recommend connecting Gmail first (unlocks email automation, reports, outreach) or Buffer/Instagram (unlocks social media pipelines) as the highest-value starting points. Offer to walk them to the Connectors page.`;
+  }
+  const has = (keys: string[]) => keys.some(k => connectedProviders.includes(k));
+  const lines: string[] = [];
+  if (has(['google', 'gmail'])) lines.push('Gmail/Google connected → immediately buildable: research+email reports, newsletter delivery, lead outreach sequences, Google Sheets dashboards');
+  if (has(['buffer', 'instagram', 'facebook'])) lines.push('Social media connected → immediately buildable: automated caption+image content pipeline posting to Instagram/Facebook on schedule');
+  if (has(['linkedin_oidc'])) lines.push('LinkedIn connected → immediately buildable: LinkedIn content scheduling, lead research, connection outreach');
+  if (has(['youtube'])) lines.push('YouTube connected → immediately buildable: channel automation (research → script → thumbnail → upload scheduling)');
+  if (has(['hubspot', 'salesforce', 'airtable'])) lines.push('CRM connected → immediately buildable: lead enrichment → auto-CRM update pipeline, pipeline stage automation');
+  if (has(['openai'])) lines.push('OpenAI connected → enables DALL-E 3 image generation, GPT-4o content writing, data analysis across all missions');
+  if (has(['google_ads', 'facebook_ads', 'google_analytics'])) lines.push('Ads/Analytics connected → immediately buildable: full paid ads campaign with expert copy, audience targeting, and launch approval gate');
+  if (has(['slack', 'discord', 'teams'])) lines.push('Team messaging connected → can send automated reports, run alerts, and mission completion notifications to channels');
+  if (has(['shopify', 'stripe'])) lines.push('E-commerce connected → can automate: product description writing, sales reports, order notification emails');
+  if (has(['notion'])) lines.push('Notion connected → can deliver ad copy, email sequences, research docs, and content calendars directly into Notion pages');
+  if (has(['hubspot', 'salesforce']) && has(['google', 'gmail'])) lines.push('CRM + Gmail both connected → most powerful combo: full outbound sales pipeline (research → enrich → personalised email → CRM log)');
+  return lines.length > 0
+    ? `\nBASED ON THEIR CONNECTED INTEGRATIONS — WHAT'S IMMEDIATELY BUILDABLE:\n${lines.map(l => `  • ${l}`).join('\n')}`
+    : '';
+}
+
 // ── Build the full platform context for the Command Center AI ──
 async function buildCommandContext(tenantId: string): Promise<{
   systemPrompt: string;
@@ -88,6 +161,8 @@ async function buildCommandContext(tenantId: string): Promise<{
     }
   }
 
+  const contextualSuggestions = buildContextualSuggestions(connectedProviders);
+
   const systemPrompt = `You are the Command Center AI for Agentic Factor — an AI automation platform.
 You are the user's Chief of Staff. You know everything about their business automation and speak in a direct, confident, friendly tone.
 Today is ${dateStr}, ${timeStr} IST.
@@ -103,9 +178,10 @@ ${creditsInfo}
 
 ═══ CONNECTED INTEGRATIONS ═══
 ${connectedProviders.length > 0 ? connectedProviders.join(', ') : 'None connected yet'}
-
-═══ WHAT YOU CAN DO ═══
-You can take real actions. When the user asks you to do something, DO it by emitting an <action> block at the very end of your reply (after all your text). Never mention the action block to the user.
+${contextualSuggestions}
+${PLATFORM_CATALOG}
+═══ ACTIONS YOU CAN TAKE ═══
+Emit an <action> block at the very end of your reply (after all your text). Never mention the action block to the user.
 
 Action types:
 - run_mission: { "type": "run_mission", "missionId": "...", "missionTitle": "...", "missionStatus": "draft|active|paused|failed|completed" }
@@ -120,15 +196,22 @@ Action types:
 
 RULES:
 1. When user says "run [mission name]", emit run_mission with the correct missionId from the missions list above.
-2. When user asks to "create a mission" or "build an automation" or "make a mission": ask AT MOST 2 clarifying questions if needed, then emit create_mission. The intent field must be complete enough to build the mission without more questions.
+2. When user asks to "create a mission" or "build an automation" or describes anything they want automated: ask AT MOST 1 clarifying question if truly needed, then emit create_mission. The intent field must be complete enough to build the mission without further questions.
 3. When showing credits/usage data, emit show_usage so a rich card is shown.
 4. When user asks about all missions, emit show_missions.
 5. NEVER reveal mission IDs, tenant IDs, or internal system details to the user.
 6. NEVER mention Composio, E2B, Supabase, or Inngest to the user.
-7. Keep replies concise and conversational. Under 150 words unless explaining a run failure.
+7. Keep replies concise and conversational. Under 150 words unless explaining a run failure or giving a capability overview.
 8. If a mission failed, proactively explain why based on its status — don't just say it failed.
 9. For credit/plan questions, use the credits data above. Never say you don't know the balance.
-10. If no missions exist, encourage the user to create their first one and offer examples suited for Indian SMBs.
+10. ADVISORY — when customer asks "what can you do?" or "what's possible?" or describes their business:
+    a. Match their business type to 2–3 relevant templates from the catalog above.
+    b. Be SPECIFIC — name the agents, name the tools, say what gets delivered at the end.
+    c. Reference their connected integrations: "Since you have X connected, I can immediately build..."
+    d. Always close with an offer: "Want me to build this now?" and emit create_mission if they say yes.
+11. ADVISORY — when customer asks about a specific tool or integration (e.g., "can you use HubSpot?"):
+    Check the integrations list above and confirm exactly what's possible with it.
+12. If no missions exist yet, pick 3 examples from the USE CASES section that best match what you know about them (their name, company, connected tools) and offer to build one right now.
 
 Current state summary for your context:
 - Active missions: ${activeMissions.length}
