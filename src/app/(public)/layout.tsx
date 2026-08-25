@@ -18,7 +18,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
             <a href="/pricing" className="public-nav-link">Pricing</a>
             <a href="/terms" className="public-nav-link">Terms</a>
             <a href="/dashboard" className="public-nav-link public-nav-cta-ghost">Test Me</a>
-            <a href="/signup" className="public-nav-link public-nav-cta-ghost">Sign Up</a>
+            <a href="/login" className="public-nav-link public-nav-cta-ghost">Sign Up</a>
             <a href="/login" className="public-nav-link public-nav-cta">Log In</a>
           </div>
           {/* Mobile hamburger */}

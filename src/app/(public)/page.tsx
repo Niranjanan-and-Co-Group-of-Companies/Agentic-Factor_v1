@@ -24,15 +24,15 @@ const FEATURES = [
 const PLANS = [
   { name: "Free Trial", price: "₹0", period: "", credits: "30 credits", features: ["1 active mission", "Flash models (Gemini Flash, Claude Haiku)", "100 MB storage", "2 discovery questions", "No scheduling", "No multi-role agents"], cta: "Start Free", href: "/login", highlight: false },
   { name: "Individual", price: "₹2,499", period: "/month", credits: "1,000 credits", features: ["5 active missions", "Pro models (Claude Sonnet, GPT-4o)", "10 GB storage", "3-4 discovery questions", "Agent email inbox", "Up to 2 parallel roles"], cta: "Upgrade", href: "/pricing", highlight: true },
-  { name: "Pro", price: "From ₹4,548", period: "/month", credits: "1,000 credits/seat", features: ["50 active missions", "All models (Claude Sonnet 4, Gemini, GPT)", "100 GB storage", "5-6 discovery questions", "Unlimited multi-role agents", "Credit top-ups available"], cta: "Configure", href: "/pricing", highlight: false },
+  { name: "Pro", price: "From ₹2,999", period: "/seat/mo", credits: "2,500 credits/seat", features: ["50 active missions", "All models (Claude Sonnet 4, Gemini, GPT)", "100 GB storage", "5-6 discovery questions", "Unlimited multi-role agents", "Credit top-ups available"], cta: "Configure", href: "/pricing", highlight: false },
   { name: "Enterprise", price: "Custom", period: "", credits: "Unlimited credits", features: ["Unlimited missions", "All + custom fine-tuned models", "1 TB storage", "8-10 discovery questions", "Dedicated support"], cta: "Contact Sales", href: "/contact", highlight: false },
 ];
 
 const TESTIMONIALS = [
-  { name: "Priya Sharma", role: "Marketing Lead, TechCorp", text: "Agentic Factor transformed how we manage our social media campaigns. The AI agents handle everything from content research to posting schedules.", avatar: "PS" },
-  { name: "Rahul Mehta", role: "CTO, DataVista", text: "We deployed 15 agents in a week — monitoring infrastructure, processing reports, and routing Slack alerts. Incredible time savings.", avatar: "RM" },
-  { name: "Ananya Gupta", role: "Founder, CreativeHQ", text: "The blueprint system is genius. I describe what I need and the AI designs the perfect team. It's like having a solutions architect on demand.", avatar: "AG" },
-  { name: "Vikram Patel", role: "VP Engineering, ScaleUp Inc", text: "Enterprise-grade security with startup-level speed. Our compliance team approved it in days, not months.", avatar: "VP" },
+  { name: "Arjun S", role: "Founder, D2C Brand", text: "I used to spend 3 hours every Monday pulling sales reports and sending updates. Now one mission does it automatically — I just check my phone.", avatar: "AS" },
+  { name: "Emin M", role: "Marketing Head", text: "We connected our CRM and the agents started writing follow-up emails for every new lead. It genuinely feels like we hired someone just for that.", avatar: "EM" },
+  { name: "Nitto Raju", role: "Workshop Owner", text: "I told it to find local businesses in my area and send them an intro. It pulled the list, wrote the emails, and sent them — I didn't touch anything.", avatar: "NR" },
+  { name: "Joel Joshi", role: "Agency Founder", text: "We run 8 client accounts. The content scheduling agent alone saves my team 2 full days every week. The ROI was obvious in the first run.", avatar: "JJ" },
 ];
 
 const FAQS = [
@@ -92,7 +92,7 @@ export default function WelcomePage() {
           </p>
           <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
             <a href="/dashboard" className="btn btn-primary btn-lg" style={{ fontSize: "1rem", padding: "14px 32px" }}>🎯 Test Me Free</a>
-            <a href="/signup" className="btn btn-ghost btn-lg" style={{ fontSize: "1rem", padding: "14px 32px" }}>Create Account →</a>
+            <a href="/login" className="btn btn-ghost btn-lg" style={{ fontSize: "1rem", padding: "14px 32px" }}>Create Account →</a>
           </div>
         </div>
       </section>

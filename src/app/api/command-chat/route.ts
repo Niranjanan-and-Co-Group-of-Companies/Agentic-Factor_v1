@@ -181,7 +181,7 @@ ${connectedProviders.length > 0 ? connectedProviders.join(', ') : 'None connecte
 ${contextualSuggestions}
 ${PLATFORM_CATALOG}
 ═══ ACTIONS YOU CAN TAKE ═══
-Emit an <action> block at the very end of your reply (after all your text). Never mention the action block to the user.
+CRITICAL: You MUST wrap every action in <action>...</action> tags — always, regardless of how long the JSON is, regardless of how complex the request is. Never output action JSON as plain text. The tags are required for the UI to render correctly. Place the <action> block at the very end of your reply, after all your text. Never mention the action block to the user.
 
 Action types:
 - run_mission: { "type": "run_mission", "missionId": "...", "missionTitle": "...", "missionStatus": "draft|active|paused|failed|completed" }
@@ -333,7 +333,7 @@ export async function POST(request: NextRequest) {
           },
           body: JSON.stringify({
             model: 'claude-sonnet-4-6',
-            max_tokens: 1024,
+            max_tokens: 4096,
             stream: true,
             system: systemPrompt,
             messages: recentMessages,
@@ -394,6 +394,34 @@ export async function POST(request: NextRequest) {
             actionPayload = JSON.parse(actionMatch[1].trim());
             cleanText = fullText.replace(/<action>[\s\S]*?<\/action>/, '').trim();
           } catch { /* malformed action — ignore */ }
+        }
+
+        // Fallback: detect raw action JSON even when LLM omits <action> tags or truncation cut the closing tag.
+        // Walks character by character, balancing braces so nested objects/arrays don't confuse it.
+        if (!actionPayload) {
+          const KNOWN_TYPES = new Set(['create_mission','run_mission','show_missions','show_usage','open_mission','schedule_mission','pause_mission','resume_mission','suggest_connector']);
+          const jsonStart = fullText.indexOf('{"type":');
+          if (jsonStart !== -1) {
+            let depth = 0, inString = false, escaped = false, jsonEnd = -1;
+            for (let i = jsonStart; i < fullText.length; i++) {
+              const ch = fullText[i];
+              if (escaped) { escaped = false; continue; }
+              if (ch === '\\' && inString) { escaped = true; continue; }
+              if (ch === '"') { inString = !inString; continue; }
+              if (inString) continue;
+              if (ch === '{') depth++;
+              if (ch === '}') { depth--; if (depth === 0) { jsonEnd = i; break; } }
+            }
+            if (jsonEnd !== -1) {
+              try {
+                const candidate = JSON.parse(fullText.slice(jsonStart, jsonEnd + 1)) as Record<string, unknown>;
+                if (candidate.type && KNOWN_TYPES.has(candidate.type as string)) {
+                  actionPayload = candidate;
+                  cleanText = (fullText.slice(0, jsonStart) + fullText.slice(jsonEnd + 1)).trim();
+                }
+              } catch { /* not valid JSON — leave as plain text */ }
+            }
+          }
         }
 
         // Deduct credits
