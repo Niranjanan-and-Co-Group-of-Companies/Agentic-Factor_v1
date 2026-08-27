@@ -10,14 +10,25 @@ import { createServiceClient } from '@/lib/supabase/server';
 // Old batches older than 14 days are pruned automatically.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const GENERATION_PROMPT = `Generate 25 unique, inspiring one-to-two sentence messages for a business AI automation platform dashboard. Vary the angle across all 25 — cover ROI gains, time savings, 24/7 execution, competitive advantage, business transformation, and the permission/approval model. Include specific realistic statistics in most messages. Tone: warm, confident, empowering — like a premium coach, not a salesperson. Never mention failures, errors, or technical details.
+const GENERATION_PROMPT = `Generate 30 unique, inspiring one-to-two sentence messages for an AI agent automation platform dashboard. Each message should feel fresh and be drawn from a DIFFERENT real-world scenario. Spread across ALL of these areas — pick different ones each time so the pool stays diverse:
+
+Sales & revenue growth, Marketing & content creation, Operations & admin, Customer retention, Customer acquisition, Research & academia, Study & learning assistance, Personal productivity, Health & fitness coaching, Finance & accounting, HR & recruitment, E-commerce & retail, Real estate, Social media management, Legal & compliance, Events & hospitality, Education & online coaching, Journalism & media, Non-profit & social impact, Travel & logistics, Mental wellness & therapy support, Parenting & family organisation, Career development & job searching, Language learning, Creative writing & storytelling, Photography & videography businesses, Restaurant & food businesses, Healthcare professionals, Interior design & architecture, Software development teams.
+
+Rules:
+- Every message must be 1–2 sentences max
+- Include a specific realistic metric or statistic in most messages (percentages, time saved, multipliers)
+- Tone: warm, confident, empowering — like a brilliant coach who believes in you, not a salesperson
+- Always positive — never mention failures, errors, or anything negative
+- Make each message feel like it was written for THAT specific industry or person
+- Vary the angle: ROI, time savings, 24/7 execution, competitive edge, quality of life, peace of mind, scale, transformation
 
 Style examples:
-"Companies running AI-powered sales follow-up report 3× more deals closed without adding a single hire."
-"Your agents work 720 hours every month. You work zero on those tasks — just give the approval."
-"Teams automating their reporting workflows get back an average of 9 hours a week, every week."
+"PhD students using AI research agents report spending 70% less time on literature reviews — and 70% more time on original thinking."
+"Your fitness coaching agent sends personalised check-ins to every client, every day — without you lifting a finger."
+"E-commerce brands using AI for abandoned cart recovery report recovering up to 22% of otherwise lost revenue."
+"Give the approval once. Your agents execute it a thousand times — perfectly, consistently, at scale."
 
-Return ONLY a valid JSON array of 25 strings. No markdown fences, no explanation, no keys — just the raw JSON array.`;
+Return ONLY a valid JSON array of 30 strings. No markdown, no explanation, no keys — raw JSON array only.`;
 
 export const generateWelcomeMessages = inngest.createFunction(
   {
