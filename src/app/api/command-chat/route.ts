@@ -428,53 +428,23 @@ export async function POST(request: NextRequest) {
         const credits = await calculateChatCreditCost(inputTokens, outputTokens, 'claude-sonnet-4-6');
         deductCredits(tenantId, credits, 'command_chat').catch(console.error);
 
-        // ── Handle create_mission action server-side ──
-        let missionCreated: { id: string; title: string } | null = null;
+        // ── Handle create_mission: hand off to Inngest background job ──
+        // generateMissionJSON can take 45-90s for complex missions.
+        // Running it inline would hit the 120s serverless timeout — so we fire
+        // an Inngest event and let the background function handle it. The client
+        // polls /api/blueprint-status?jobId=... for progress and completion.
         if (actionPayload?.type === 'create_mission' && actionPayload.intent) {
+          const jobId = crypto.randomUUID();
           try {
-            const { generateMissionJSON, persistMission } = await import('@/lib/services/intake');
-            const result = await generateMissionJSON(actionPayload.intent as string, tenantId);
-            if (result.mission && !result.isDiscovery) {
-              const saved = await persistMission(result.mission, tenantId);
-              missionCreated = { id: saved.id, title: saved.title };
-
-              // Extract agent cards for the visual pipeline rendered in chat
-              const agentCards = result.mission.agents
-                .sort((a, b) => a.agentIndex - b.agentIndex)
-                .map(a => ({
-                  name: a.role,
-                  icon: inferAgentIcon(a.role, a.tools.map(t => t.type)),
-                  role: a.capabilities.slice(0, 2).join(' · '),
-                  tool: a.tools[0]?.name ?? '',
-                  trustLevel: a.trustLevel,
-                }));
-
-              // Deterministically compute missing connectors from blueprint permissions
-              const seen = new Set<string>();
-              const missingConnectors = result.mission.permissions
-                .filter(p => !tenantProviders.includes(p.service))
-                .reduce<Array<{ service: string; reason: string }>>((acc, p) => {
-                  if (!seen.has(p.service)) {
-                    seen.add(p.service);
-                    acc.push({ service: p.service, reason: p.scope });
-                  }
-                  return acc;
-                }, []);
-
-              actionPayload = {
-                type: 'mission_created',
-                missionId: saved.id,
-                missionTitle: saved.title,
-                agents: agentCards,
-                orchestrationPattern: result.mission.orchestration.pattern,
-                missingConnectors,
-              };
-            } else if (result.isDiscovery && result.question) {
-              actionPayload = { type: 'discovery_question', question: result.question };
-            }
-          } catch (intakeErr) {
-            console.error('[command-chat] Mission creation failed:', intakeErr);
-            actionPayload = { type: 'mission_create_error', error: (intakeErr as Error).message };
+            const { inngest } = await import('@/lib/inngest/client');
+            await inngest.send({
+              name: 'mission/blueprint.generate',
+              data: { jobId, intent: actionPayload.intent as string, tenantId },
+            });
+            actionPayload = { type: 'building_blueprint', jobId };
+          } catch (inngestErr) {
+            console.error('[command-chat] Failed to queue blueprint generation:', inngestErr);
+            actionPayload = { type: 'mission_create_error', error: (inngestErr as Error).message };
           }
         }
 
@@ -498,7 +468,7 @@ export async function POST(request: NextRequest) {
           await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
         })().catch(console.error);
 
-        send({ type: 'done', credits, inputTokens, outputTokens, sessionId: chatId, cleanText, action: actionPayload, missionCreated });
+        send({ type: 'done', credits, inputTokens, outputTokens, sessionId: chatId, cleanText, action: actionPayload });
 
       } catch (err) {
         console.error('[command-chat/stream]', err);

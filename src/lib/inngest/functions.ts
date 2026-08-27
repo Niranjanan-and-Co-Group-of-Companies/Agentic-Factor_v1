@@ -394,6 +394,22 @@ export const executeMissionBackground = inngest.createFunction(
   }
 );
 
+// ── Local helper: map agent role + tools to an emoji icon ────────────────────
+function inferAgentIcon(role: string, toolTypes: string[]): string {
+  const r = role.toLowerCase();
+  const t = toolTypes.join(' ').toLowerCase();
+  if (/image|photo|visual|dall|design|generat.*image/.test(`${r} ${t}`)) return '🎨';
+  if (/post|publish|buffer|social|facebook|instagram|twitter/.test(`${r} ${t}`)) return '📲';
+  if (/email|outreach|gmail|smtp/.test(`${r} ${t}`)) return '📧';
+  if (/video|youtube|render|edit/.test(`${r} ${t}`)) return '🎬';
+  if (/search|research|scrape|web/.test(`${r} ${t}`)) return '🔍';
+  if (/data|analyt|report|spread/.test(`${r} ${t}`)) return '📊';
+  if (/lead|crm|hubspot|salesforce/.test(`${r} ${t}`)) return '🎯';
+  if (/notify|alert|slack|discord/.test(`${r} ${t}`)) return '🔔';
+  if (/content|write|copy|caption|text/.test(`${r} ${t}`)) return '🧠';
+  return '🤖';
+}
+
 // ═══════════════════════════════════════════════════════════
 // Inngest Function: Generate Blueprint in Background
 // ═══════════════════════════════════════════════════════════
@@ -474,21 +490,51 @@ export const generateBlueprintBackground = inngest.createFunction(
         return { success: true, jobId, type: 'discovery' };
       }
 
-      // ── Step 3: Validate + save ──
+      // ── Step 3: Persist + emit completion data ──
       await step.run('save-blueprint', async () => {
         await updateJobStatus('processing', { step: '✅ Validating blueprint structure...' });
-        // Brief pause so SSE can pick up the validation message before completed fires
         await new Promise<void>((r) => setTimeout(r, 1200));
 
         const mission = discoveryResult.mission;
+
+        // Persist mission to the database
+        const { persistMission } = await import('@/lib/services/intake');
+        const saved = await persistMission(mission, tenantId);
+
+        // Build agent cards for the chat UI pipeline renderer
+        const agentCards = (mission.agents as any[])
+          .sort((a, b) => a.agentIndex - b.agentIndex)
+          .map((a) => ({
+            name: a.role,
+            icon: inferAgentIcon(a.role, (a.tools as any[]).map((t) => t.type)),
+            role: (a.capabilities as string[]).slice(0, 2).join(' · '),
+            tool: a.tools[0]?.name ?? '',
+            trustLevel: a.trustLevel,
+          }));
+
+        // Determine which connectors the tenant still needs to connect
+        const { data: perms } = await supabase
+          .from('tenant_permissions')
+          .select('provider')
+          .eq('tenant_id', tenantId);
+        const tenantProviders = (perms ?? []).map((p: any) => p.provider as string);
+        const seen = new Set<string>();
+        const missingConnectors = ((mission.permissions as any[]) ?? [])
+          .filter((p) => !tenantProviders.includes(p.service))
+          .reduce<Array<{ service: string; reason: string }>>((acc, p) => {
+            if (!seen.has(p.service)) {
+              seen.add(p.service);
+              acc.push({ service: p.service, reason: p.scope });
+            }
+            return acc;
+          }, []);
+
         await updateJobStatus('completed', {
-          blueprint: mission,
-          rawLLMOutput: discoveryResult.rawLLMOutput,
-          meta: {
-            agentCount: mission.agents.length,
-            pattern: mission.orchestration.pattern,
-            timeoutSeconds: mission.orchestration.timeoutSeconds,
-          },
+          missionId: saved.id,
+          missionTitle: saved.title,
+          agents: agentCards,
+          orchestrationPattern: mission.orchestration.pattern,
+          missingConnectors,
         });
       });
 

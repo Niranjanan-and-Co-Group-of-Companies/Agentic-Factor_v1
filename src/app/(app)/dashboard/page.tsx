@@ -21,6 +21,7 @@ interface AgentCard { name: string; icon?: string; role: string; tool?: string; 
 interface MissingConnector { service: string; reason: string; }
 interface ActionPayload {
   type: string;
+  jobId?: string;
   missionId?: string;
   missionTitle?: string;
   missionStatus?: string;
@@ -168,9 +169,12 @@ function CommandCenterPageInner() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  const [blueprintSteps, setBlueprintSteps] = useState<Record<string, string>>({});
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const runPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const blueprintPollsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
 
@@ -247,7 +251,10 @@ function CommandCenterPageInner() {
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   // ── Cleanup polling ────────────────────────────────────────────────────────
-  useEffect(() => () => { if (runPollRef.current) clearInterval(runPollRef.current); }, []);
+  useEffect(() => () => {
+    if (runPollRef.current) clearInterval(runPollRef.current);
+    for (const poll of blueprintPollsRef.current.values()) clearInterval(poll);
+  }, []);
 
   // ── Load session ───────────────────────────────────────────────────────────
   const loadSession = async (sessionId: string) => {
@@ -292,6 +299,72 @@ function CommandCenterPageInner() {
     setTimeout(() => { if (runPollRef.current) clearInterval(runPollRef.current); }, 15 * 60 * 1000);
   }, []);
 
+  // ── Blueprint polling: pick up Inngest progress + completion ──────────────
+  const startBlueprintPolling = useCallback((jobId: string) => {
+    if (blueprintPollsRef.current.has(jobId)) {
+      clearInterval(blueprintPollsRef.current.get(jobId)!);
+    }
+
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/blueprint-status?jobId=${encodeURIComponent(jobId)}`, { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json() as {
+          status?: string; step?: string;
+          missionId?: string; missionTitle?: string;
+          agents?: AgentCard[]; orchestrationPattern?: string;
+          missingConnectors?: MissingConnector[]; error?: string;
+        };
+
+        if (data.step) setBlueprintSteps(prev => ({ ...prev, [jobId]: data.step! }));
+
+        if (data.status === 'completed' && data.missionId) {
+          clearInterval(poll); blueprintPollsRef.current.delete(jobId);
+          setMessages(prev => {
+            const updated = [...prev];
+            const idx = updated.findIndex(m => m.action_payload?.type === 'building_blueprint' && m.action_payload.jobId === jobId);
+            if (idx === -1) return prev;
+            updated[idx] = { ...updated[idx], action_payload: {
+              type: 'mission_created',
+              missionId: data.missionId, missionTitle: data.missionTitle,
+              agents: data.agents ?? [], orchestrationPattern: data.orchestrationPattern,
+              missingConnectors: data.missingConnectors ?? [],
+            }};
+            return updated;
+          });
+          loadMissions();
+          setTimeout(() => loadCredits(), 1000);
+        } else if (data.status === 'failed') {
+          clearInterval(poll); blueprintPollsRef.current.delete(jobId);
+          setMessages(prev => {
+            const updated = [...prev];
+            const idx = updated.findIndex(m => m.action_payload?.type === 'building_blueprint' && m.action_payload.jobId === jobId);
+            if (idx === -1) return prev;
+            updated[idx] = { ...updated[idx], action_payload: { type: 'mission_create_error', error: data.error ?? 'Blueprint generation failed.' }};
+            return updated;
+          });
+        }
+      } catch { /* non-fatal */ }
+    }, 2500);
+
+    blueprintPollsRef.current.set(jobId, poll);
+
+    // Stop polling after 12 minutes and show a timeout message
+    setTimeout(() => {
+      if (!blueprintPollsRef.current.has(jobId)) return;
+      clearInterval(blueprintPollsRef.current.get(jobId)!);
+      blueprintPollsRef.current.delete(jobId);
+      setMessages(prev => {
+        const updated = [...prev];
+        const idx = updated.findIndex(m => m.action_payload?.type === 'building_blueprint' && m.action_payload.jobId === jobId);
+        if (idx === -1 || updated[idx]?.action_payload?.type !== 'building_blueprint') return prev;
+        updated[idx] = { ...updated[idx], action_payload: { type: 'mission_create_error', error: 'Timed out. Check your Missions list — it may have been created. Otherwise try again.' }};
+        return updated;
+      });
+    }, 12 * 60 * 1000);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadMissions]);
+
   // ── Send message ───────────────────────────────────────────────────────────
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
@@ -329,7 +402,7 @@ function CommandCenterPageInner() {
           try {
             const evt = JSON.parse(line.slice(6)) as {
               type: string; text?: string; cleanText?: string;
-              action?: ActionPayload; sessionId?: string; missionCreated?: { id: string; title: string };
+              action?: ActionPayload; sessionId?: string;
               credits?: number; inputTokens?: number; outputTokens?: number;
             };
             if (evt.type === 'delta' && evt.text) {
@@ -349,7 +422,12 @@ function CommandCenterPageInner() {
             }
             if (evt.type === 'done') {
               const final = evt.cleanText ?? streamed;
-              setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: final, action_payload: evt.action ?? null, isStreaming: false, ts: Date.now() }; return u; });
+              const action = evt.action ?? null;
+              setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: final, action_payload: action, isStreaming: false, ts: Date.now() }; return u; });
+              // If the server queued a blueprint generation job, start polling for completion
+              if (action?.type === 'building_blueprint' && action.jobId) {
+                startBlueprintPolling(action.jobId);
+              }
               if (evt.sessionId && !activeSessionId) { setActiveSessionId(evt.sessionId); loadSessions(); }
               // Optimistically subtract deducted credits so balance updates instantly
               if (evt.credits && evt.credits > 0) {
@@ -440,12 +518,12 @@ function CommandCenterPageInner() {
 
   // ── Action Card Renderer ───────────────────────────────────────────────────
   // ── Processing card (shown while server builds the action result) ─────────────
-  const renderProcessingCard = (actionType: string) => {
+  const renderProcessingCard = (actionType: string, liveStep?: string) => {
     type CfgEntry = { icon: string; title: string; sub: string; steps?: string[] };
     const cfg: Record<string, CfgEntry> = {
       create_mission: {
         icon: '✨', title: 'Building Mission Blueprint',
-        sub: 'Designing your agent pipeline — takes 15–30 s',
+        sub: 'Designing your agent pipeline…',
         steps: ['Structuring agent roles & capabilities', 'Wiring tool connections', 'Verifying required connectors'],
       },
       run_mission:      { icon: '▶',  title: 'Launching Mission',    sub: 'Dispatching your agents…' },
@@ -456,6 +534,7 @@ function CommandCenterPageInner() {
       pending:          { icon: '⟳',  title: 'Processing',            sub: 'One moment…' },
     };
     const c: CfgEntry = cfg[actionType] ?? cfg.pending;
+    const displaySub = liveStep ?? c.sub;
 
     return (
       <div style={{ marginTop: 10, maxWidth: 520, animation: 'slideIn 0.3s ease', fontFamily: 'var(--font-sans)' }}>
@@ -473,7 +552,7 @@ function CommandCenterPageInner() {
             }}>{c.icon}</div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)' }}>{c.title}</div>
-              <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', marginTop: 2 }}>{c.sub}</div>
+              <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', marginTop: 2 }}>{displaySub}</div>
             </div>
             {/* Bouncing dots */}
             <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
@@ -495,8 +574,8 @@ function CommandCenterPageInner() {
             }} />
           </div>
 
-          {/* Steps — only for create_mission */}
-          {c.steps && (
+          {/* Steps during initial streaming (before Inngest sends real updates) */}
+          {!liveStep && c.steps && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
               {c.steps.map((step, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -571,6 +650,21 @@ function CommandCenterPageInner() {
         <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => applyAction(action, msgIndex)}>Connect Now →</button>
       </div>
     );
+
+    if (action.type === 'building_blueprint' && action.jobId) {
+      const liveStep = blueprintSteps[action.jobId];
+      const isActive = blueprintPollsRef.current.has(action.jobId);
+      if (isActive || liveStep) {
+        return renderProcessingCard('create_mission', liveStep);
+      }
+      // Historical message — job is no longer active
+      return (
+        <div style={card}>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>✨ Blueprint job has ended. Check your Missions list.</div>
+          <button style={ghostBtn} onClick={() => router.push('/dashboard/missions')}>View Missions →</button>
+        </div>
+      );
+    }
 
     if (action.type === 'mission_created') {
       const agents: AgentCard[] = action.agents ?? [];
