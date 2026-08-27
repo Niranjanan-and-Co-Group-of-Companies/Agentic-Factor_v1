@@ -51,14 +51,21 @@ export async function buildChatContext(
     ? connectedProviders.join(', ')
     : 'none connected yet';
 
-  // Google family: connecting 'google' covers gmail, sheets, drive, etc.
-  const GOOGLE_SLUGS = new Set(['gmail', 'googlesheets', 'googledrive', 'googlecalendar', 'googledocs', 'youtube']);
-  const hasGoogle = connectedProviders.some(p => p === 'google' || GOOGLE_SLUGS.has(p));
+  // Legacy AF key → Composio slug mappings (for backward compat with old provider keys stored in DB)
+  const LEGACY_SLUG_ALIASES: Record<string, string[]> = {
+    gmail:          ['google', 'gmail'],
+    linkedin:       ['linkedin_oidc', 'linkedin'],
+    jira:           ['atlassian', 'jira'],
+    confluence:     ['atlassian', 'confluence'],
+    outlook:        ['microsoft', 'outlook'],
+    onedrive:       ['microsoft', 'onedrive'],
+    microsoftteams: ['microsoft', 'microsoftteams'],
+  };
 
   function isProviderConnected(service: string): boolean {
     const s = service.toLowerCase();
-    if (GOOGLE_SLUGS.has(s) && hasGoogle) return true;
-    return connectedProviders.includes(s);
+    const candidates = LEGACY_SLUG_ALIASES[s] ?? [s];
+    return candidates.some(c => connectedProviders.includes(c));
   }
 
   // Permissions required by this mission but not yet granted

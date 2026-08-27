@@ -345,21 +345,24 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
     }
   });
 
-  // Composio slug → list of provider keys that could satisfy the requirement.
-  // The callback route stores the AF provider key (e.g. 'google'), not the Composio slug
-  // (e.g. 'gmail'), so we must check both forms for Google and other multi-service providers.
+  // Composio slug → legacy AF provider keys that could satisfy the requirement.
+  // Only needed for services where the OLD connect flow stored a different key in
+  // tenant_permissions than the Composio slug. Each entry here represents one OAuth
+  // connection that genuinely covers the slug — not just a Google-family alias.
+  // gmail/google: the old AF key 'google' created a gmail Composio connection → valid.
+  // linkedin/linkedin_oidc: old AF key for LinkedIn.
+  // jira/atlassian: old AF key for Jira.
+  // outlook/microsoft: old AF key for Outlook.
+  // googlesheets, googledrive, etc. are SEPARATE Composio connections — do NOT alias them
+  // to 'google', as that connection cannot execute GOOGLESHEETS_* or GOOGLEDRIVE_* actions.
   const COMPOSIO_SLUG_ALIASES: Record<string, string[]> = {
     gmail:          ['google', 'gmail'],
-    googlesheets:   ['google', 'googlesheets'],
-    googledrive:    ['google', 'googledrive'],
-    googlecalendar: ['google', 'googlecalendar'],
-    googledocs:     ['google', 'googledocs'],
-    youtube:        ['google', 'youtube'],
+    linkedin:       ['linkedin_oidc', 'linkedin'],
+    jira:           ['atlassian', 'jira'],
+    confluence:     ['atlassian', 'confluence'],
     outlook:        ['microsoft', 'outlook'],
     onedrive:       ['microsoft', 'onedrive'],
     microsoftteams: ['microsoft', 'microsoftteams'],
-    jira:           ['atlassian', 'jira'],
-    confluence:     ['atlassian', 'confluence'],
   };
 
   // Verify Composio-managed connections: check tenant_permissions for any matching provider key.
