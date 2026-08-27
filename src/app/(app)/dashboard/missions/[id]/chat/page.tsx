@@ -231,24 +231,34 @@ export default function MissionChatPage() {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
 
+      // Read mission_json so we can extract permissions + fallback title from it
       const { data: mission } = await supabase
         .from('missions')
-        .select('title, status, permissions')
+        .select('title, status, mission_json')
         .eq('id', missionId)
         .eq('tenant_id', user.id)
         .single();
 
-      if (mission?.title) setMissionTitle(mission.title);
+      const missionJson = mission?.mission_json as Record<string, unknown> | null;
+
+      // Title: prefer missions.title column, fall back to mission_json.title
+      const resolvedTitle = mission?.title || (missionJson?.title as string | undefined);
+      if (resolvedTitle) setMissionTitle(resolvedTitle);
       if (mission?.status) setMissionStatus(mission.status);
 
-      const permissions: Array<{ service: string; scope: string }> = mission?.permissions ?? [];
-      if (permissions.length === 0) return;
+      // Permissions live inside mission_json, not a separate column
+      const rawPerms = (missionJson?.permissions as Array<{ service: string; scope?: string; type?: string }> | null) ?? [];
+      if (rawPerms.length === 0) return;
 
       // Deduplicate by service
       const seen = new Set<string>();
-      const unique = permissions.filter(p => { if (seen.has(p.service)) return false; seen.add(p.service); return true; });
+      const unique = rawPerms.filter(p => {
+        if (!p.service || seen.has(p.service)) return false;
+        seen.add(p.service);
+        return true;
+      });
 
-      // Fetch which providers this tenant has connected
+      // Fetch connected providers for this tenant
       const { data: connected } = await supabase
         .from('tenant_permissions')
         .select('provider')
@@ -258,7 +268,7 @@ export default function MissionChatPage() {
 
       setRequiredConnectors(unique.map(p => ({
         service: p.service,
-        reason: p.scope,
+        reason: p.scope ?? p.type ?? '',
         connected: connectedSet.has(p.service),
       })));
     });
@@ -289,14 +299,22 @@ export default function MissionChatPage() {
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
-  // ── Poll mission status every 8s ─────────────────────────────
+  // ── Poll mission status every 8s — also refreshes title if it didn't load ──
   useEffect(() => {
     const supabase = getSupabase();
     const poll = setInterval(async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await supabase.from('missions').select('status').eq('id', missionId).eq('tenant_id', user.id).single();
+      const { data } = await supabase
+        .from('missions')
+        .select('status, title, mission_json')
+        .eq('id', missionId)
+        .eq('tenant_id', user.id)
+        .single();
       if (data?.status) setMissionStatus(data.status);
+      // Fill in title if it wasn't set on initial load
+      const pollTitle = data?.title || (data?.mission_json as any)?.title;
+      if (pollTitle) setMissionTitle((prev) => (prev === 'Mission' ? pollTitle : prev));
     }, 8000);
     return () => clearInterval(poll);
   }, [missionId]);
@@ -761,10 +779,10 @@ export default function MissionChatPage() {
                 + New Chat
               </button>
               <button
-                onClick={() => router.push(`/dashboard/missions/${missionId}`)}
+                onClick={() => router.push('/dashboard')}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.75rem', textAlign: 'left', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 6 }}
               >
-                ← Back to mission
+                ← All Missions
               </button>
             </div>
 
@@ -828,10 +846,10 @@ export default function MissionChatPage() {
               }}>
                 {missionStatus}
               </span>
-              <button onClick={() => router.push(`/dashboard/missions/${missionId}`)}
+              <button onClick={() => router.push('/dashboard')}
                 className="btn btn-ghost btn-sm"
                 style={{ fontSize: '0.78rem' }}>
-                View Mission →
+                ← Missions
               </button>
             </div>
           </div>
@@ -873,10 +891,10 @@ export default function MissionChatPage() {
               </div>
               {(liveRun.status === 'completed' || liveRun.status === 'failed') && (
                 <button
-                  onClick={() => router.push(`/dashboard/missions/${missionId}`)}
+                  onClick={() => sendMessage(liveRun.status === 'failed' ? 'Explain what failed and how to fix it' : 'What did the mission accomplish in that run?')}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}
                 >
-                  View →
+                  {liveRun.status === 'failed' ? 'Diagnose →' : 'Summary →'}
                 </button>
               )}
               <button
