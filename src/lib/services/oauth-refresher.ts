@@ -345,21 +345,40 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
     }
   });
 
-  // Verify Composio-managed connections: just check the row exists (any access_token is valid —
-  // Composio stores 'composio_managed' as the token placeholder).
+  // Composio slug → list of provider keys that could satisfy the requirement.
+  // The callback route stores the AF provider key (e.g. 'google'), not the Composio slug
+  // (e.g. 'gmail'), so we must check both forms for Google and other multi-service providers.
+  const COMPOSIO_SLUG_ALIASES: Record<string, string[]> = {
+    gmail:          ['google', 'gmail'],
+    googlesheets:   ['google', 'googlesheets'],
+    googledrive:    ['google', 'googledrive'],
+    googlecalendar: ['google', 'googlecalendar'],
+    googledocs:     ['google', 'googledocs'],
+    youtube:        ['google', 'youtube'],
+    outlook:        ['microsoft', 'outlook'],
+    onedrive:       ['microsoft', 'onedrive'],
+    microsoftteams: ['microsoft', 'microsoftteams'],
+    jira:           ['atlassian', 'jira'],
+    confluence:     ['atlassian', 'confluence'],
+  };
+
+  // Verify Composio-managed connections: check tenant_permissions for any matching provider key.
   for (const slug of composioProviders) {
+    const candidates = COMPOSIO_SLUG_ALIASES[slug] ?? [slug];
+
     const { data: row } = await supabase
       .from('tenant_permissions')
       .select('provider')
       .eq('tenant_id', tenantId)
-      .eq('provider', slug)
+      .in('provider', candidates)
+      .limit(1)
       .maybeSingle();
 
     if (!row) {
-      console.log(`[VerifyPermissions] ❌ Composio provider "${slug}" — not connected`);
+      console.log(`[VerifyPermissions] ❌ Composio provider "${slug}" — not connected (checked: ${candidates.join(', ')})`);
       missingProviders.push(slug);
     } else {
-      console.log(`[VerifyPermissions] ✅ Composio provider "${slug}" — connected`);
+      console.log(`[VerifyPermissions] ✅ Composio provider "${slug}" — connected (found as "${row.provider}")`);
     }
   }
 

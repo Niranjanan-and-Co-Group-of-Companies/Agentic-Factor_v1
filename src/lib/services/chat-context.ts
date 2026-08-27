@@ -51,10 +51,20 @@ export async function buildChatContext(
     ? connectedProviders.join(', ')
     : 'none connected yet';
 
+  // Google family: connecting 'google' covers gmail, sheets, drive, etc.
+  const GOOGLE_SLUGS = new Set(['gmail', 'googlesheets', 'googledrive', 'googlecalendar', 'googledocs', 'youtube']);
+  const hasGoogle = connectedProviders.some(p => p === 'google' || GOOGLE_SLUGS.has(p));
+
+  function isProviderConnected(service: string): boolean {
+    const s = service.toLowerCase();
+    if (GOOGLE_SLUGS.has(s) && hasGoogle) return true;
+    return connectedProviders.includes(s);
+  }
+
   // Permissions required by this mission but not yet granted
   const requiredPerms = (mission?.permissions as Array<{ service: string; granted?: boolean }> ?? []);
   const missingConnectors = requiredPerms
-    .filter(p => !p.granted && !connectedProviders.includes(p.service))
+    .filter(p => !p.granted && !isProviderConnected(p.service))
     .map(p => p.service);
 
   // ── 4. Last 3 run summaries ─────────────────────────────────
