@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
+import MissionsSidebar from '@/components/MissionsSidebar';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -771,6 +772,9 @@ export default function MissionChatPage() {
         display: 'flex', background: 'var(--bg-primary)', zIndex: 40,
         fontFamily: 'var(--font-sans)',
       }}>
+
+        {/* ── Missions Sidebar ─────────────────────────────────── */}
+        <MissionsSidebar activeMissionId={missionId} />
 
         {/* ── Main Chat Area ──────────────────────────────────── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>

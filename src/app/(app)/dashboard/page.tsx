@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import OnboardingTour from '@/components/OnboardingTour';
+import MissionsSidebar from '@/components/MissionsSidebar';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -161,14 +162,6 @@ function CommandCenterPageInner() {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [proactiveAlert, setProactiveAlert] = useState<string | null>(null);
-
-  // UI state — left rail hidden on mobile by default
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.innerWidth <= 768) setSidebarOpen(false);
-  }, []);
-  const [missions, setMissions] = useState<MissionShortcut[]>([]);
-  const [credits, setCredits] = useState<{ remaining: number; topup: number; plan: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [applyingAction, setApplyingAction] = useState<number | null>(null);
   const [liveRun, setLiveRun] = useState<{ missionId: string; run: LiveRun } | null>(null);
@@ -200,8 +193,6 @@ function CommandCenterPageInner() {
   // ── Bootstrap ──────────────────────────────────────────────────────────────
   useEffect(() => {
     loadSessions();
-    loadMissions();
-    loadCredits();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -226,21 +217,6 @@ function CommandCenterPageInner() {
     if (res.ok) { const d = await res.json() as { sessions: ChatSession[] }; setSessions(d.sessions ?? []); }
   }, []);
 
-  const loadMissions = async () => {
-    const supabase = getSupabase();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data } = await supabase.from('missions').select('id, title, status').eq('tenant_id', user.id).order('created_at', { ascending: false }).limit(20);
-    setMissions(data ?? []);
-  };
-
-  const loadCredits = async () => {
-    const supabase = getSupabase();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data } = await supabase.from('tenant_billing').select('credits_remaining, credits_topup, plan').eq('tenant_id', user.id).single();
-    if (data) setCredits({ remaining: data.credits_remaining ?? 0, topup: data.credits_topup ?? 0, plan: data.plan ?? 'free' });
-  };
 
   // ── Proactive alert on first open ──────────────────────────────────────────
   useEffect(() => {
@@ -390,7 +366,6 @@ function CommandCenterPageInner() {
         setLiveRun({ missionId, run: latest });
         if (latest.status === 'completed' || latest.status === 'failed') {
           if (runPollRef.current) clearInterval(runPollRef.current);
-          loadMissions();
         }
       } catch { /* non-fatal */ }
     }, 3000);
@@ -430,8 +405,6 @@ function CommandCenterPageInner() {
             }};
             return updated;
           });
-          loadMissions();
-          setTimeout(() => loadCredits(), 1000);
         } else if (data.status === 'failed') {
           clearInterval(poll); blueprintPollsRef.current.delete(jobId);
           setMessages(prev => {
@@ -461,7 +434,7 @@ function CommandCenterPageInner() {
       });
     }, 12 * 60 * 1000);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadMissions]);
+  }, []);
 
   // ── Send message ───────────────────────────────────────────────────────────
   const sendMessage = async (text: string) => {
@@ -527,12 +500,6 @@ function CommandCenterPageInner() {
                 startBlueprintPolling(action.jobId);
               }
               if (evt.sessionId && !activeSessionId) { setActiveSessionId(evt.sessionId); loadSessions(); }
-              // Optimistically subtract deducted credits so balance updates instantly
-              if (evt.credits && evt.credits > 0) {
-                setCredits(prev => prev ? { ...prev, remaining: Math.max(0, prev.remaining - evt.credits!) } : prev);
-              }
-              // Re-fetch true balance from DB after deductCredits() has committed
-              setTimeout(() => loadCredits(), 1500);
             }
             if (evt.type === 'error') {
               setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: `⚠️ ${evt.text ?? 'Error'}` }; return u; });
@@ -554,7 +521,7 @@ function CommandCenterPageInner() {
           ? `/api/missions/${action.missionId}/run`
           : `/api/missions/${action.missionId}/execute`;
         const res = await fetch(ep, { method: 'POST', credentials: 'include' });
-        if (res.ok) { showToast('✅ Mission started!'); startRunPolling(action.missionId); loadMissions(); }
+        if (res.ok) { showToast('✅ Mission started!'); startRunPolling(action.missionId); }
         else { const e = await res.json() as { error?: string }; showToast(`❌ ${e.error ?? 'Could not start.'}`); }
 
       } else if (action.type === 'schedule_mission' && action.missionId && action.cron) {
@@ -567,11 +534,11 @@ function CommandCenterPageInner() {
 
       } else if (action.type === 'pause_mission' && action.missionId) {
         const res = await fetch(`/api/missions/${action.missionId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pause' }) });
-        showToast(res.ok ? '⏸️ Mission paused.' : '❌ Could not pause.'); if (res.ok) loadMissions();
+        showToast(res.ok ? '⏸️ Mission paused.' : '❌ Could not pause.');
 
       } else if (action.type === 'resume_mission' && action.missionId) {
         const res = await fetch(`/api/missions/${action.missionId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'resume' }) });
-        showToast(res.ok ? '▶️ Mission resumed.' : '❌ Could not resume.'); if (res.ok) loadMissions();
+        showToast(res.ok ? '▶️ Mission resumed.' : '❌ Could not resume.');
 
       } else if (action.type === 'suggest_connector' && action.provider) {
         router.push(`/connectors?search=${encodeURIComponent(action.provider)}`);
@@ -1043,9 +1010,6 @@ function CommandCenterPageInner() {
     return null;
   };
 
-  // ── Session groups ─────────────────────────────────────────────────────────
-  const sessionGroups = groupByDate(sessions);
-
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
@@ -1118,77 +1082,19 @@ function CommandCenterPageInner() {
       {/* Full-screen layout pinned past the app sidebar */}
       <div className="cc-container" style={{ position: 'fixed', top: 0, left: 'var(--sidebar-width, 260px)', right: 0, bottom: 0, display: 'flex', background: 'var(--bg-primary)', zIndex: 40, fontFamily: 'var(--font-sans)' }}>
 
-        {/* ── Left Rail ─────────────────────────────────────────────────── */}
-        {sidebarOpen && (
-          <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: 'var(--bg-secondary)', overflow: 'hidden' }}>
-
-            {/* Header */}
-            <div style={{ padding: '14px 12px 10px', borderBottom: '1px solid var(--border)' }}>
-              <button
-                onClick={() => { setMessages([]); setActiveSessionId(null); setProactiveAlert(null); }}
-                className="btn btn-primary btn-sm"
-                style={{ width: '100%', justifyContent: 'center', fontSize: '0.82rem' }}
-              >
-                + New Chat
-              </button>
-            </div>
-
-            {/* Missions list */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
-              {missions.length > 0 ? (
-                <>
-                  <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '6px 8px 4px' }}>
-                    Missions
-                  </div>
-                  {missions.map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => router.push(`/dashboard/missions/${m.id}`)}
-                      style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', borderRadius: 'var(--radius-sm)', padding: '6px 8px', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 7, overflow: 'hidden' }}
-                      title={m.title}
-                    >
-                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusDot(m.status), flexShrink: 0 }} />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
-                    </button>
-                  ))}
-                  <button onClick={() => router.push('/dashboard/missions')} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '5px 8px', cursor: 'pointer', color: 'var(--accent)', fontSize: '0.72rem' }}>
-                    View all missions →
-                  </button>
-                </>
-              ) : (
-                <div style={{ padding: '20px 12px', fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.6 }}>
-                  No missions yet.<br />Describe what you want to automate.
-                </div>
-              )}
-            </div>
-
-            {/* Credits pill at bottom */}
-            {credits && (
-              <div style={{ padding: '10px 12px', borderTop: '1px solid var(--border)' }}>
-                <button onClick={() => router.push('/dashboard/usage')} style={{ width: '100%', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 10px', cursor: 'pointer', textAlign: 'left' }}>
-                  <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: 4 }}>Credits · {credits.plan}</div>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)' }}>{(credits.remaining + credits.topup).toLocaleString()} remaining</div>
-                  <div style={{ marginTop: 4, height: 3, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', background: credits.remaining < 100 ? '#ef4444' : 'var(--accent)', borderRadius: 4, width: `${Math.min(100, Math.round(credits.remaining / Math.max(credits.remaining + credits.topup, 1) * 100))}%` }} />
-                  </div>
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        {/* ── Missions Sidebar ───────────────────────────────────────────── */}
+        <MissionsSidebar />
 
         {/* ── Main Chat Area ─────────────────────────────────────────────── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
 
           {/* Header */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)', flexShrink: 0, flexWrap: 'nowrap', minHeight: 52 }}>
-            <button onClick={() => setSidebarOpen(o => !o)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '1.1rem', lineHeight: 1, padding: '6px', flexShrink: 0 }} title={sidebarOpen ? 'Hide history' : 'Show history'}>☰</button>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Command Center</div>
               <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>Your AI Chief of Staff</div>
             </div>
-            <button onClick={() => router.push('/dashboard/missions')} className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem', flexShrink: 0 }}>Missions</button>
-            <button onClick={() => { setInput('Create a new mission: '); inputRef.current?.focus(); }} className="btn btn-primary btn-sm" style={{ fontSize: '0.75rem', flexShrink: 0, whiteSpace: 'nowrap' }}>+ New</button>
+            <button onClick={() => { setInput('Create a new mission: '); inputRef.current?.focus(); }} className="btn btn-primary btn-sm" style={{ fontSize: '0.75rem', flexShrink: 0, whiteSpace: 'nowrap' }}>+ New Mission</button>
           </div>
 
           {/* Live run ticker */}
