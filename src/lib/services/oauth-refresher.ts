@@ -289,16 +289,20 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
     zendesk:       'zendesk',
   };
 
-  // Map api_key service names → DB provider keys in tenant_permissions
+  // Map api_key service names (from blueprint) → provider keys stored in tenant_permissions.
+  // The stored key is always the connector-page slug (e.g. 'openai', 'anthropic').
+  // Old blueprint prompts used '_api' suffixes — keep those as aliases for backward compat.
   const API_KEY_ALIASES: Record<string, string> = {
+    'openai': 'openai', 'open ai': 'openai', 'openai_api': 'openai',
+    'anthropic': 'anthropic', 'anthropic_api': 'anthropic', 'claude': 'anthropic',
+    'gemini': 'gemini', 'google gemini': 'gemini', 'gemini_api': 'gemini',
+    'buffer': 'buffer',
     'zendesk': 'zendesk',
     'linear': 'linear',
-    'hunter': 'hunter', 'hunter.io': 'hunter', 'hunterio': 'hunter',
+    'hunter': 'hunter', 'hunter.io': 'hunter', 'hunterio': 'hunter', 'hunter_io': 'hunter',
     'sendgrid': 'sendgrid', 'send grid': 'sendgrid',
     'stripe': 'stripe',
     'twilio': 'twilio',
-    'openai': 'openai_api', 'open ai': 'openai_api',
-    'anthropic': 'anthropic_api', 'claude': 'anthropic_api',
     'replicate': 'replicate',
     'segment': 'segment',
     'mixpanel': 'mixpanel',
@@ -307,6 +311,10 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
     'heygen': 'heygen',
     'razorpay': 'razorpay',
     'shiprocket': 'shiprocket',
+    'apollo': 'apollo',
+    'bamboohr': 'bamboohr',
+    'elevenlabs': 'elevenlabs',
+    'tavily': 'tavily',
   };
 
   // composio_oauth permissions are tracked separately — they check tenant_permissions directly
