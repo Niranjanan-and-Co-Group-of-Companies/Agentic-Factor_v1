@@ -18,7 +18,7 @@ interface ChatMessage {
   ts?: number;
 }
 interface AgentCard { name: string; icon?: string; role: string; tool?: string; trustLevel?: string; }
-interface MissingConnector { service: string; reason: string; }
+interface RequiredConnector { service: string; reason: string; connected: boolean; }
 interface ActionPayload {
   type: string;
   jobId?: string;
@@ -35,7 +35,7 @@ interface ActionPayload {
   error?: string;
   agents?: AgentCard[];
   orchestrationPattern?: string;
-  missingConnectors?: MissingConnector[];
+  requiredConnectors?: RequiredConnector[];
 }
 interface MissionShortcut { id: string; title: string; status: string; }
 interface LiveRun {
@@ -138,6 +138,16 @@ const CONNECTOR_META: Record<string, { label: string; icon: string }> = {
 };
 const connectorMeta = (s: string) => CONNECTOR_META[s] ?? { label: s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), icon: '🔌' };
 
+// Connector auth type lookup — determines inline connect flow
+const APIKEY_CONNECTORS = new Set(['openai', 'gemini', 'anthropic', 'buffer', 'sendgrid', 'twilio', 'apollo', 'razorpay', 'elevenlabs', 'heygen', 'runwayml', 'tavily', 'stripe', 'bamboohr', 'firebase', 'zendesk']);
+const API_KEY_FIELD_LABELS: Record<string, string> = {
+  openai: 'API Key (sk-...)', gemini: 'API Key (from aistudio.google.com)',
+  anthropic: 'API Key (sk-ant-...)', buffer: 'Access Token (from buffer.com/developers)',
+  stripe: 'Secret Key (sk_live_...)', sendgrid: 'API Key (SG...)',
+  twilio: 'Auth Token', apollo: 'API Key', elevenlabs: 'API Key',
+  tavily: 'API Key', razorpay: 'Key Secret',
+};
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 function CommandCenterPageInner() {
@@ -170,6 +180,15 @@ function CommandCenterPageInner() {
   const audioChunksRef = useRef<Blob[]>([]);
 
   const [blueprintSteps, setBlueprintSteps] = useState<Record<string, string>>({});
+
+  // Inline connector state (for connecting directly from blueprint card in chat)
+  const [connectingSlug, setConnectingSlug] = useState<string | null>(null);
+  const [connectedInSession, setConnectedInSession] = useState<Set<string>>(new Set());
+  const [inlineApiKeyModal, setInlineApiKeyModal] = useState<{ service: string } | null>(null);
+  const [inlineApiKeyValue, setInlineApiKeyValue] = useState('');
+  const [inlineApiKeySaving, setInlineApiKeySaving] = useState(false);
+  const [inlineApiKeyError, setInlineApiKeyError] = useState<string | null>(null);
+  const [inlineApiKeySuccess, setInlineApiKeySuccess] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -256,6 +275,85 @@ function CommandCenterPageInner() {
     for (const poll of blueprintPollsRef.current.values()) clearInterval(poll);
   }, []);
 
+  // ── OAuth popup result listener (for inline connect from blueprint card) ──
+  useEffect(() => {
+    const handle = (e: MessageEvent) => {
+      if (e.data?.type === 'OAUTH_SUCCESS') {
+        const provider = e.data.provider as string ?? '';
+        showToast(`✅ ${connectorMeta(provider).label} connected!`);
+        setConnectedInSession(prev => { const s = new Set(prev); s.add(provider); return s; });
+        setConnectingSlug(null);
+      } else if (e.data?.type === 'OAUTH_ERROR') {
+        showToast('❌ Connection failed. Please try again.');
+        setConnectingSlug(null);
+      }
+    };
+    window.addEventListener('message', handle);
+    return () => window.removeEventListener('message', handle);
+  }, []);
+
+  // ── Connect a service directly from within the chat ────────────────────────
+  const handleConnectInChat = useCallback(async (service: string) => {
+    if (APIKEY_CONNECTORS.has(service)) {
+      setInlineApiKeyValue(''); setInlineApiKeyError(null);
+      setInlineApiKeySuccess(false); setInlineApiKeyModal({ service });
+      return;
+    }
+    setConnectingSlug(service);
+    try {
+      const res = await fetch('/api/composio/connect', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', body: JSON.stringify({ provider: service }),
+      });
+      const data = await res.json() as { authUrl?: string; error?: string };
+      if (!res.ok || !data.authUrl) {
+        // OAuth unavailable — fall back to API key modal
+        setConnectingSlug(null);
+        setInlineApiKeyValue(''); setInlineApiKeyError(null);
+        setInlineApiKeySuccess(false); setInlineApiKeyModal({ service });
+        return;
+      }
+      const popup = window.open(data.authUrl, 'oauth_window', 'width=500,height=700,scrollbars=yes');
+      const poll = setInterval(() => {
+        if (popup?.closed) { clearInterval(poll); setConnectingSlug(null); }
+      }, 500);
+    } catch {
+      showToast(`❌ Could not connect ${connectorMeta(service).label}. Try again.`);
+      setConnectingSlug(null);
+    }
+  }, []);
+
+  // ── Save API key entered in inline modal ───────────────────────────────────
+  const handleInlineApiKeySave = useCallback(async () => {
+    if (!inlineApiKeyModal || !inlineApiKeyValue.trim()) { setInlineApiKeyError('API key is required'); return; }
+    setInlineApiKeySaving(true); setInlineApiKeyError(null);
+    try {
+      const verifyRes = await fetch('/api/connectors/apikey/verify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ provider: inlineApiKeyModal.service, fields: { apiKey: inlineApiKeyValue.trim() } }),
+      });
+      const verifyData = await verifyRes.json() as { verified: boolean; error?: string };
+      if (!verifyData.verified) { setInlineApiKeyError(verifyData.error ?? 'Invalid API key — please check and try again.'); setInlineApiKeySaving(false); return; }
+
+      const saveRes = await fetch('/api/connectors/apikey', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ provider: inlineApiKeyModal.service, fields: { apiKey: inlineApiKeyValue.trim() } }),
+      });
+      const saveData = await saveRes.json() as { success?: boolean; error?: string };
+      if (!saveRes.ok || !saveData.success) { setInlineApiKeyError(saveData.error ?? 'Failed to save'); setInlineApiKeySaving(false); return; }
+
+      setInlineApiKeySuccess(true);
+      const svc = inlineApiKeyModal.service;
+      setConnectedInSession(prev => { const s = new Set(prev); s.add(svc); return s; });
+      setTimeout(() => {
+        showToast(`✅ ${connectorMeta(svc).label} connected!`);
+        setInlineApiKeyModal(null); setInlineApiKeyValue(''); setInlineApiKeySuccess(false);
+      }, 1000);
+    } catch { setInlineApiKeyError('Network error. Please try again.'); }
+    setInlineApiKeySaving(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inlineApiKeyModal, inlineApiKeyValue]);
+
   // ── Load session ───────────────────────────────────────────────────────────
   const loadSession = async (sessionId: string) => {
     setActiveSessionId(sessionId); setMessages([]); setProactiveAlert(null);
@@ -313,7 +411,7 @@ function CommandCenterPageInner() {
           status?: string; step?: string;
           missionId?: string; missionTitle?: string;
           agents?: AgentCard[]; orchestrationPattern?: string;
-          missingConnectors?: MissingConnector[]; error?: string;
+          requiredConnectors?: RequiredConnector[]; error?: string;
         };
 
         if (data.step) setBlueprintSteps(prev => ({ ...prev, [jobId]: data.step! }));
@@ -328,7 +426,7 @@ function CommandCenterPageInner() {
               type: 'mission_created',
               missionId: data.missionId, missionTitle: data.missionTitle,
               agents: data.agents ?? [], orchestrationPattern: data.orchestrationPattern,
-              missingConnectors: data.missingConnectors ?? [],
+              requiredConnectors: data.requiredConnectors ?? [],
             }};
             return updated;
           });
@@ -819,11 +917,11 @@ function CommandCenterPageInner() {
           </div>
 
           {/* ── Required Connectors Section ── */}
-          {action.missingConnectors !== undefined && (
+          {action.requiredConnectors !== undefined && (
             <div style={{
               background: 'var(--bg-card)',
               border: '1px solid var(--border)',
-              borderTop: action.missingConnectors.length > 0
+              borderTop: action.requiredConnectors.some(c => !c.connected && !connectedInSession.has(c.service))
                 ? '1px solid hsla(0,84%,60%,0.18)'
                 : '1px solid hsla(142,71%,45%,0.2)',
               padding: '12px 14px',
@@ -832,41 +930,57 @@ function CommandCenterPageInner() {
                 Required Connectors
               </div>
 
-              {action.missingConnectors.length === 0 ? (
+              {action.requiredConnectors.length === 0 || action.requiredConnectors.every(c => c.connected || connectedInSession.has(c.service)) ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: '0.78rem', color: '#22C55E', fontWeight: 600 }}>
                   <span>✅</span> All connectors ready — you can run now
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {action.missingConnectors.map((c, idx) => {
+                  {action.requiredConnectors.map((c, idx) => {
                     const meta = connectorMeta(c.service);
+                    const isConnected = c.connected || connectedInSession.has(c.service);
+                    const isConnectingThis = connectingSlug === c.service;
+                    const isApiKey = APIKEY_CONNECTORS.has(c.service);
                     return (
                       <div key={idx} style={{
                         display: 'flex', alignItems: 'center', gap: 10,
                         padding: '8px 10px', borderRadius: 8,
-                        background: 'hsla(0,84%,60%,0.05)',
-                        border: '1px solid hsla(0,84%,60%,0.15)',
+                        background: isConnected ? 'hsla(142,71%,45%,0.05)' : 'hsla(0,84%,60%,0.04)',
+                        border: `1px solid ${isConnected ? 'hsla(142,71%,45%,0.2)' : 'hsla(0,84%,60%,0.13)'}`,
                       }}>
                         <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>{meta.icon}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-primary)' }}>{meta.label}</div>
-                          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.reason}</div>
+                          <div style={{ fontSize: '0.63rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.reason}</div>
                         </div>
-                        <button
-                          onClick={() => router.push('/connectors')}
-                          style={{
-                            background: 'hsla(0,84%,60%,0.08)', border: '1px solid hsla(0,84%,60%,0.28)',
-                            color: '#EF4444', borderRadius: 6, padding: '4px 12px',
-                            fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
-                            flexShrink: 0, fontFamily: 'var(--font-sans)',
-                          }}
-                        >Connect →</button>
+                        {isConnected ? (
+                          <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#22C55E', background: 'hsla(142,71%,45%,0.1)', border: '1px solid hsla(142,71%,45%,0.3)', borderRadius: 99, padding: '2px 10px', flexShrink: 0 }}>✓ Connected</span>
+                        ) : (
+                          <button
+                            onClick={() => handleConnectInChat(c.service)}
+                            disabled={isConnectingThis}
+                            style={{
+                              background: isApiKey ? 'hsla(38,92%,55%,0.08)' : 'hsla(217,91%,60%,0.08)',
+                              border: `1px solid ${isApiKey ? 'hsla(38,92%,55%,0.3)' : 'hsla(217,91%,60%,0.3)'}`,
+                              color: isApiKey ? '#F59E0B' : '#3B82F6',
+                              borderRadius: 6, padding: '4px 12px',
+                              fontSize: '0.7rem', fontWeight: 700,
+                              cursor: isConnectingThis ? 'not-allowed' : 'pointer',
+                              flexShrink: 0, fontFamily: 'var(--font-sans)',
+                              opacity: isConnectingThis ? 0.6 : 1,
+                            }}
+                          >
+                            {isConnectingThis ? 'Connecting…' : isApiKey ? '🔑 API Key' : 'Connect →'}
+                          </button>
+                        )}
                       </div>
                     );
                   })}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.67rem', color: '#F59E0B', marginTop: 2 }}>
-                    <span>⚠️</span> Connect the above before running this mission
-                  </div>
+                  {action.requiredConnectors.some(c => !c.connected && !connectedInSession.has(c.service)) && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.67rem', color: '#F59E0B', marginTop: 2 }}>
+                      <span>⚠️</span> Connect the above before running this mission
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -880,27 +994,27 @@ function CommandCenterPageInner() {
           }}>
             <button
               style={{
-                flex: 1, padding: '9px 0', borderRadius: 8,
+                flex: 2, padding: '9px 0', borderRadius: 8,
                 background: 'linear-gradient(135deg,#3B82F6,#8B5CF6)', color: '#fff',
-                border: 'none', fontSize: '0.8rem', fontWeight: 700,
+                border: 'none', fontSize: '0.82rem', fontWeight: 700,
+                cursor: 'pointer', fontFamily: 'var(--font-sans)',
+              }}
+              onClick={() => router.push(`/dashboard/missions/${action.missionId}`)}
+            >
+              Open Mission →
+            </button>
+            <button
+              style={{
+                flex: 1, padding: '9px 0', borderRadius: 8,
+                background: 'var(--bg-secondary)', color: 'var(--text-primary)',
+                border: '1px solid var(--border)', fontSize: '0.78rem', fontWeight: 600,
                 cursor: applying ? 'not-allowed' : 'pointer', opacity: applying ? 0.6 : 1,
                 fontFamily: 'var(--font-sans)',
               }}
               onClick={() => applyAction({ type: 'run_mission', missionId: action.missionId, missionTitle: action.missionTitle, missionStatus: 'active' }, msgIndex)}
               disabled={applying}
             >
-              {applying ? 'Starting…' : '▶ Run Now'}
-            </button>
-            <button
-              style={{
-                flex: 1, padding: '9px 0', borderRadius: 8,
-                background: 'var(--bg-secondary)', color: 'var(--text-primary)',
-                border: '1px solid var(--border)', fontSize: '0.8rem', fontWeight: 600,
-                cursor: 'pointer', fontFamily: 'var(--font-sans)',
-              }}
-              onClick={() => router.push(`/dashboard/missions/${action.missionId}`)}
-            >
-              Configure Mission →
+              {applying ? 'Starting…' : '▶ Run'}
             </button>
           </div>
         </div>
@@ -938,6 +1052,62 @@ function CommandCenterPageInner() {
       {/* Onboarding tour — shown once on first login */}
       <OnboardingTour />
 
+      {/* ── Inline API Key Modal (connect from blueprint card without leaving chat) ── */}
+      {inlineApiKeyModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}
+          onClick={() => setInlineApiKeyModal(null)}>
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, width: '100%', maxWidth: 420, padding: '20px 22px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <span style={{ fontSize: '1.4rem' }}>{connectorMeta(inlineApiKeyModal.service).icon}</span>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>Connect {connectorMeta(inlineApiKeyModal.service).label}</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>API Key · encrypted at rest</div>
+                </div>
+              </div>
+              <button onClick={() => setInlineApiKeyModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.2rem', lineHeight: 1, padding: 4 }}>✕</button>
+            </div>
+
+            {inlineApiKeySuccess ? (
+              <div style={{ padding: 20, textAlign: 'center' }}>
+                <div style={{ fontSize: '2rem', marginBottom: 8 }}>✅</div>
+                <div style={{ fontWeight: 700, color: '#22C55E' }}>{connectorMeta(inlineApiKeyModal.service).label} Connected!</div>
+              </div>
+            ) : (
+              <>
+                <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                  {API_KEY_FIELD_LABELS[inlineApiKeyModal.service] ?? 'API Key'}
+                </label>
+                <input
+                  type="password" autoComplete="new-password"
+                  placeholder={`Paste your ${connectorMeta(inlineApiKeyModal.service).label} API key`}
+                  value={inlineApiKeyValue}
+                  onChange={e => setInlineApiKeyValue(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && !inlineApiKeySaving && handleInlineApiKeySave()}
+                  disabled={inlineApiKeySaving}
+                  style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', fontSize: '0.85rem', color: 'var(--text-primary)', fontFamily: 'monospace', marginBottom: 10, boxSizing: 'border-box' }}
+                />
+                {inlineApiKeyError && (
+                  <div style={{ padding: '8px 12px', background: 'hsla(0,84%,60%,0.07)', border: '1px solid hsla(0,84%,60%,0.2)', borderRadius: 8, fontSize: '0.78rem', color: '#EF4444', marginBottom: 10 }}>
+                    ❌ {inlineApiKeyError}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setInlineApiKeyModal(null)} disabled={inlineApiKeySaving}
+                    style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', cursor: 'pointer', color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)' }}>
+                    Cancel
+                  </button>
+                  <button onClick={handleInlineApiKeySave} disabled={inlineApiKeySaving || !inlineApiKeyValue.trim()}
+                    style={{ background: 'linear-gradient(135deg,#3B82F6,#8B5CF6)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: '0.82rem', fontWeight: 700, cursor: inlineApiKeySaving || !inlineApiKeyValue.trim() ? 'not-allowed' : 'pointer', opacity: inlineApiKeySaving || !inlineApiKeyValue.trim() ? 0.6 : 1, fontFamily: 'var(--font-sans)' }}>
+                    {inlineApiKeySaving ? 'Saving…' : 'Save & Connect →'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Toast */}
       {toast && (
         <div style={{ position: 'fixed', top: 20, right: 20, zIndex: 9998, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px 18px', fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-primary)', boxShadow: '0 4px 24px rgba(0,0,0,0.15)', animation: 'slideIn 0.2s ease' }}>
@@ -963,56 +1133,31 @@ function CommandCenterPageInner() {
               </button>
             </div>
 
-            {/* Chat History */}
+            {/* Missions list */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
-              {sessions.length > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  {Object.entries(sessionGroups).map(([group, items]) => (
-                    <div key={group} style={{ marginBottom: 8 }}>
-                      <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 8px 2px' }}>{group}</div>
-                      {items.map(s => (
-                        <div key={s.id} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                          <button
-                            onClick={() => loadSession(s.id)}
-                            style={{ flex: 1, textAlign: 'left', background: activeSessionId === s.id ? 'var(--accent-subtle)' : 'none', border: 'none', borderRadius: 'var(--radius-sm)', padding: '6px 28px 6px 10px', cursor: 'pointer', color: activeSessionId === s.id ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.78rem', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                            title={s.title ?? 'Chat'}
-                          >
-                            {s.title || 'New conversation'}
-                          </button>
-                          <button
-                            onClick={e => deleteSession(s.id, e)}
-                            style={{ position: 'absolute', right: 4, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.75rem', padding: '2px 4px', opacity: 0.6, lineHeight: 1 }}
-                            title="Delete"
-                          >×</button>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Missions shortcuts */}
-              {missions.length > 0 && (
-                <div>
-                  <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 8px 4px', marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+              {missions.length > 0 ? (
+                <>
+                  <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '6px 8px 4px' }}>
                     Missions
                   </div>
                   {missions.map(m => (
                     <button
                       key={m.id}
-                      onClick={() => router.push(`/dashboard/missions/${m.id}/chat`)}
-                      style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', borderRadius: 'var(--radius-sm)', padding: '5px 8px', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.77rem', display: 'flex', alignItems: 'center', gap: 7, overflow: 'hidden' }}
-                      title={`Open ${m.title} chat`}
+                      onClick={() => router.push(`/dashboard/missions/${m.id}`)}
+                      style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', borderRadius: 'var(--radius-sm)', padding: '6px 8px', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 7, overflow: 'hidden' }}
+                      title={m.title}
                     >
                       <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusDot(m.status), flexShrink: 0 }} />
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
                     </button>
                   ))}
-                  {missions.length >= 5 && (
-                    <button onClick={() => router.push('/dashboard/missions')} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: 'var(--accent)', fontSize: '0.72rem' }}>
-                      View all missions →
-                    </button>
-                  )}
+                  <button onClick={() => router.push('/dashboard/missions')} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '5px 8px', cursor: 'pointer', color: 'var(--accent)', fontSize: '0.72rem' }}>
+                    View all missions →
+                  </button>
+                </>
+              ) : (
+                <div style={{ padding: '20px 12px', fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.6 }}>
+                  No missions yet.<br />Describe what you want to automate.
                 </div>
               )}
             </div>

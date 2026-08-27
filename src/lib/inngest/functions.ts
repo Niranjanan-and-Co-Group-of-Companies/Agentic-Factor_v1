@@ -519,12 +519,11 @@ export const generateBlueprintBackground = inngest.createFunction(
           .eq('tenant_id', tenantId);
         const tenantProviders = (perms ?? []).map((p: any) => p.provider as string);
         const seen = new Set<string>();
-        const missingConnectors = ((mission.permissions as any[]) ?? [])
-          .filter((p) => !tenantProviders.includes(p.service))
-          .reduce<Array<{ service: string; reason: string }>>((acc, p) => {
+        const requiredConnectors = ((mission.permissions as any[]) ?? [])
+          .reduce<Array<{ service: string; reason: string; connected: boolean }>>((acc, p) => {
             if (!seen.has(p.service)) {
               seen.add(p.service);
-              acc.push({ service: p.service, reason: p.scope });
+              acc.push({ service: p.service, reason: p.scope, connected: tenantProviders.includes(p.service) });
             }
             return acc;
           }, []);
@@ -534,7 +533,7 @@ export const generateBlueprintBackground = inngest.createFunction(
           missionTitle: saved.title,
           agents: agentCards,
           orchestrationPattern: mission.orchestration.pattern,
-          missingConnectors,
+          requiredConnectors,
         });
       });
 
