@@ -2,6 +2,7 @@ import { serve } from 'inngest/next';
 import { inngest } from '@/lib/inngest/client';
 import { executeMissionBackground, generateBlueprintBackground } from '@/lib/inngest/functions';
 import { handleInboundEmail } from '@/lib/inngest/email-functions';
+import { generateWelcomeMessages } from '@/lib/inngest/message-cron';
 
 // ═══════════════════════════════════════════════════════════
 // /api/inngest — Inngest webhook endpoint
@@ -17,5 +18,6 @@ export const { GET, POST, PUT } = serve({
     executeMissionBackground,
     generateBlueprintBackground,
     handleInboundEmail,
+    generateWelcomeMessages,
   ],
 });

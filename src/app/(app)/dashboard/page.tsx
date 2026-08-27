@@ -161,7 +161,7 @@ function CommandCenterPageInner() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [proactiveAlert, setProactiveAlert] = useState<string | null>(null);
+  const [welcomeMessage, setWelcomeMessage] = useState<string>('');
   const [toast, setToast] = useState<string | null>(null);
   const [applyingAction, setApplyingAction] = useState<number | null>(null);
   const [liveRun, setLiveRun] = useState<{ missionId: string; run: LiveRun } | null>(null);
@@ -193,6 +193,10 @@ function CommandCenterPageInner() {
   // ── Bootstrap ──────────────────────────────────────────────────────────────
   useEffect(() => {
     loadSessions();
+    fetch('/api/platform/welcome-message')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.message) setWelcomeMessage(d.message); })
+      .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -234,8 +238,7 @@ function CommandCenterPageInner() {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           try {
-            const evt = JSON.parse(line.slice(6)) as { type: string; proactiveAlert?: string };
-            if (evt.type === 'proactive_alert' && evt.proactiveAlert) setProactiveAlert(evt.proactiveAlert);
+            JSON.parse(line.slice(6)); // parse but ignore proactive_alert — welcome message handles empty state
           } catch { /* skip */ }
         }
       }
@@ -332,7 +335,7 @@ function CommandCenterPageInner() {
 
   // ── Load session ───────────────────────────────────────────────────────────
   const loadSession = async (sessionId: string) => {
-    setActiveSessionId(sessionId); setMessages([]); setProactiveAlert(null);
+    setActiveSessionId(sessionId); setMessages([]);
     const res = await fetch('/api/command-chat/sessions', {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -440,7 +443,7 @@ function CommandCenterPageInner() {
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || isStreaming) return;
-    setInput(''); setProactiveAlert(null);
+    setInput('');
 
     const userMsg: ChatMessage = { role: 'user', content: trimmed, ts: Date.now() };
     const newMessages = [...messages, userMsg];
@@ -1127,15 +1130,29 @@ function CommandCenterPageInner() {
           <div style={{ flex: 1, overflowY: 'auto', padding: '24px 0' }}>
             <div style={{ maxWidth: 780, margin: '0 auto', padding: '0 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-              {/* Welcome / empty state */}
-              {messages.length === 0 && !proactiveAlert && (
-                <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+              {/* Welcome state — shown whenever the conversation is empty */}
+              {messages.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '56px 20px 48px' }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/logo.png" alt="Agentic Factor" style={{ height: 56, objectFit: 'contain', marginBottom: 20, display: 'inline-block' }} />
-                  <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>Command Center</h2>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', lineHeight: 1.7, maxWidth: 440, margin: '0 auto 28px' }}>
-                    Run missions, check status, create automations, connect integrations — all by just saying what you need.
-                  </p>
+                  <img src="/logo.png" alt="Agentic Factor" style={{ height: 52, objectFit: 'contain', marginBottom: 20, display: 'inline-block' }} />
+                  <h2 style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>
+                    What shall we automate today?
+                  </h2>
+                  {welcomeMessage && (
+                    <div style={{
+                      maxWidth: 520, margin: '0 auto 28px',
+                      padding: '14px 20px',
+                      background: 'var(--accent-subtle)',
+                      border: '1px solid hsla(152,69%,50%,0.18)',
+                      borderRadius: 'var(--radius-md)',
+                      fontSize: '0.86rem',
+                      color: 'var(--text-secondary)',
+                      lineHeight: 1.75,
+                      fontStyle: 'italic',
+                    }}>
+                      {welcomeMessage}
+                    </div>
+                  )}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
                     {QUICK_CHIPS.map(chip => (
                       <button key={chip} onClick={() => sendMessage(chip)} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 20, padding: '7px 16px', fontSize: '0.82rem', cursor: 'pointer', color: 'var(--text-secondary)', transition: 'all 0.15s' }}>
@@ -1143,14 +1160,6 @@ function CommandCenterPageInner() {
                       </button>
                     ))}
                   </div>
-                </div>
-              )}
-
-              {/* Proactive alert */}
-              {proactiveAlert && messages.length === 0 && (
-                <div style={{ background: 'hsla(258,90%,66%,0.08)', border: '1px solid hsla(258,90%,66%,0.2)', borderRadius: 'var(--radius-md)', padding: '12px 16px', fontSize: '0.85rem', color: 'var(--text-primary)', lineHeight: 1.6 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--accent)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Update</div>
-                  {proactiveAlert}
                 </div>
               )}
 

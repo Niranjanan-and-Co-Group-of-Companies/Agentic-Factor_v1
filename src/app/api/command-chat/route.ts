@@ -148,18 +148,10 @@ async function buildCommandContext(tenantId: string): Promise<{
     ? `${billing.credits_remaining} monthly + ${billing.credits_topup ?? 0} top-up remaining (${billing.plan} plan, ${billing.credits_used_this_month} used this period)`
     : 'unknown';
 
-  // Build proactive alert (what happened since last visit)
-  let proactiveAlert: string | null = null;
-  if (failedMissions.length > 0) {
-    const names = failedMissions.map(m => `"${m.title}"`).join(', ');
-    proactiveAlert = `${failedMissions.length} mission${failedMissions.length > 1 ? 's' : ''} failed recently: ${names}. Ask me to explain why.`;
-  } else if (runs && runs.length > 0) {
-    const lastRun = runs[0];
-    const mTitle = missions?.find(m => m.id === lastRun.mission_id)?.title ?? 'a mission';
-    if (lastRun.status === 'completed') {
-      proactiveAlert = `"${mTitle}" completed successfully ${formatAgo(lastRun.started_at)}.`;
-    }
-  }
+  // proactiveAlert intentionally not used — Command Center shows a dynamic
+  // welcome message instead. Negative alerts (failures) are never surfaced
+  // as banners; the AI can discuss failures when the user asks.
+  const proactiveAlert: string | null = null;
 
   const contextualSuggestions = buildContextualSuggestions(connectedProviders);
 

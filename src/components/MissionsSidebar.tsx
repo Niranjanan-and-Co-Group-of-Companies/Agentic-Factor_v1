@@ -27,16 +27,6 @@ function getSupabase() {
   );
 }
 
-function statusColor(status: string): string {
-  const map: Record<string, string> = {
-    active: 'var(--emerald)',
-    failed: '#ef4444',
-    paused: '#f59e0b',
-    draft: 'var(--text-muted)',
-    completed: '#6366f1',
-  };
-  return map[status] ?? 'var(--text-muted)';
-}
 
 export default function MissionsSidebar({ activeMissionId }: Props) {
   const router = useRouter();
@@ -145,10 +135,6 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
                     transition: 'background 0.12s',
                   }}
                 >
-                  <span style={{
-                    width: 7, height: 7, borderRadius: '50%',
-                    background: statusColor(m.status), flexShrink: 0,
-                  }} />
                   <span style={{
                     fontSize: '0.78rem',
                     color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
