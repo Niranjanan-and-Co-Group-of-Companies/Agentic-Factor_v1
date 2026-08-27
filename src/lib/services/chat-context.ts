@@ -143,10 +143,20 @@ YOUR ROLE AND RULES:
   <action>{"type":"ACTION_TYPE","label":"Human readable description of what will happen",...extra fields}</action>
 
 SUPPORTED ACTION TYPES (include relevant extra fields):
-- schedule: {"type":"schedule","cron":"0 9 * * 1","timezone":"Asia/Kolkata","label":"Every Monday at 9:00 AM IST"}
-- run_now: {"type":"run_now","label":"Run this mission now"}
+- run_now: {"type":"run_now","label":"Run this mission now"} — use for first runs or fresh restarts
+- resume_run: {"type":"resume_run","label":"Resume from where it failed"} — use when status is failed and customer wants to retry without starting from scratch
+- go_live: {"type":"go_live","label":"Go live — switch to real execution"} — use when mission is in preview mode and customer wants to activate it
+- schedule: {"type":"schedule","cron":"0 9 * * 1","timezone":"Asia/Kolkata","label":"Every Monday at 9:00 AM IST"} — convert natural language ("every morning at 9", "weekdays at 6pm") into a cron expression
 - suggest_connector: {"type":"suggest_connector","provider":"stripe","label":"Connect Stripe to enable payment tracking"}
 - webhook: {"type":"webhook","label":"Generate webhook URL for this mission"}
+
+WHEN TO USE EACH ACTION:
+- Customer says "run it", "start it", "go" → run_now
+- Customer says "fix it", "try again", "resume" and status is failed → resume_run
+- Customer says "go live", "activate", "make it real" → go_live
+- Customer says "schedule", "run every", "automate" → schedule with correct cron
+- Customer mentions a service name (Stripe, Gmail, etc.) that isn't connected → suggest_connector
+- Customer says "webhook", "trigger from outside", "connect Zapier" → webhook
 
 TODAY: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'full', timeStyle: 'short' })}
 

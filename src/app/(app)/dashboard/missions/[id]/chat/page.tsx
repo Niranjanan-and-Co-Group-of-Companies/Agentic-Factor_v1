@@ -29,7 +29,7 @@ interface ChatMessage {
 }
 
 interface ActionPayload {
-  type: 'schedule' | 'run_now' | 'suggest_connector' | 'webhook';
+  type: 'schedule' | 'run_now' | 'resume_run' | 'go_live' | 'suggest_connector' | 'webhook';
   label: string;
   cron?: string;
   timezone?: string;
@@ -435,12 +435,18 @@ export default function MissionChatPage() {
         setInlineApiKeySaving(false);
         return;
       }
-      await fetch('/api/connectors/apikey', {
+      const saveRes = await fetch('/api/connectors/apikey', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ provider: slug, apiKey: inlineApiKeyValue.trim() }),
+        body: JSON.stringify({ provider: slug, fields: { apiKey: inlineApiKeyValue.trim() } }),
       });
+      if (!saveRes.ok) {
+        const errData = await saveRes.json().catch(() => ({})) as { error?: string };
+        setInlineApiKeyError(errData.error ?? 'Could not save the key. Please try again.');
+        setInlineApiKeySaving(false);
+        return;
+      }
       setConnectedInSession(prev => new Set([...prev, slug]));
       setRequiredConnectors(prev => prev.map(c => c.service === slug ? { ...c, connected: true } : c));
       setInlineApiKeyModal(null);
@@ -578,7 +584,7 @@ export default function MissionChatPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ provider: detectedKey.provider, apiKey: detectedKey.key }),
+        body: JSON.stringify({ provider: detectedKey.provider, fields: { apiKey: detectedKey.key } }),
       });
       if (!saveRes.ok) throw new Error('Save failed');
       // Mark as connected in required connectors list too
@@ -621,7 +627,37 @@ export default function MissionChatPage() {
           startRunPolling();
         } else {
           const err = await res.json() as { error?: string };
-          showToast(`❌ ${err.error ?? 'Could not start run. Please try from the mission page.'}`);
+          showToast(`❌ ${err.error ?? 'Could not start run.'}`);
+        }
+
+      } else if (action.type === 'resume_run') {
+        showToast('▶ Resuming from failed point…');
+        const res = await fetch(`/api/missions/${missionId}/execute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ mode: 'resume' }),
+        });
+        if (res.ok) {
+          showToast('✅ Mission resuming!');
+          startRunPolling();
+        } else {
+          const err = await res.json() as { error?: string };
+          showToast(`❌ ${err.error ?? 'Could not resume.'}`);
+        }
+
+      } else if (action.type === 'go_live') {
+        showToast('🚀 Going live…');
+        const res = await fetch(`/api/missions/${missionId}/graduate`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (res.ok) {
+          showToast('✅ Mission is now live! Real actions will execute.');
+          setMissionStatus('active');
+        } else {
+          const err = await res.json() as { error?: string };
+          showToast(`❌ ${err.error ?? 'Could not go live.'}`);
         }
 
       } else if (action.type === 'schedule' && action.cron) {
@@ -1018,12 +1054,14 @@ export default function MissionChatPage() {
                           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 3 }}>
-                                {a.type === 'schedule' ? '📅' : a.type === 'run_now' ? '🚀' : a.type === 'suggest_connector' ? '🔌' : '🔗'}{' '}
+                                {a.type === 'schedule' ? '📅' : a.type === 'run_now' ? '🚀' : a.type === 'resume_run' ? '▶' : a.type === 'go_live' ? '🟢' : a.type === 'suggest_connector' ? '🔌' : '🔗'}{' '}
                                 {a.label}
                               </div>
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
                                 {a.type === 'schedule' && a.cron ? `Cron: ${a.cron} (${a.timezone ?? 'Asia/Kolkata'})` :
-                                 a.type === 'run_now' ? (missionStatus === 'draft' ? 'Will build and start this mission for the first time.' : 'Will trigger a fresh run immediately.') :
+                                 a.type === 'run_now' ? (missionStatus === 'draft' ? 'Will build and start this mission for the first time.' : 'Will trigger a fresh run of all agents.') :
+                                 a.type === 'resume_run' ? 'Skips completed agents and retries only from the failed point.' :
+                                 a.type === 'go_live' ? 'Switches from preview mode — real emails, posts, and actions will execute.' :
                                  connectorDesc ?? 'Connects this service to your mission.' }
                               </div>
                               {isConnector && connectorSlug && (
