@@ -12,6 +12,12 @@ interface ChatSession {
   updated_at: string;
 }
 
+interface RequiredConnector {
+  service: string;
+  reason: string;
+  connected: boolean;
+}
+
 interface ChatMessage {
   id?: string;
   role: 'user' | 'assistant';
@@ -39,6 +45,34 @@ interface LiveRun {
   started_at: string;
   duration_ms: number | null;
 }
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const APIKEY_CONNECTORS = new Set([
+  'openai', 'gemini', 'anthropic', 'buffer', 'sendgrid', 'twilio', 'apollo',
+  'razorpay', 'elevenlabs', 'heygen', 'runwayml', 'tavily', 'custom_tavily',
+  'stripe', 'bamboohr', 'firebase', 'zendesk',
+]);
+
+const API_KEY_FIELD_LABELS: Record<string, string> = {
+  openai: 'API Key (sk-...)',
+  gemini: 'API Key (from aistudio.google.com)',
+  anthropic: 'API Key (sk-ant-...)',
+  buffer: 'Access Token',
+  sendgrid: 'API Key (SG....)',
+  twilio: 'Auth Token',
+  apollo: 'API Key',
+  razorpay: 'Secret Key (rzp_live_...)',
+  elevenlabs: 'API Key',
+  heygen: 'API Key',
+  runwayml: 'API Key',
+  tavily: 'API Key',
+  custom_tavily: 'API Key',
+  stripe: 'Secret Key (sk_live_...)',
+  bamboohr: 'API Key',
+  firebase: 'Service Account JSON',
+  zendesk: 'API Token',
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +108,11 @@ function groupSessionsByDate(sessions: ChatSession[]) {
     groups[key].push(s);
   }
   return groups;
+}
+
+// Strip <action>...</action> blocks from streamed text before display
+function stripActionTags(text: string): string {
+  return text.replace(/<action>[\s\S]*?<\/action>/g, '').replace(/<action>[\s\S]*$/, '').trim();
 }
 
 // Simple inline markdown → React elements (no external deps)
@@ -166,6 +205,15 @@ export default function MissionChatPage() {
   const [liveRun, setLiveRun] = useState<LiveRun | null>(null);
   const [liveRunDismissed, setLiveRunDismissed] = useState(false);
 
+  // ── Connector state ──────────────────────────────────────────
+  const [requiredConnectors, setRequiredConnectors] = useState<RequiredConnector[]>([]);
+  const [connectingSlug, setConnectingSlug] = useState<string | null>(null);
+  const [connectedInSession, setConnectedInSession] = useState<Set<string>>(new Set());
+  const [inlineApiKeyModal, setInlineApiKeyModal] = useState<{ slug: string; label: string } | null>(null);
+  const [inlineApiKeyValue, setInlineApiKeyValue] = useState('');
+  const [inlineApiKeySaving, setInlineApiKeySaving] = useState(false);
+  const [inlineApiKeyError, setInlineApiKeyError] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const runPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -177,25 +225,60 @@ export default function MissionChatPage() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  // ── Load mission title + status ─────────────────────────────
+  // ── Load mission title, status, and required connectors ──────
   useEffect(() => {
     const supabase = getSupabase();
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
-      supabase
+
+      const { data: mission } = await supabase
         .from('missions')
-        .select('title, status')
+        .select('title, status, permissions')
         .eq('id', missionId)
         .eq('tenant_id', user.id)
-        .single()
-        .then(({ data }) => {
-          if (data?.title) setMissionTitle(data.title);
-          if (data?.status) setMissionStatus(data.status);
-        });
+        .single();
+
+      if (mission?.title) setMissionTitle(mission.title);
+      if (mission?.status) setMissionStatus(mission.status);
+
+      const permissions: Array<{ service: string; scope: string }> = mission?.permissions ?? [];
+      if (permissions.length === 0) return;
+
+      // Deduplicate by service
+      const seen = new Set<string>();
+      const unique = permissions.filter(p => { if (seen.has(p.service)) return false; seen.add(p.service); return true; });
+
+      // Fetch which providers this tenant has connected
+      const { data: connected } = await supabase
+        .from('tenant_permissions')
+        .select('provider')
+        .eq('tenant_id', user.id);
+
+      const connectedSet = new Set((connected ?? []).map((r: { provider: string }) => r.provider));
+
+      setRequiredConnectors(unique.map(p => ({
+        service: p.service,
+        reason: p.scope,
+        connected: connectedSet.has(p.service),
+      })));
     });
   }, [missionId]);
 
-  // ── Load sessions ───────────────────────────────────────────
+  // ── Listen for OAuth popup success messages ──────────────────
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type !== 'OAUTH_SUCCESS') return;
+      const slug = e.data.provider as string;
+      setConnectedInSession(prev => new Set([...prev, slug]));
+      setConnectingSlug(null);
+      setRequiredConnectors(prev => prev.map(c => c.service === slug ? { ...c, connected: true } : c));
+      showToast(`✅ ${slug} connected successfully!`);
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+  // ── Load sessions ────────────────────────────────────────────
   const loadSessions = useCallback(async () => {
     const res = await fetch(`/api/missions/${missionId}/chat/sessions`, { credentials: 'include' });
     if (res.ok) {
@@ -206,7 +289,7 @@ export default function MissionChatPage() {
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
-  // ── Poll mission status every 8s to keep run_now routing correct ──
+  // ── Poll mission status every 8s ─────────────────────────────
   useEffect(() => {
     const supabase = getSupabase();
     const poll = setInterval(async () => {
@@ -218,7 +301,7 @@ export default function MissionChatPage() {
     return () => clearInterval(poll);
   }, [missionId]);
 
-  // ── Live run status polling ──────────────────────────────────
+  // ── Live run status polling ───────────────────────────────────
   const startRunPolling = useCallback(() => {
     if (runPollRef.current) clearInterval(runPollRef.current);
     setLiveRunDismissed(false);
@@ -238,13 +321,12 @@ export default function MissionChatPage() {
         }
       } catch { /* non-fatal */ }
     }, 3000);
-    // Safety stop after 15 minutes
     setTimeout(() => { if (runPollRef.current) clearInterval(runPollRef.current); }, 15 * 60 * 1000);
   }, [missionId]);
 
   useEffect(() => () => { if (runPollRef.current) clearInterval(runPollRef.current); }, []);
 
-  // ── Proactive alert on first open ──────────────────────────
+  // ── Proactive alert on first open ────────────────────────────
   useEffect(() => {
     if (messages.length === 0 && !activeSessionId) {
       fetch(`/api/missions/${missionId}/chat`, {
@@ -278,7 +360,7 @@ export default function MissionChatPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missionId]);
 
-  // ── Load existing session messages ──────────────────────────
+  // ── Load existing session messages ────────────────────────────
   const loadSession = async (sessionId: string) => {
     setActiveSessionId(sessionId);
     setMessages([]);
@@ -295,17 +377,82 @@ export default function MissionChatPage() {
     }
   };
 
-  // ── Scroll to bottom ────────────────────────────────────────
+  // ── Scroll to bottom ──────────────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ── API key detection ───────────────────────────────────────
+  // ── API key detection ─────────────────────────────────────────
   useEffect(() => {
     setDetectedKey(detectApiKey(input));
   }, [input]);
 
-  // ── Send message ────────────────────────────────────────────
+  // ── Inline connector: OAuth popup or API key modal ────────────
+  const handleConnectInChat = useCallback(async (slug: string, label: string) => {
+    if (APIKEY_CONNECTORS.has(slug)) {
+      setInlineApiKeyModal({ slug, label });
+      setInlineApiKeyValue('');
+      setInlineApiKeyError(null);
+      return;
+    }
+    setConnectingSlug(slug);
+    try {
+      const res = await fetch('/api/composio/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ provider: slug }),
+      });
+      const data = await res.json() as { authUrl?: string; error?: string };
+      if (!data.authUrl) {
+        showToast(`❌ ${data.error ?? 'Could not start connection'}`);
+        setConnectingSlug(null);
+        return;
+      }
+      window.open(data.authUrl, 'oauth_window', 'width=600,height=700,scrollbars=yes,resizable=yes');
+    } catch {
+      showToast('❌ Could not start connection');
+      setConnectingSlug(null);
+    }
+  }, []);
+
+  // ── Save API key from inline modal ────────────────────────────
+  const handleInlineApiKeySave = useCallback(async () => {
+    if (!inlineApiKeyModal || !inlineApiKeyValue.trim()) return;
+    setInlineApiKeySaving(true);
+    setInlineApiKeyError(null);
+    const { slug, label } = inlineApiKeyModal;
+    try {
+      const vRes = await fetch('/api/connectors/apikey/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ provider: slug, fields: { apiKey: inlineApiKeyValue.trim() } }),
+      });
+      const vData = await vRes.json() as { verified: boolean; error?: string };
+      if (!vData.verified) {
+        setInlineApiKeyError(vData.error ?? 'Invalid key — please check and try again');
+        setInlineApiKeySaving(false);
+        return;
+      }
+      await fetch('/api/connectors/apikey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ provider: slug, apiKey: inlineApiKeyValue.trim() }),
+      });
+      setConnectedInSession(prev => new Set([...prev, slug]));
+      setRequiredConnectors(prev => prev.map(c => c.service === slug ? { ...c, connected: true } : c));
+      setInlineApiKeyModal(null);
+      setInlineApiKeyValue('');
+      showToast(`✅ ${label} connected!`);
+    } catch {
+      setInlineApiKeyError('Could not save the key. Please try again.');
+    }
+    setInlineApiKeySaving(false);
+  }, [inlineApiKeyModal, inlineApiKeyValue]);
+
+  // ── Send message ──────────────────────────────────────────────
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || isStreaming) return;
@@ -362,15 +509,17 @@ export default function MissionChatPage() {
 
             if (evt.type === 'delta' && evt.text) {
               streamedText += evt.text;
+              // Strip <action> blocks before showing to user
+              const displayText = stripActionTags(streamedText);
               setMessages(prev => {
                 const updated = [...prev];
-                updated[updated.length - 1] = { role: 'assistant', content: streamedText, isStreaming: true };
+                updated[updated.length - 1] = { role: 'assistant', content: displayText, isStreaming: true };
                 return updated;
               });
             }
 
             if (evt.type === 'done') {
-              const finalText = evt.cleanText ?? streamedText;
+              const finalText = evt.cleanText ?? stripActionTags(streamedText);
               setMessages(prev => {
                 const updated = [...prev];
                 updated[updated.length - 1] = {
@@ -408,7 +557,7 @@ export default function MissionChatPage() {
     inputRef.current?.focus();
   };
 
-  // ── Save detected API key ───────────────────────────────────
+  // ── Save detected API key from message input ──────────────────
   const saveDetectedKey = async () => {
     if (!detectedKey) return;
     setSavingKey(true);
@@ -432,6 +581,9 @@ export default function MissionChatPage() {
         body: JSON.stringify({ provider: detectedKey.provider, apiKey: detectedKey.key }),
       });
       if (!saveRes.ok) throw new Error('Save failed');
+      // Mark as connected in required connectors list too
+      setConnectedInSession(prev => new Set([...prev, detectedKey.provider]));
+      setRequiredConnectors(prev => prev.map(c => c.service === detectedKey.provider ? { ...c, connected: true } : c));
       setDetectedKey(null);
       setInput(prev => prev.replace(detectedKey.key, '[key saved]'));
       showToast(`✅ ${detectedKey.label} connected!${verifyData.accountInfo ? ' ' + verifyData.accountInfo : ''}`);
@@ -442,8 +594,14 @@ export default function MissionChatPage() {
     setSavingKey(false);
   };
 
-  // ── Apply action from assistant card ───────────────────────
+  // ── Apply action from assistant card ─────────────────────────
   const applyAction = async (action: ActionPayload, msgIndex: number) => {
+    // suggest_connector handled inline — should not reach applyAction, but guard anyway
+    if (action.type === 'suggest_connector' && action.provider) {
+      handleConnectInChat(action.provider, action.label);
+      return;
+    }
+
     setApplyingAction(msgIndex);
     setMessages(prev => {
       const u = [...prev];
@@ -479,14 +637,11 @@ export default function MissionChatPage() {
         });
         if (res.ok) {
           showToast(`✅ Scheduled: ${action.label}`);
-          setMissionStatus('paused'); // schedule transitions mission to paused
+          setMissionStatus('paused');
         } else {
           const err = await res.json() as { error?: string };
           showToast(`❌ ${err.error ?? 'Could not set schedule. Please try from the mission page.'}`);
         }
-
-      } else if (action.type === 'suggest_connector' && action.provider) {
-        router.push(`/connectors?search=${encodeURIComponent(action.provider)}`);
 
       } else if (action.type === 'webhook') {
         const url = `${window.location.origin}/api/webhooks/trigger/${missionId}`;
@@ -499,7 +654,7 @@ export default function MissionChatPage() {
     setApplyingAction(null);
   };
 
-  // ── Voice recording ─────────────────────────────────────────
+  // ── Voice recording ───────────────────────────────────────────
   const toggleVoice = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
@@ -543,7 +698,10 @@ export default function MissionChatPage() {
 
   const sessionGroups = groupSessionsByDate(sessions);
 
-  // ── Render ─────────────────────────────────────────────────
+  const allConnected = requiredConnectors.length > 0 && requiredConnectors.every(c => c.connected);
+  const hasUnconnected = requiredConnectors.some(c => !c.connected);
+
+  // ── Render ────────────────────────────────────────────────────
   return (
     <>
       <div style={{
@@ -626,7 +784,6 @@ export default function MissionChatPage() {
               <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>AI Mission Assistant</div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
-              {/* Mission status pill */}
               <span style={{
                 fontSize: '0.65rem', fontWeight: 600, padding: '2px 8px', borderRadius: 20,
                 background: missionStatus === 'active' ? 'hsla(152,69%,50%,0.12)' : missionStatus === 'draft' ? 'hsla(258,90%,66%,0.12)' : 'var(--bg-card)',
@@ -650,7 +807,6 @@ export default function MissionChatPage() {
               borderBottom: `1px solid ${liveRun.status === 'completed' ? 'hsla(152,69%,50%,0.25)' : liveRun.status === 'failed' ? 'hsla(0,80%,60%,0.25)' : 'hsla(258,90%,66%,0.25)'}`,
               padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
             }}>
-              {/* Spinner or status icon */}
               {liveRun.status !== 'completed' && liveRun.status !== 'failed' ? (
                 <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--accent)', borderTopColor: 'transparent', display: 'inline-block', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
               ) : liveRun.status === 'completed' ? (
@@ -736,6 +892,72 @@ export default function MissionChatPage() {
                 </div>
               )}
 
+              {/* ── Required Connectors Panel ─────────────────────── */}
+              {requiredConnectors.length > 0 && !allConnected && (
+                <div style={{
+                  background: 'var(--bg-secondary)',
+                  border: `1px solid ${hasUnconnected ? 'hsla(38,92%,55%,0.3)' : 'hsla(152,69%,50%,0.3)'}`,
+                  borderRadius: 'var(--radius-md)', padding: '16px',
+                }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: hasUnconnected ? 'var(--amber)' : 'var(--emerald)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>🔌</span>
+                    <span>Required Connections</span>
+                    {hasUnconnected && <span style={{ fontWeight: 400, color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>— connect these before running</span>}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {requiredConnectors.map(c => {
+                      const isConnected = c.connected || connectedInSession.has(c.service);
+                      const label = c.service.charAt(0).toUpperCase() + c.service.slice(1).replace(/_/g, ' ');
+                      const isConnecting = connectingSlug === c.service;
+                      return (
+                        <div key={c.service} style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '10px 12px',
+                          background: 'var(--bg-card)',
+                          border: `1px solid ${isConnected ? 'hsla(152,69%,50%,0.2)' : 'var(--border)'}`,
+                          borderRadius: 'var(--radius-sm)',
+                        }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '0.83rem', fontWeight: 600, color: 'var(--text-primary)' }}>{label}</div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {CONNECTOR_DESCRIPTIONS[c.service.toLowerCase()] ?? c.reason}
+                            </div>
+                          </div>
+                          {isConnected ? (
+                            <span style={{
+                              fontSize: '0.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 12,
+                              background: 'hsla(152,69%,50%,0.1)', color: 'var(--emerald)',
+                              border: '1px solid hsla(152,69%,50%,0.2)', whiteSpace: 'nowrap', flexShrink: 0,
+                            }}>
+                              ✓ Connected
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleConnectInChat(c.service, label)}
+                              disabled={isConnecting}
+                              className="btn btn-primary btn-sm"
+                              style={{ fontSize: '0.73rem', flexShrink: 0, minWidth: 80 }}
+                            >
+                              {isConnecting ? (
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                  <span style={{ width: 10, height: 10, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
+                                  Connecting…
+                                </span>
+                              ) : 'Connect →'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {allConnected && (
+                    <div style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--emerald)', textAlign: 'center' }}>
+                      ✓ All connectors ready — you can run this mission now.
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Messages */}
               {messages.map((msg, i) => (
                 <div key={i} style={{ display: 'flex', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row', gap: 12, alignItems: 'flex-start' }}>
@@ -778,9 +1000,14 @@ export default function MissionChatPage() {
                     {msg.role === 'assistant' && msg.action_payload && !msg.action_applied && (() => {
                       const a = msg.action_payload;
                       const isConnector = a.type === 'suggest_connector';
-                      const connectorDesc = isConnector && a.provider
-                        ? (CONNECTOR_DESCRIPTIONS[a.provider.toLowerCase()] ?? `Connect ${a.provider} to use it in this mission.`)
+                      const connectorSlug = a.provider ?? '';
+                      const connectorLabel = connectorSlug.charAt(0).toUpperCase() + connectorSlug.slice(1).replace(/_/g, ' ');
+                      const isAlreadyConnected = requiredConnectors.find(c => c.service === connectorSlug)?.connected
+                        || connectedInSession.has(connectorSlug);
+                      const connectorDesc = isConnector && connectorSlug
+                        ? (CONNECTOR_DESCRIPTIONS[connectorSlug.toLowerCase()] ?? `Connect ${connectorLabel} to use it in this mission.`)
                         : null;
+                      const isConnecting = connectingSlug === connectorSlug;
 
                       return (
                         <div style={{
@@ -797,18 +1024,19 @@ export default function MissionChatPage() {
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
                                 {a.type === 'schedule' && a.cron ? `Cron: ${a.cron} (${a.timezone ?? 'Asia/Kolkata'})` :
                                  a.type === 'run_now' ? (missionStatus === 'draft' ? 'Will build and start this mission for the first time.' : 'Will trigger a fresh run immediately.') :
-                                 connectorDesc ?? 'Will take you to the connector setup.' }
+                                 connectorDesc ?? 'Connects this service to your mission.' }
                               </div>
-                              {/* Inline connector info */}
-                              {isConnector && a.provider && (
+                              {isConnector && connectorSlug && (
                                 <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
                                   <span style={{
                                     fontSize: '0.72rem', fontWeight: 600, padding: '2px 8px', borderRadius: 12,
-                                    background: 'hsla(152,69%,50%,0.1)', color: 'var(--emerald)', border: '1px solid hsla(152,69%,50%,0.2)',
+                                    background: isAlreadyConnected ? 'hsla(152,69%,50%,0.1)' : 'hsla(258,90%,66%,0.08)',
+                                    color: isAlreadyConnected ? 'var(--emerald)' : 'var(--purple)',
+                                    border: `1px solid ${isAlreadyConnected ? 'hsla(152,69%,50%,0.2)' : 'hsla(258,90%,66%,0.2)'}`,
                                   }}>
-                                    {a.provider.charAt(0).toUpperCase() + a.provider.slice(1)}
+                                    {isAlreadyConnected ? '✓ ' : ''}{connectorLabel}
                                   </span>
-                                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>— click Connect to set up on the Connectors page</span>
+                                  {isAlreadyConnected && <span style={{ fontSize: '0.7rem', color: 'var(--emerald)' }}>Connected</span>}
                                 </div>
                               )}
                             </div>
@@ -822,14 +1050,34 @@ export default function MissionChatPage() {
                                   return u;
                                 })}
                               >Skip</button>
-                              <button
-                                className="btn btn-primary btn-sm"
-                                style={{ fontSize: '0.73rem', minWidth: 72 }}
-                                disabled={applyingAction === i}
-                                onClick={() => applyAction(a, i)}
-                              >
-                                {applyingAction === i ? '…' : isConnector ? 'Connect →' : 'Apply →'}
-                              </button>
+                              {isConnector ? (
+                                isAlreadyConnected ? (
+                                  <span style={{ fontSize: '0.73rem', color: 'var(--emerald)', padding: '4px 8px', fontWeight: 600 }}>✓ Done</span>
+                                ) : (
+                                  <button
+                                    className="btn btn-primary btn-sm"
+                                    style={{ fontSize: '0.73rem', minWidth: 80 }}
+                                    disabled={isConnecting}
+                                    onClick={() => handleConnectInChat(connectorSlug, connectorLabel)}
+                                  >
+                                    {isConnecting ? (
+                                      <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                        <span style={{ width: 10, height: 10, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
+                                        Connecting…
+                                      </span>
+                                    ) : 'Connect →'}
+                                  </button>
+                                )
+                              ) : (
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  style={{ fontSize: '0.73rem', minWidth: 72 }}
+                                  disabled={applyingAction === i}
+                                  onClick={() => applyAction(a, i)}
+                                >
+                                  {applyingAction === i ? '…' : 'Apply →'}
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -948,6 +1196,66 @@ export default function MissionChatPage() {
         </div>
       </div>
 
+      {/* ── Inline API Key Modal ──────────────────────────────── */}
+      {inlineApiKeyModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        }}
+          onClick={e => { if (e.target === e.currentTarget) { setInlineApiKeyModal(null); } }}
+        >
+          <div style={{
+            background: 'var(--bg-card)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-lg)', padding: '28px 28px 24px',
+            width: '100%', maxWidth: 460, boxShadow: 'var(--shadow-xl)',
+          }}>
+            <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)', marginBottom: 6 }}>
+              Connect {inlineApiKeyModal.label}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 18, lineHeight: 1.5 }}>
+              {CONNECTOR_DESCRIPTIONS[inlineApiKeyModal.slug] ?? `Enter your ${inlineApiKeyModal.label} API key to use it in this mission.`}
+            </div>
+            <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+              {API_KEY_FIELD_LABELS[inlineApiKeyModal.slug] ?? 'API Key'}
+            </label>
+            <input
+              type="password"
+              value={inlineApiKeyValue}
+              onChange={e => { setInlineApiKeyValue(e.target.value); setInlineApiKeyError(null); }}
+              onKeyDown={e => { if (e.key === 'Enter' && !inlineApiKeySaving) handleInlineApiKeySave(); }}
+              placeholder="Paste your key here…"
+              autoFocus
+              style={{
+                width: '100%', padding: '10px 12px', borderRadius: 'var(--radius-sm)',
+                border: `1px solid ${inlineApiKeyError ? 'var(--rose)' : 'var(--border)'}`,
+                background: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: '0.88rem',
+                outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace',
+              }}
+            />
+            {inlineApiKeyError && (
+              <div style={{ fontSize: '0.75rem', color: 'var(--rose)', marginTop: 6 }}>❌ {inlineApiKeyError}</div>
+            )}
+            <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+              <button
+                className="btn btn-ghost"
+                style={{ flex: 1 }}
+                onClick={() => { setInlineApiKeyModal(null); setInlineApiKeyValue(''); setInlineApiKeyError(null); }}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 2 }}
+                onClick={handleInlineApiKeySave}
+                disabled={inlineApiKeySaving || !inlineApiKeyValue.trim()}
+              >
+                {inlineApiKeySaving ? 'Verifying…' : 'Save & Connect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toast */}
       {toast && (
         <div style={{
@@ -963,6 +1271,7 @@ export default function MissionChatPage() {
 
       <style>{`
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        @keyframes spin { to{transform:rotate(360deg)} }
         @keyframes fadeInUp { from{opacity:0;transform:translateX(-50%) translateY(8px)} to{opacity:1;transform:translateX(-50%) translateY(0)} }
       `}</style>
     </>
