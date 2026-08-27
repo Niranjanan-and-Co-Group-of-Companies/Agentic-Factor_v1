@@ -34,6 +34,7 @@ interface ActionPayload {
   intent?: string;
   question?: string;
   error?: string;
+  accountInfo?: string;
   agents?: AgentCard[];
   orchestrationPattern?: string;
   requiredConnectors?: RequiredConnector[];
@@ -1009,6 +1010,45 @@ function CommandCenterPageInner() {
         <button style={{ ...btnStyle, alignSelf: 'flex-start', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }} onClick={() => { setInput('Create a mission that '); inputRef.current?.focus(); }}>Try Again →</button>
       </div>
     );
+
+    if (action.type === 'key_connected') {
+      const meta = connectorMeta(action.provider ?? '');
+      return (
+        <div style={{ ...card, borderColor: 'hsla(142,71%,45%,0.35)', background: 'hsla(142,71%,45%,0.04)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: '1.5rem', lineHeight: 1 }}>{meta.icon}</span>
+            <div>
+              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#22C55E' }}>✅ {meta.label} Connected</div>
+              {action.accountInfo && (
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>{action.accountInfo}</div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (action.type === 'key_connection_failed') {
+      const meta = connectorMeta(action.provider ?? '');
+      return (
+        <div style={{ ...card, borderColor: 'hsla(0,84%,60%,0.3)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: '1.3rem', lineHeight: 1 }}>{meta.icon}</span>
+            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#EF4444' }}>❌ {meta.label} key not valid</div>
+          </div>
+          {action.error && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{action.error}</div>}
+          <button
+            style={{ ...ghostBtn, alignSelf: 'flex-start' }}
+            onClick={() => {
+              setInlineApiKeyValue(''); setInlineApiKeyError(null);
+              setInlineApiKeySuccess(false); setInlineApiKeyModal({ service: action.provider ?? '' });
+            }}
+          >
+            Try Again →
+          </button>
+        </div>
+      );
+    }
 
     return null;
   };

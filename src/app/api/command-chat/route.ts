@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 import { calculateChatCreditCost, checkCredits, deductCredits } from '@/lib/middleware/billing';
+import { detectApiKey, redactKey, providerLabel } from '@/lib/services/apikey-detector';
+import { verifyApiKey } from '@/lib/services/apikey-verifier';
 
 export const maxDuration = 120;
 
@@ -301,6 +303,67 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // ── API key paste detection — intercept before LLM call ─────────────────────
+  // If the customer pastes an API key directly into the chat, verify + save it
+  // here without invoking the LLM. The key is never stored in chat history.
+  const lastUserMsg = messages[messages.length - 1];
+  const detectedKey = lastUserMsg?.role === 'user' ? detectApiKey(lastUserMsg.content) : null;
+
+  if (detectedKey) {
+    const verifyResult = await verifyApiKey(detectedKey.provider, { apiKey: detectedKey.key });
+    const label = providerLabel(detectedKey.provider);
+    const supabase = createServiceClient();
+
+    let confirmationText: string;
+    let actionPayload: Record<string, unknown>;
+
+    if (verifyResult.verified) {
+      await supabase.from('tenant_permissions').upsert(
+        {
+          tenant_id: tenantId,
+          provider: detectedKey.provider,
+          access_token: detectedKey.key,
+          refresh_token: null,
+          expires_at: null,
+          scopes: ['apikey'],
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'tenant_id,provider' }
+      );
+      confirmationText = `Your ${label} key is connected and ready to use.${verifyResult.accountInfo ? ` ${verifyResult.accountInfo}.` : ''}`;
+      actionPayload = { type: 'key_connected', provider: detectedKey.provider, accountInfo: verifyResult.accountInfo };
+    } else {
+      confirmationText = `That doesn't look like a valid ${label} key — ${verifyResult.error ?? 'please check and try again'}.`;
+      actionPayload = { type: 'key_connection_failed', provider: detectedKey.provider, error: verifyResult.error };
+    }
+
+    // Persist messages with key redacted so it never appears in chat history
+    const redactedUserContent = redactKey(lastUserMsg.content, detectedKey);
+    const firstUserContent = messages.find(m => m.role === 'user')?.content ?? '';
+    const chatId = await ensureSession(supabase, tenantId, sessionId, firstUserContent);
+
+    ;(async () => {
+      await supabase.from('mission_chat_messages').insert({ chat_id: chatId, tenant_id: tenantId, role: 'user', content: redactedUserContent });
+      await supabase.from('mission_chat_messages').insert({ chat_id: chatId, tenant_id: tenantId, role: 'assistant', content: confirmationText, action_payload: actionPayload });
+      await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
+    })().catch(console.error);
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        const send = (obj: Record<string, unknown>) =>
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        send({ type: 'delta', text: confirmationText });
+        send({ type: 'done', credits: 0, inputTokens: 0, outputTokens: 0, sessionId: chatId, cleanText: confirmationText, action: actionPayload });
+        controller.close();
+      },
+    });
+    return new Response(stream, {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+    });
+  }
+  // ── End API key detection ────────────────────────────────────────────────────
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'LLM not configured' }), { status: 500 });
@@ -391,7 +454,7 @@ export async function POST(request: NextRequest) {
         // Fallback: detect raw action JSON even when LLM omits <action> tags or truncation cut the closing tag.
         // Walks character by character, balancing braces so nested objects/arrays don't confuse it.
         if (!actionPayload) {
-          const KNOWN_TYPES = new Set(['create_mission','run_mission','show_missions','show_usage','open_mission','schedule_mission','pause_mission','resume_mission','suggest_connector']);
+          const KNOWN_TYPES = new Set(['create_mission','run_mission','show_missions','show_usage','open_mission','schedule_mission','pause_mission','resume_mission','suggest_connector','key_connected','key_connection_failed']);
           const jsonStart = fullText.indexOf('{"type":');
           if (jsonStart !== -1) {
             let depth = 0, inString = false, escaped = false, jsonEnd = -1;

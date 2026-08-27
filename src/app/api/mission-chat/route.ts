@@ -5,6 +5,8 @@ import { callLLM } from '@/lib/services/llm-router';
 import { editBlueprint } from '@/lib/services/intake';
 import { safeJSONParse } from '@/lib/utils/json-parser';
 import { processApprovalDecision } from '@/lib/services/approvals';
+import { detectApiKey, redactKey, providerLabel } from '@/lib/services/apikey-detector';
+import { verifyApiKey } from '@/lib/services/apikey-verifier';
 
 export const maxDuration = 120;
 
@@ -38,6 +40,42 @@ export async function POST(request: NextRequest) {
         );
       }
     }
+
+    // ── API key paste detection — intercept before LLM call ──────────────────
+    // Customers sometimes paste API keys into the mission chat instead of the
+    // Connectors page. Detect, verify, save, and confirm without touching the LLM.
+    if (!isSilentCheckin) {
+      const detectedKey = detectApiKey(message);
+      if (detectedKey) {
+        const verifyResult = await verifyApiKey(detectedKey.provider, { apiKey: detectedKey.key });
+        const label = providerLabel(detectedKey.provider);
+
+        if (verifyResult.verified) {
+          const supabase = createServiceClient();
+          await supabase.from('tenant_permissions').upsert(
+            {
+              tenant_id: tenantId,
+              provider: detectedKey.provider,
+              access_token: detectedKey.key,
+              refresh_token: null,
+              expires_at: null,
+              scopes: ['apikey'],
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'tenant_id,provider' }
+          );
+          const info = verifyResult.accountInfo ? ` ${verifyResult.accountInfo}.` : '';
+          return NextResponse.json({
+            reply: `Your ${label} key is now connected and ready to use across your missions.${info}`,
+          });
+        } else {
+          return NextResponse.json({
+            reply: `That doesn't look like a valid ${label} key — ${verifyResult.error ?? 'please check and try again'}.`,
+          });
+        }
+      }
+    }
+    // ── End API key detection ─────────────────────────────────────────────────
 
     const supabase = createServiceClient();
 
