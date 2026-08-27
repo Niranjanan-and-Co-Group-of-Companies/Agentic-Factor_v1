@@ -97,18 +97,6 @@ function detectApiKey(text: string): { provider: string; label: string; key: str
   return null;
 }
 
-function groupSessionsByDate(sessions: ChatSession[]) {
-  const groups: Record<string, ChatSession[]> = {};
-  const now = new Date();
-  for (const s of sessions) {
-    const d = new Date(s.updated_at);
-    const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
-    const key = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Yesterday' : diffDays <= 7 ? 'This Week' : 'Older';
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(s);
-  }
-  return groups;
-}
 
 // Strip <action>...</action> blocks from streamed text before display
 function stripActionTags(text: string): string {
@@ -188,7 +176,6 @@ export default function MissionChatPage() {
 
   const [missionTitle, setMissionTitle] = useState('Mission');
   const [missionStatus, setMissionStatus] = useState('draft');
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -199,7 +186,6 @@ export default function MissionChatPage() {
   const [savingKey, setSavingKey] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const [applyingAction, setApplyingAction] = useState<number | null>(null);
   const [liveRun, setLiveRun] = useState<LiveRun | null>(null);
@@ -289,16 +275,6 @@ export default function MissionChatPage() {
     return () => window.removeEventListener('message', handler);
   }, []);
 
-  // ── Load sessions ────────────────────────────────────────────
-  const loadSessions = useCallback(async () => {
-    const res = await fetch(`/api/missions/${missionId}/chat/sessions`, { credentials: 'include' });
-    if (res.ok) {
-      const data = await res.json() as { sessions: ChatSession[] };
-      setSessions(data.sessions ?? []);
-    }
-  }, [missionId]);
-
-  useEffect(() => { loadSessions(); }, [loadSessions]);
 
   // ── Poll mission status every 8s — also refreshes title if it didn't load ──
   useEffect(() => {
@@ -380,7 +356,7 @@ export default function MissionChatPage() {
   }, [missionId]);
 
   // ── Load existing session messages ────────────────────────────
-  const loadSession = async (sessionId: string) => {
+  const loadSession = useCallback(async (sessionId: string) => {
     setActiveSessionId(sessionId);
     setMessages([]);
     setProactiveAlert(null);
@@ -394,7 +370,18 @@ export default function MissionChatPage() {
       const data = await res.json() as { messages: ChatMessage[] };
       setMessages(data.messages ?? []);
     }
-  };
+  }, [missionId]);
+
+  // ── Auto-load most recent conversation on mount ───────────────
+  useEffect(() => {
+    fetch(`/api/missions/${missionId}/chat/sessions`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { sessions: ChatSession[] } | null) => {
+        const latest = data?.sessions?.[0];
+        if (latest) loadSession(latest.id);
+      })
+      .catch(() => { /* non-fatal — welcome screen will show */ });
+  }, [missionId, loadSession]);
 
   // ── Scroll to bottom ──────────────────────────────────────────
   useEffect(() => {
@@ -576,7 +563,6 @@ export default function MissionChatPage() {
               setToolStatusLines([]);
               if (evt.sessionId && !activeSessionId) {
                 setActiveSessionId(evt.sessionId);
-                loadSessions();
               }
               if (evt.action?.type === 'suggest_connector') setQuickChips(QUICK_CHIPS_AFTER_CONNECT);
               else if (streamedText.toLowerCase().includes('fail') || streamedText.toLowerCase().includes('error'))
@@ -774,8 +760,6 @@ export default function MissionChatPage() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); }
   };
 
-  const sessionGroups = groupSessionsByDate(sessions);
-
   const allConnected = requiredConnectors.length > 0 && requiredConnectors.every(c => c.connected);
   const hasUnconnected = requiredConnectors.some(c => !c.connected);
 
@@ -788,62 +772,6 @@ export default function MissionChatPage() {
         fontFamily: 'var(--font-sans)',
       }}>
 
-        {/* ── Left Rail ──────────────────────────────────────── */}
-        {sidebarOpen && (
-          <div style={{
-            width: 252, flexShrink: 0, borderRight: '1px solid var(--border)',
-            display: 'flex', flexDirection: 'column', background: 'var(--bg-secondary)',
-          }}>
-            <div style={{ padding: '16px 14px 12px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <button
-                onClick={() => { setMessages([]); setActiveSessionId(null); setProactiveAlert(null); }}
-                className="btn btn-primary btn-sm"
-                style={{ width: '100%', justifyContent: 'center' }}
-              >
-                + New Chat
-              </button>
-              <button
-                onClick={() => router.push('/dashboard')}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.75rem', textAlign: 'left', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 6 }}
-              >
-                ← All Missions
-              </button>
-            </div>
-
-            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
-              {sessions.length === 0 ? (
-                <div style={{ padding: '20px 10px', color: 'var(--text-muted)', fontSize: '0.78rem', textAlign: 'center' }}>
-                  No past conversations yet.<br />Start chatting to build history.
-                </div>
-              ) : (
-                Object.entries(sessionGroups).map(([group, items]) => (
-                  <div key={group} style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 8px 2px' }}>{group}</div>
-                    {items.map(s => (
-                      <button
-                        key={s.id}
-                        onClick={() => loadSession(s.id)}
-                        style={{
-                          width: '100%', textAlign: 'left',
-                          background: activeSessionId === s.id ? 'var(--accent-subtle)' : 'none',
-                          border: 'none', borderRadius: 'var(--radius-sm)', padding: '7px 10px',
-                          cursor: 'pointer', color: activeSessionId === s.id ? 'var(--accent)' : 'var(--text-secondary)',
-                          fontSize: '0.8rem', lineHeight: 1.3,
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                          transition: 'all var(--duration)',
-                        }}
-                        title={s.title ?? 'Chat'}
-                      >
-                        {s.title || 'Untitled chat'}
-                      </button>
-                    ))}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-
         {/* ── Main Chat Area ──────────────────────────────────── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
 
@@ -852,9 +780,6 @@ export default function MissionChatPage() {
             display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px',
             borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)', flexShrink: 0,
           }}>
-            <button onClick={() => setSidebarOpen(o => !o)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '1rem', lineHeight: 1 }}
-              title={sidebarOpen ? 'Hide history' : 'Show history'}>☰</button>
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {missionTitle}
