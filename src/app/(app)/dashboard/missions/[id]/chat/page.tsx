@@ -204,6 +204,7 @@ export default function MissionChatPage() {
   const [applyingAction, setApplyingAction] = useState<number | null>(null);
   const [liveRun, setLiveRun] = useState<LiveRun | null>(null);
   const [liveRunDismissed, setLiveRunDismissed] = useState(false);
+  const [toolStatusLines, setToolStatusLines] = useState<Array<{ name: string; status: 'running' | 'done'; label: string; summary?: string }>>([]);
 
   // ── Connector state ──────────────────────────────────────────
   const [requiredConnectors, setRequiredConnectors] = useState<RequiredConnector[]>([]);
@@ -493,6 +494,7 @@ export default function MissionChatPage() {
 
     const streamingMsg: ChatMessage = { role: 'assistant', content: '', isStreaming: true };
     setMessages([...newMessages, streamingMsg]);
+    setToolStatusLines([]);
 
     try {
       const apiMessages = newMessages.map(m => ({ role: m.role, content: m.content }));
@@ -529,6 +531,7 @@ export default function MissionChatPage() {
             const evt = JSON.parse(line.slice(6)) as {
               type: string; text?: string; cleanText?: string;
               action?: ActionPayload | null; sessionId?: string; message?: string;
+              name?: string; status?: 'running' | 'done'; label?: string; summary?: string;
             };
 
             if (evt.type === 'delta' && evt.text) {
@@ -542,6 +545,24 @@ export default function MissionChatPage() {
               });
             }
 
+            if (evt.type === 'tool_status' && evt.name) {
+              setToolStatusLines(prev => {
+                const existing = prev.findIndex(t => t.name === evt.name);
+                const entry = {
+                  name: evt.name!,
+                  status: evt.status ?? 'running',
+                  label: evt.label ?? evt.name!,
+                  summary: evt.summary,
+                };
+                if (existing >= 0) {
+                  const updated = [...prev];
+                  updated[existing] = entry;
+                  return updated;
+                }
+                return [...prev, entry];
+              });
+            }
+
             if (evt.type === 'done') {
               const finalText = evt.cleanText ?? stripActionTags(streamedText);
               setMessages(prev => {
@@ -552,6 +573,7 @@ export default function MissionChatPage() {
                 };
                 return updated;
               });
+              setToolStatusLines([]);
               if (evt.sessionId && !activeSessionId) {
                 setActiveSessionId(evt.sessionId);
                 loadSessions();
@@ -568,6 +590,7 @@ export default function MissionChatPage() {
                 updated[updated.length - 1] = { role: 'assistant', content: `⚠️ ${evt.message ?? 'Error'}` };
                 return updated;
               });
+              setToolStatusLines([]);
             }
           } catch { /* skip malformed */ }
         }
@@ -578,6 +601,7 @@ export default function MissionChatPage() {
     }
 
     setIsStreaming(false);
+    setToolStatusLines([]);
     inputRef.current?.focus();
   };
 
@@ -1037,6 +1061,28 @@ export default function MissionChatPage() {
                       color: msg.role === 'user' ? '#fff' : 'var(--text-primary)',
                       fontSize: '0.88rem', lineHeight: 1.65,
                     }}>
+                      {/* Tool status indicators shown while assistant is working */}
+                      {msg.isStreaming && toolStatusLines.length > 0 && (
+                        <div style={{ marginBottom: msg.content ? 10 : 0 }}>
+                          {toolStatusLines.map(t => (
+                            <div key={t.name} style={{
+                              display: 'flex', alignItems: 'center', gap: 6,
+                              fontSize: '0.75rem', color: 'var(--text-muted)',
+                              padding: '4px 8px', borderRadius: 6,
+                              background: 'var(--bg-secondary)',
+                              border: '1px solid var(--border)',
+                              marginBottom: 4,
+                            }}>
+                              {t.status === 'running' ? (
+                                <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', border: '2px solid var(--accent)', borderTopColor: 'transparent', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
+                              ) : (
+                                <span style={{ color: 'hsla(152,69%,50%,1)', fontSize: '0.8rem' }}>✓</span>
+                              )}
+                              <span>{t.status === 'done' && t.summary ? t.summary : t.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
                       {msg.isStreaming && (
                         <span style={{ display: 'inline-block', width: 2, height: 16, background: 'var(--accent)', borderRadius: 1, marginLeft: 3, animation: 'blink 0.7s step-end infinite', verticalAlign: 'text-bottom' }} />
