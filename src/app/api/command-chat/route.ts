@@ -6,7 +6,7 @@ import { detectApiKey, redactKey, providerLabel } from '@/lib/services/apikey-de
 import { verifyApiKey } from '@/lib/services/apikey-verifier';
 import { retrieveRelevantChunks, listUploadedDocuments } from '@/lib/services/rag-retrieval';
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 // Sentinel UUID used as mission_id for platform-level (non-mission) chat sessions
 const PLATFORM_CHAT_SENTINEL = '00000000-0000-0000-0000-000000000000';
@@ -241,6 +241,211 @@ function formatAgo(dateStr: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+// ── Command Center tool definitions ───────────────────────────────────────
+
+const CC_TOOLS = [
+  {
+    name: 'search_web',
+    description: 'Search the internet for current information — news, research, company data, competitor info, market intelligence. Use when the user asks about something that requires up-to-date information.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string' as const, description: 'Search query' },
+      },
+      required: ['query'] as string[],
+    },
+  },
+  {
+    name: 'get_mission_details',
+    description: 'Get detailed status, recent run history, and error information for a specific mission by its ID. Use when the user asks for details about a specific mission.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        mission_id: { type: 'string' as const, description: 'Mission UUID' },
+      },
+      required: ['mission_id'] as string[],
+    },
+  },
+];
+
+// Streaming parser (same pattern as mission chat)
+interface CCContentBlock { type: 'text' | 'tool_use'; text?: string; id?: string; name?: string; inputJson?: string }
+interface CCStreamResult { textContent: string; contentBlocks: CCContentBlock[]; stopReason: string; inputTokens: number; outputTokens: number }
+
+async function parseCCStream(response: Response, onTextDelta: (t: string) => void): Promise<CCStreamResult> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const contentBlocks: CCContentBlock[] = [];
+  let stopReason = 'end_turn';
+  let inputTokens = 0, outputTokens = 0, fullText = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n'); buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      if (raw === '[DONE]') continue;
+      try {
+        const evt = JSON.parse(raw) as {
+          type: string; index?: number;
+          content_block?: { type: string; id?: string; name?: string };
+          delta?: { type: string; text?: string; partial_json?: string; stop_reason?: string };
+          usage?: { output_tokens?: number };
+          message?: { usage?: { input_tokens?: number } };
+        };
+        if (evt.type === 'message_start' && evt.message?.usage) inputTokens = evt.message.usage.input_tokens ?? 0;
+        if (evt.type === 'content_block_start' && evt.content_block) {
+          const idx = evt.index ?? contentBlocks.length;
+          const cb = evt.content_block;
+          if (cb.type === 'text') contentBlocks[idx] = { type: 'text', text: '' };
+          else if (cb.type === 'tool_use') contentBlocks[idx] = { type: 'tool_use', id: cb.id, name: cb.name, inputJson: '' };
+        }
+        if (evt.type === 'content_block_delta' && evt.delta) {
+          const idx = evt.index ?? contentBlocks.length - 1;
+          const block = contentBlocks[idx];
+          if (!block) continue;
+          if (evt.delta.type === 'text_delta' && evt.delta.text && block.type === 'text') {
+            block.text = (block.text ?? '') + evt.delta.text;
+            fullText += evt.delta.text;
+            onTextDelta(evt.delta.text);
+          }
+          if (evt.delta.type === 'input_json_delta' && evt.delta.partial_json && block.type === 'tool_use') {
+            block.inputJson = (block.inputJson ?? '') + evt.delta.partial_json;
+          }
+        }
+        if (evt.type === 'message_delta') {
+          stopReason = (evt.delta as Record<string, unknown>)?.stop_reason as string ?? stopReason;
+          outputTokens = evt.usage?.output_tokens ?? outputTokens;
+        }
+      } catch { /* skip malformed */ }
+    }
+  }
+  return { textContent: fullText, contentBlocks, stopReason, inputTokens, outputTokens };
+}
+
+async function executeCCTool(
+  name: string,
+  input: Record<string, unknown>,
+  tenantId: string,
+  supabase: ReturnType<typeof createServiceClient>
+): Promise<{ content: string; summary: string }> {
+
+  if (name === 'search_web') {
+    const query = String(input.query ?? '');
+    if (!query) return { content: 'No query provided.', summary: 'Missing query' };
+
+    let apiKey = process.env.TAVILY_API_KEY ?? '';
+    try {
+      const { data } = await supabase.from('tenant_permissions').select('access_token').eq('tenant_id', tenantId).eq('provider', 'tavily').maybeSingle();
+      if (data?.access_token && data.access_token !== 'composio_managed') apiKey = data.access_token;
+    } catch { /* use env key */ }
+
+    if (!apiKey) return { content: 'Web search not configured.', summary: 'Not configured' };
+    try {
+      const res = await fetch('https://api.tavily.com/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({ query, max_results: 5, search_depth: 'basic' }),
+        signal: AbortSignal.timeout(12_000),
+      });
+      const data = await res.json() as { results?: Array<{ title: string; content: string; url: string }> };
+      const results = (data.results ?? []).slice(0, 5);
+      const formatted = results.map(r => `[${r.title}]\n${r.content.slice(0, 300)}\n${r.url}`).join('\n\n');
+      return { content: formatted || 'No results.', summary: `${results.length} results for "${query}"` };
+    } catch (err) {
+      return { content: `Search failed: ${err instanceof Error ? err.message : String(err)}`, summary: 'Search failed' };
+    }
+  }
+
+  if (name === 'get_mission_details') {
+    const missionId = String(input.mission_id ?? '');
+    if (!missionId) return { content: 'No mission ID provided.', summary: 'Missing ID' };
+    try {
+      const [{ data: mission }, { data: runs }] = await Promise.all([
+        supabase.from('missions').select('title, status, mission_json').eq('id', missionId).eq('tenant_id', tenantId).single(),
+        supabase.from('mission_runs').select('run_number, status, started_at, duration_ms, agents_done, agents_failed, agents_total, summary').eq('mission_id', missionId).eq('tenant_id', tenantId).order('started_at', { ascending: false }).limit(3),
+      ]);
+      if (!mission) return { content: 'Mission not found or access denied.', summary: 'Not found' };
+      const runLines = (runs ?? []).map(r => `  Run #${r.run_number}: ${r.status}, agents: ${r.agents_done}/${r.agents_total}, ${r.duration_ms ? Math.round(r.duration_ms / 1000) + 's' : '?'}`).join('\n') || '  No runs yet';
+      return {
+        content: `Mission: "${mission.title}" — Status: ${mission.status}\n\nRecent runs:\n${runLines}`,
+        summary: `"${mission.title}" is ${mission.status}`,
+      };
+    } catch (err) {
+      return { content: `Error: ${err instanceof Error ? err.message : String(err)}`, summary: 'Error fetching mission' };
+    }
+  }
+
+  return { content: `Unknown tool: ${name}`, summary: 'Unknown tool' };
+}
+
+async function runCommandLoop(params: {
+  systemPrompt: string;
+  messages: Array<{ role: string; content: unknown }>;
+  apiKey: string;
+  tenantId: string;
+  supabase: ReturnType<typeof createServiceClient>;
+  send: (obj: Record<string, unknown>) => void;
+}): Promise<{ fullText: string; inputTokens: number; outputTokens: number }> {
+  const { systemPrompt, apiKey, tenantId, supabase, send } = params;
+  const messages = [...params.messages];
+  let totalInputTokens = 0, totalOutputTokens = 0, fullText = '';
+  const MAX_ROUNDS = 8;
+
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4096, stream: true, system: systemPrompt, tools: CC_TOOLS, messages }),
+    });
+
+    if (!res.ok) { send({ type: 'error', message: 'AI temporarily unavailable. Please try again.' }); break; }
+
+    const { textContent, contentBlocks, stopReason, inputTokens, outputTokens } =
+      await parseCCStream(res, text => send({ type: 'delta', text }));
+    totalInputTokens += inputTokens;
+    totalOutputTokens += outputTokens;
+    if (textContent) fullText += textContent;
+
+    const assistantContent: unknown[] = [];
+    for (const block of contentBlocks) {
+      if (block.type === 'text' && block.text) assistantContent.push({ type: 'text', text: block.text });
+      else if (block.type === 'tool_use' && block.id) {
+        let inp: Record<string, unknown> = {};
+        try { inp = JSON.parse(block.inputJson ?? '{}'); } catch { /* empty */ }
+        assistantContent.push({ type: 'tool_use', id: block.id, name: block.name, input: inp });
+      }
+    }
+
+    const toolBlocks = contentBlocks.filter(b => b.type === 'tool_use' && b.id && b.name);
+    if (stopReason !== 'tool_use' || toolBlocks.length === 0) break;
+
+    const toolResults: unknown[] = [];
+    for (const block of toolBlocks) {
+      let inp: Record<string, unknown> = {};
+      try { inp = JSON.parse(block.inputJson ?? '{}'); } catch { /* empty */ }
+
+      const label = block.name === 'search_web' ? `Searching "${inp.query}"…` : `Fetching mission details…`;
+      send({ type: 'tool_status', name: block.name, provider: block.name === 'search_web' ? 'tavily' : 'system', displayName: block.name === 'search_web' ? 'Web Search' : 'Mission Details', status: 'running', label, logoUrl: block.name === 'search_web' ? 'https://tavily.com/favicon.ico' : null });
+
+      const result = await executeCCTool(block.name!, inp, tenantId, supabase);
+
+      send({ type: 'tool_status', name: block.name, provider: block.name === 'search_web' ? 'tavily' : 'system', displayName: block.name === 'search_web' ? 'Web Search' : 'Mission Details', status: 'done', summary: result.summary, logoUrl: block.name === 'search_web' ? 'https://tavily.com/favicon.ico' : null });
+
+      toolResults.push({ type: 'tool_result', tool_use_id: block.id!, content: result.content });
+    }
+
+    messages.push({ role: 'assistant', content: assistantContent });
+    messages.push({ role: 'user', content: toolResults });
+  }
+
+  return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
+}
+
 async function ensureSession(
   supabase: ReturnType<typeof createServiceClient>,
   tenantId: string,
@@ -390,66 +595,15 @@ export async function POST(request: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
 
       try {
-        const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-          },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 4096,
-            stream: true,
-            system: systemPrompt,
-            messages: recentMessages,
-          }),
+        const supabase = createServiceClient();
+        const { fullText, inputTokens, outputTokens } = await runCommandLoop({
+          systemPrompt,
+          messages: recentMessages,
+          apiKey,
+          tenantId,
+          supabase,
+          send,
         });
-
-        if (!anthropicRes.ok) {
-          send({ type: 'error', message: 'AI temporarily unavailable. Please try again.' });
-          controller.close();
-          return;
-        }
-
-        const reader = anthropicRes.body!.getReader();
-        const decoder = new TextDecoder();
-        let fullText = '';
-        let inputTokens = 0;
-        let outputTokens = 0;
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const raw = line.slice(6).trim();
-            if (raw === '[DONE]') continue;
-            try {
-              const evt = JSON.parse(raw) as {
-                type: string;
-                delta?: { type: string; text?: string };
-                usage?: { output_tokens?: number };
-                message?: { usage?: { input_tokens?: number } };
-              };
-              if (evt.type === 'message_start' && evt.message?.usage) {
-                inputTokens = evt.message.usage.input_tokens ?? 0;
-              }
-              if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta' && evt.delta.text) {
-                fullText += evt.delta.text;
-                send({ type: 'delta', text: evt.delta.text });
-              }
-              if (evt.type === 'message_delta' && evt.usage) {
-                outputTokens = evt.usage.output_tokens ?? 0;
-              }
-            } catch { /* skip malformed */ }
-          }
-        }
 
         // Extract <action> block
         const actionMatch = fullText.match(/<action>([\s\S]*?)<\/action>/);
@@ -515,7 +669,6 @@ export async function POST(request: NextRequest) {
         }
 
         // Persist messages
-        const supabase = createServiceClient();
         const firstUserContent = recentMessages.find(m => m.role === 'user')?.content ?? '';
         const chatId = await ensureSession(supabase, tenantId, sessionId, firstUserContent);
 

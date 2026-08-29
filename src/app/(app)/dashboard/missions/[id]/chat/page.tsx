@@ -47,6 +47,126 @@ interface LiveRun {
   duration_ms: number | null;
 }
 
+// ── ToolCallCards component ───────────────────────────────────────────────────
+
+interface ToolCard {
+  name: string;
+  provider: string;
+  displayName: string;
+  status: 'running' | 'done' | 'error';
+  label: string;
+  summary?: string;
+  logoUrl?: string | null;
+}
+
+function ToolCallCards({ cards }: { cards: ToolCard[] }) {
+  const [expanded, setExpanded] = React.useState<string | null>(null);
+
+  if (cards.length === 0) return null;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
+      {cards.map(card => {
+        const isExpanded = expanded === card.name;
+        const statusColor = card.status === 'done' ? 'hsla(152,69%,45%,1)'
+          : card.status === 'error' ? '#ef4444'
+          : 'var(--accent)';
+        const borderColor = card.status === 'done' ? 'hsla(152,69%,45%,0.25)'
+          : card.status === 'error' ? 'rgba(239,68,68,0.25)'
+          : 'var(--border)';
+        const leftStripe = card.status === 'done' ? 'hsla(152,69%,45%,0.7)'
+          : card.status === 'error' ? '#ef4444'
+          : 'var(--accent)';
+
+        return (
+          <div key={card.name}>
+            <div
+              onClick={() => card.status !== 'running' && setExpanded(isExpanded ? null : card.name)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 10px', borderRadius: 8,
+                background: 'var(--bg-secondary)',
+                border: `1px solid ${borderColor}`,
+                borderLeft: `3px solid ${leftStripe}`,
+                cursor: card.status !== 'running' ? 'pointer' : 'default',
+                transition: 'all 0.15s',
+                userSelect: 'none',
+              }}
+            >
+              {/* Logo */}
+              {card.logoUrl ? (
+                <img
+                  src={card.logoUrl}
+                  alt={card.provider}
+                  style={{ width: 16, height: 16, borderRadius: 3, objectFit: 'contain', flexShrink: 0 }}
+                  onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                />
+              ) : (
+                <span style={{
+                  width: 16, height: 16, borderRadius: 3, flexShrink: 0,
+                  background: 'var(--accent)', color: '#fff',
+                  fontSize: '0.6rem', fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {card.provider.charAt(0).toUpperCase()}
+                </span>
+              )}
+
+              {/* Status indicator */}
+              {card.status === 'running' ? (
+                <span style={{
+                  display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
+                  border: `2px solid ${statusColor}`, borderTopColor: 'transparent',
+                  animation: 'spin 0.7s linear infinite', flexShrink: 0,
+                }} />
+              ) : card.status === 'done' ? (
+                <span style={{ color: statusColor, fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}>✓</span>
+              ) : (
+                <span style={{ color: statusColor, fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}>✗</span>
+              )}
+
+              {/* Label / summary */}
+              <span style={{ flex: 1, fontSize: '0.75rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {card.status === 'running' ? card.label : (card.summary ?? card.displayName)}
+              </span>
+
+              {/* Expand indicator */}
+              {card.status !== 'running' && (
+                <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', flexShrink: 0 }}>
+                  {isExpanded ? '▲' : '▼'}
+                </span>
+              )}
+            </div>
+
+            {/* Expanded detail */}
+            {isExpanded && (
+              <div style={{
+                margin: '2px 0 2px 3px',
+                padding: '8px 12px', borderRadius: '0 0 8px 8px',
+                background: 'var(--bg-secondary)',
+                border: `1px solid ${borderColor}`, borderTop: 'none',
+                fontSize: '0.72rem', color: 'var(--text-muted)',
+                fontFamily: 'var(--font-mono, monospace)',
+              }}>
+                <div style={{ marginBottom: 4 }}>
+                  <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)' }}>Action: </span>
+                  {card.name}
+                </div>
+                {card.summary && (
+                  <div>
+                    <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)' }}>Result: </span>
+                    {card.summary}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const APIKEY_CONNECTORS = new Set([
@@ -191,7 +311,7 @@ export default function MissionChatPage() {
   const [applyingAction, setApplyingAction] = useState<number | null>(null);
   const [liveRun, setLiveRun] = useState<LiveRun | null>(null);
   const [liveRunDismissed, setLiveRunDismissed] = useState(false);
-  const [toolStatusLines, setToolStatusLines] = useState<Array<{ name: string; status: 'running' | 'done'; label: string; summary?: string }>>([]);
+  const [toolStatusLines, setToolStatusLines] = useState<Array<{ name: string; provider: string; displayName: string; status: 'running' | 'done' | 'error'; label: string; summary?: string; logoUrl?: string | null }>>([]);
 
   // ── Connector state ──────────────────────────────────────────
   const [requiredConnectors, setRequiredConnectors] = useState<RequiredConnector[]>([]);
@@ -526,7 +646,8 @@ export default function MissionChatPage() {
             const evt = JSON.parse(line.slice(6)) as {
               type: string; text?: string; cleanText?: string;
               action?: ActionPayload | null; sessionId?: string; message?: string;
-              name?: string; status?: 'running' | 'done'; label?: string; summary?: string;
+              name?: string; provider?: string; displayName?: string;
+              status?: 'running' | 'done' | 'error'; label?: string; summary?: string; logoUrl?: string | null;
             };
 
             if (evt.type === 'delta' && evt.text) {
@@ -545,9 +666,12 @@ export default function MissionChatPage() {
                 const existing = prev.findIndex(t => t.name === evt.name);
                 const entry = {
                   name: evt.name!,
+                  provider: evt.provider ?? 'system',
+                  displayName: evt.displayName ?? evt.name!,
                   status: evt.status ?? 'running',
                   label: evt.label ?? evt.name!,
                   summary: evt.summary,
+                  logoUrl: evt.logoUrl,
                 };
                 if (existing >= 0) {
                   const updated = [...prev];
@@ -1019,27 +1143,9 @@ export default function MissionChatPage() {
                       color: msg.role === 'user' ? '#fff' : 'var(--text-primary)',
                       fontSize: '0.88rem', lineHeight: 1.65,
                     }}>
-                      {/* Tool status indicators shown while assistant is working */}
-                      {msg.isStreaming && toolStatusLines.length > 0 && (
-                        <div style={{ marginBottom: msg.content ? 10 : 0 }}>
-                          {toolStatusLines.map(t => (
-                            <div key={t.name} style={{
-                              display: 'flex', alignItems: 'center', gap: 6,
-                              fontSize: '0.75rem', color: 'var(--text-muted)',
-                              padding: '4px 8px', borderRadius: 6,
-                              background: 'var(--bg-secondary)',
-                              border: '1px solid var(--border)',
-                              marginBottom: 4,
-                            }}>
-                              {t.status === 'running' ? (
-                                <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', border: '2px solid var(--accent)', borderTopColor: 'transparent', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
-                              ) : (
-                                <span style={{ color: 'hsla(152,69%,50%,1)', fontSize: '0.8rem' }}>✓</span>
-                              )}
-                              <span>{t.status === 'done' && t.summary ? t.summary : t.label}</span>
-                            </div>
-                          ))}
-                        </div>
+                      {/* Tool call cards — shown while streaming, persist on done */}
+                      {(msg.isStreaming ? toolStatusLines.length > 0 : false) && (
+                        <ToolCallCards cards={toolStatusLines} />
                       )}
                       {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
                       {msg.isStreaming && (

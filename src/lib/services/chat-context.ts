@@ -1,14 +1,24 @@
 /**
- * Chat Context Builder
- * Assembles the full system prompt for the mission AI assistant.
- * Called fresh on every chat message — context stays current.
+ * Chat Context Builder — assembles the full system prompt for mission AI agents.
+ *
+ * All 8 layers, in priority order:
+ *   1. Agent identity + role (from mission brief)
+ *   2. Scope and responsibilities
+ *   3. Available tools (grouped by provider)
+ *   4. Customer profile (from agent_profiles)
+ *   5. Recent sessions (from agent_episodes)
+ *   6. Run history + schedule
+ *   7. Tenant business facts (from tenant_memory)
+ *   8. Operating principles + current date/time
  */
 
 import { createServiceClient } from '@/lib/supabase/server';
+import { getMemoryContext } from '@/lib/services/agent-memory';
 
 export interface ChatContext {
   systemPrompt: string;
-  proactiveAlert: string | null; // non-null only on first load
+  proactiveAlert: string | null;
+  connectedProviders: string[];
 }
 
 export async function buildChatContext(
@@ -18,7 +28,7 @@ export async function buildChatContext(
 ): Promise<ChatContext> {
   const supabase = createServiceClient();
 
-  // ── 1. Fetch mission ────────────────────────────────────────
+  // ── Fetch mission ────────────────────────────────────────────────────
   const { data: missionRow } = await supabase
     .from('missions')
     .select('mission_json, status, title')
@@ -30,51 +40,79 @@ export async function buildChatContext(
   const mission = missionRow?.mission_json as Record<string, unknown> | null;
   const missionStatus: string = missionRow?.status ?? 'unknown';
 
-  // ── 2. Agents summary (non-technical) ──────────────────────
+  // ── Agent definitions ────────────────────────────────────────────────
+  type AgentDef = { role?: string; agentIndex?: number; capabilities?: string[]; systemPrompt?: string };
   let agentsSummary = 'No agents configured yet.';
-  if (mission?.agents && Array.isArray(mission.agents) && mission.agents.length > 0) {
-    const agents = mission.agents as Array<{ role?: string; agentIndex?: number; capabilities?: string[]; systemPrompt?: string }>;
+  let agentPrompts = '';
+  if (Array.isArray(mission?.agents) && (mission.agents as AgentDef[]).length > 0) {
+    const agents = (mission.agents as AgentDef[]).sort((a, b) => (a.agentIndex ?? 0) - (b.agentIndex ?? 0));
     agentsSummary = agents
-      .sort((a, b) => (a.agentIndex ?? 0) - (b.agentIndex ?? 0))
       .map((a, i) => `  Agent ${i + 1}: ${a.role ?? 'Unnamed'} — ${a.capabilities?.slice(0, 3).join(', ') || 'general purpose'}`)
       .join('\n');
+    // Include any custom systemPrompts from the blueprint
+    const promptLines = agents.filter(a => a.systemPrompt).map(a => `[${a.role}] ${a.systemPrompt}`);
+    if (promptLines.length > 0) agentPrompts = '\n\nAGENT INSTRUCTIONS:\n' + promptLines.join('\n');
   }
 
-  // ── 3. Connected connectors ─────────────────────────────────
+  // ── Connected connectors ─────────────────────────────────────────────
   const { data: perms } = await supabase
     .from('tenant_permissions')
     .select('provider, access_token')
     .eq('tenant_id', tenantId);
 
   const connectedProviders = (perms ?? []).map(p => p.provider);
-  const connectorsList = connectedProviders.length > 0
-    ? connectedProviders.join(', ')
-    : 'none connected yet';
 
-  // Legacy AF key → Composio slug mappings (for backward compat with old provider keys stored in DB)
-  const LEGACY_SLUG_ALIASES: Record<string, string[]> = {
-    gmail:          ['google', 'gmail'],
-    linkedin:       ['linkedin_oidc', 'linkedin'],
-    jira:           ['atlassian', 'jira'],
-    confluence:     ['atlassian', 'confluence'],
-    outlook:        ['microsoft', 'outlook'],
-    onedrive:       ['microsoft', 'onedrive'],
+  const LEGACY_ALIASES: Record<string, string[]> = {
+    gmail: ['google', 'gmail'],
+    linkedin: ['linkedin_oidc', 'linkedin'],
+    jira: ['atlassian', 'jira'],
+    outlook: ['microsoft', 'outlook'],
     microsoftteams: ['microsoft', 'microsoftteams'],
   };
-
-  function isProviderConnected(service: string): boolean {
+  function isConnected(service: string): boolean {
     const s = service.toLowerCase();
-    const candidates = LEGACY_SLUG_ALIASES[s] ?? [s];
-    return candidates.some(c => connectedProviders.includes(c));
+    return (LEGACY_ALIASES[s] ?? [s]).some(c => connectedProviders.includes(c));
   }
 
-  // Permissions required by this mission but not yet granted
   const requiredPerms = (mission?.permissions as Array<{ service: string; granted?: boolean }> ?? []);
   const missingConnectors = requiredPerms
-    .filter(p => !p.granted && !isProviderConnected(p.service))
+    .filter(p => !p.granted && !isConnected(p.service))
     .map(p => p.service);
 
-  // ── 4. Last 3 run summaries ─────────────────────────────────
+  // ── Tool availability block ──────────────────────────────────────────
+  // Load schemas to build the "what you can do" section of the prompt
+  let toolsBlock = '';
+  try {
+    const { data: toolRows } = await supabase
+      .from('mission_tool_schemas')
+      .select('provider_slug, action_name, display_name')
+      .eq('tenant_id', tenantId)
+      .eq('mission_id', missionId)
+      .eq('is_active', true)
+      .order('provider_slug')
+      .limit(80);
+
+    if (toolRows && toolRows.length > 0) {
+      const byProvider = new Map<string, string[]>();
+      for (const t of toolRows) {
+        const list = byProvider.get(t.provider_slug) ?? [];
+        list.push(t.display_name || t.action_name);
+        byProvider.set(t.provider_slug, list);
+      }
+      const lines: string[] = ['YOUR AVAILABLE TOOLS (use them — don\'t ask the customer to do things you can do yourself):'];
+      for (const [provider, actions] of byProvider) {
+        lines.push(`  ${provider.toUpperCase()}: ${actions.slice(0, 8).join(', ')}${actions.length > 8 ? `, +${actions.length - 8} more` : ''}`);
+      }
+      // Always-available system tools
+      lines.push('  SYSTEM: Read run error logs');
+      toolsBlock = lines.join('\n');
+    } else if (connectedProviders.length > 0) {
+      // Tools not yet fetched — still tell the LLM what providers are available
+      toolsBlock = `YOUR AVAILABLE TOOLS:\n  Connected providers: ${connectedProviders.join(', ')}\n  Use execute_composio_action with the exact Composio action slug for any of these.\n  SYSTEM: Read run error logs`;
+    }
+  } catch { /* non-fatal */ }
+
+  // ── Run history ──────────────────────────────────────────────────────
   let runsSummary = 'No runs yet.';
   try {
     const { data: runs } = await supabase
@@ -84,36 +122,19 @@ export async function buildChatContext(
       .eq('tenant_id', tenantId)
       .order('started_at', { ascending: false })
       .limit(3);
-
     if (runs && runs.length > 0) {
       runsSummary = runs.map(r => {
-        const when = r.started_at ? new Date(r.started_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'unknown time';
+        const when = r.started_at ? new Date(r.started_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '?';
         const dur = r.duration_ms ? `${Math.round(r.duration_ms / 1000)}s` : '?s';
         const detail = r.status === 'failed' && r.agents_failed
           ? ` (${r.agents_failed} agent(s) failed)`
-          : r.status === 'completed'
-          ? ` (${r.agents_done}/${r.agents_total} agents done)`
-          : '';
-        return `  Run #${r.run_number}: ${r.status}${detail}, started ${when}, duration ${dur}`;
+          : r.status === 'completed' ? ` (${r.agents_done}/${r.agents_total} agents done)` : '';
+        return `  Run #${r.run_number}: ${r.status}${detail}, started ${when}, ${dur}`;
       }).join('\n');
-    }
-  } catch { /* runs table may not exist on new installs */ }
-
-  // ── 5. Tenant memory (business facts) ──────────────────────
-  let memoryFacts = '';
-  try {
-    const { data: mem } = await supabase
-      .from('tenant_memory')
-      .select('fact')
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false })
-      .limit(10);
-    if (mem && mem.length > 0) {
-      memoryFacts = '\n\nKNOWN FACTS ABOUT THIS CUSTOMER:\n' + mem.map(m => `  - ${m.fact}`).join('\n');
     }
   } catch { /* non-fatal */ }
 
-  // ── 6. Scheduling status ────────────────────────────────────
+  // ── Schedule ─────────────────────────────────────────────────────────
   let scheduleInfo = 'No schedule set.';
   try {
     const { data: sched } = await supabase
@@ -123,76 +144,88 @@ export async function buildChatContext(
       .eq('tenant_id', tenantId)
       .maybeSingle();
     if (sched?.cron_expression) {
-      scheduleInfo = `Cron: ${sched.cron_expression} (${sched.timezone ?? 'UTC'}), active: ${sched.is_active ? 'yes' : 'paused'}`;
+      scheduleInfo = `${sched.cron_expression} (${sched.timezone ?? 'UTC'}), active: ${sched.is_active ? 'yes' : 'paused'}`;
       if (sched.next_run_at) {
-        scheduleInfo += `, next run: ${new Date(sched.next_run_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
+        scheduleInfo += `, next: ${new Date(sched.next_run_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
       }
     }
   } catch { /* non-fatal */ }
 
-  // ── 7. Assemble system prompt ───────────────────────────────
-  const systemPrompt = `You are the AI assistant built into AgenticFactor, helping this customer manage and improve their specific mission.
+  // ── Tenant memory (business facts) ───────────────────────────────────
+  let tenantFacts = '';
+  try {
+    const { data: mem } = await supabase
+      .from('tenant_memory')
+      .select('fact')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (mem && mem.length > 0) {
+      tenantFacts = '\nBUSINESS FACTS:\n' + mem.map(m => `  - ${m.fact}`).join('\n');
+    }
+  } catch { /* non-fatal */ }
 
-CURRENT MISSION: "${missionTitle}"
+  // ── Agent memory (profile + episodes) ────────────────────────────────
+  const { profileBlock, episodesBlock } = await getMemoryContext(tenantId, missionId);
+
+  // ── Assemble system prompt — all 8 layers ────────────────────────────
+  const now = new Date().toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    dateStyle: 'full',
+    timeStyle: 'short',
+  });
+
+  const systemPrompt = `You are the AI agent built into "${missionTitle}" on AgenticFactor.
+You are not a general-purpose assistant — you are this mission's dedicated agent.
+Your job is to ACCOMPLISH THINGS, not just give advice. If you can do it with your tools, do it.
+
+MISSION: "${missionTitle}"
 STATUS: ${missionStatus}
 MISSION ID: ${missionId}
 
 AGENTS IN THIS MISSION:
-${agentsSummary}
+${agentsSummary}${agentPrompts}
 
-CONNECTED SERVICES: ${connectorsList}
-${missingConnectors.length > 0 ? `MISSING (required but not connected): ${missingConnectors.join(', ')}` : ''}
+CONNECTED SERVICES: ${connectedProviders.length > 0 ? connectedProviders.join(', ') : 'none connected yet'}
+${missingConnectors.length > 0 ? `STILL NEEDED: ${missingConnectors.join(', ')} — suggest connecting these` : ''}
 
+${toolsBlock ? toolsBlock + '\n' : ''}
+${profileBlock ? profileBlock + '\n\n' : ''}${episodesBlock ? episodesBlock + '\n\n' : ''}
 RECENT RUNS:
 ${runsSummary}
 
 SCHEDULE: ${scheduleInfo}
-${memoryFacts}
+${tenantFacts}
 
-YOUR ROLE AND CAPABILITIES:
-- You help the customer IMPROVE THIS SPECIFIC MISSION — and you can ACTUALLY DO THINGS in real time, not just give advice.
-- You have tools you can call right now:
-  1. get_run_errors — reads the actual error messages from the most recent failed run. Use this whenever someone asks why the mission failed, what went wrong, or how to fix it. Do NOT just guess — call the tool and get real data.
-  2. execute_composio_action — executes a real action using the customer's connected accounts. You CAN create Google Sheets, check Drive files, send emails, post to Slack, etc. When the customer says "create the sheet", "check if it exists", "send that email" — DO IT, don't just explain how.
-
-- If the customer asks "can we add Stripe/Razorpay/any-service to this mission?" — answer YES or explain how to add it to this mission. Always bring it back to improving this mission.
-- NEVER say "I can't do that" for things connected services support. If a service is connected, you can act on it.
-- NEVER suggest the customer go elsewhere or use a different platform.
-- Be conversational, warm, and non-technical. Customers are business owners, not developers.
-- Keep responses concise — 2–4 short paragraphs max unless the customer explicitly asks for detail.
-- When you want to take a MISSION ACTION (create a schedule, suggest a connector, trigger a run, save settings), include a structured action block at the END of your message:
-  <action>{"type":"ACTION_TYPE","label":"Human readable description of what will happen",...extra fields}</action>
+OPERATING PRINCIPLES:
+- ACT, don't advise. If the customer says "book a session", book it. Don't say "you can book a session by…"
+- Use your tools. Every connected provider has actions you can call right now.
+- When you complete an action, confirm what you DID (past tense), not what you PLAN to do.
+- If a tool call fails, explain what happened and try an alternative approach.
+- Be conversational and warm — customers are business owners, not developers.
+- Keep responses concise: 2–4 short paragraphs max unless more detail is explicitly requested.
+- Never say "I can't do that" for things a connected service supports. If it's connected, you can act.
+- Never suggest the customer use a different platform or go elsewhere.
 
 TOOL USAGE RULES:
-- Customer says "why did it fail", "what went wrong", "what's the error" → call get_run_errors immediately, then explain based on real data
-- Customer says "create [X]", "make [X]", "set up [X]" where X is something a connected service can do → call execute_composio_action
-- Customer says "check if [X] exists", "does [X] exist" → call execute_composio_action to actually look it up
-- Customer says "send [X]", "post [X]", "update [X]" → call execute_composio_action to do it
-- For Google Sheets actions: use GOOGLESHEETS_* action slugs (e.g. GOOGLESHEETS_CREATE_SPREADSHEET, GOOGLESHEETS_BATCH_GET)
-- For Gmail: use GMAIL_* action slugs
-- provider for Google services = "google"
+- "Why did it fail?" / "What went wrong?" → call get_run_errors immediately, answer from real data
+- "Create X" / "Book X" / "Schedule X" → call the relevant tool, do it now
+- "Check if X exists" / "Look up X" → call the relevant tool to actually look it up
+- "Send X" / "Post X" / "Email X" → call the relevant tool to send it
+- Don't ask for confirmation before acting on unambiguous requests
+- After completing actions, summarise what was done
 
-SUPPORTED ACTION TYPES (include relevant extra fields):
-- run_now: {"type":"run_now","label":"Run this mission now"} — use for first runs or fresh restarts
-- resume_run: {"type":"resume_run","label":"Resume from where it failed"} — use when status is failed and customer wants to retry without starting from scratch
-- go_live: {"type":"go_live","label":"Go live — switch to real execution"} — use when mission is in preview mode and customer wants to activate it
-- schedule: {"type":"schedule","cron":"0 9 * * 1","timezone":"Asia/Kolkata","label":"Every Monday at 9:00 AM IST"} — convert natural language ("every morning at 9", "weekdays at 6pm") into a cron expression
-- suggest_connector: {"type":"suggest_connector","provider":"stripe","label":"Connect Stripe to enable payment tracking"}
-- webhook: {"type":"webhook","label":"Generate webhook URL for this mission"}
+STRUCTURED ACTIONS (include at end of message when relevant):
+<action>{"type":"run_now","label":"Run this mission now"}</action>
+<action>{"type":"resume_run","label":"Resume from where it failed"}</action>
+<action>{"type":"go_live","label":"Switch to live execution"}</action>
+<action>{"type":"schedule","cron":"0 9 * * 1","timezone":"Asia/Kolkata","label":"Every Monday 9am IST"}</action>
+<action>{"type":"suggest_connector","provider":"stripe","label":"Connect Stripe"}</action>
+<action>{"type":"webhook","label":"Generate webhook URL"}</action>
 
-WHEN TO USE EACH ACTION:
-- Customer says "run it", "start it", "go" → run_now
-- Customer says "fix it", "try again", "resume" and status is failed → resume_run
-- Customer says "go live", "activate", "make it real" → go_live
-- Customer says "schedule", "run every", "automate" → schedule with correct cron
-- Customer mentions a service name (Stripe, Gmail, etc.) that isn't connected → suggest_connector
-- Customer says "webhook", "trigger from outside", "connect Zapier" → webhook
+TODAY: ${now}`;
 
-TODAY: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'full', timeStyle: 'short' })}
-
-Remember: you are inside this specific mission. Everything you say is about making THIS mission better.`;
-
-  // ── 8. Proactive alert (only on first load) ─────────────────
+  // ── Proactive alert (first load only) ────────────────────────────────
   let proactiveAlert: string | null = null;
   if (isFirstLoad) {
     try {
@@ -206,14 +239,14 @@ Remember: you are inside this specific mission. Everything you say is about maki
         .single();
 
       if (lastRun?.status === 'failed') {
-        proactiveAlert = `Your last run failed${lastRun.agents_failed ? ` (${lastRun.agents_failed} agent(s) had errors)` : ''}. Want me to diagnose what went wrong and suggest a fix?`;
+        proactiveAlert = `Your last run failed${lastRun.agents_failed ? ` (${lastRun.agents_failed} agent(s) had errors)` : ''}. Want me to diagnose what went wrong?`;
       } else if (missingConnectors.length > 0) {
-        proactiveAlert = `This mission needs ${missingConnectors.join(', ')} to be connected before it can run. Want me to walk you through connecting ${missingConnectors[0]}?`;
+        proactiveAlert = `This mission needs ${missingConnectors.join(', ')} to be connected before it can run. Want help connecting ${missingConnectors[0]}?`;
       } else if (missionStatus === 'draft') {
-        proactiveAlert = `"${missionTitle}" is still in draft. Want to do a test run or schedule it to go live?`;
+        proactiveAlert = `"${missionTitle}" is in draft. Want to test it or set a schedule?`;
       }
     } catch { /* non-fatal */ }
   }
 
-  return { systemPrompt, proactiveAlert };
+  return { systemPrompt, proactiveAlert, connectedProviders };
 }

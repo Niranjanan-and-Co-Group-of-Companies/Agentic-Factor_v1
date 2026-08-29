@@ -6,153 +6,14 @@ import { calculateChatCreditCost, checkCredits, deductCredits } from '@/lib/midd
 import { retrieveRelevantChunks, listUploadedDocuments } from '@/lib/services/rag-retrieval';
 import { detectApiKey, redactKey, providerLabel } from '@/lib/services/apikey-detector';
 import { verifyApiKey } from '@/lib/services/apikey-verifier';
+import { loadMissionTools, refreshMissionTools, executeTool, describeToolCall, type AnthropicTool, type ToolMeta } from '@/lib/services/tool-registry';
+import { writeEpisode } from '@/lib/services/agent-memory';
 
-export const maxDuration = 120;
+export const maxDuration = 300; // 5 minutes — agentic loops with many tool calls need time
 
-// ── Tool definitions exposed to Claude ────────────────────────────────────
-const CHAT_TOOLS = [
-  {
-    name: 'get_run_errors',
-    description:
-      'Read the actual error messages and full details from the most recent failed run of this mission. Returns specific error text, which agents failed, and what was completed before the failure. Call this whenever the user asks why the mission failed, what went wrong, or how to fix it.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {},
-      required: [] as string[],
-    },
-  },
-  {
-    name: 'execute_composio_action',
-    description:
-      'Execute a real action on a connected service on behalf of the user — check if a Google Sheet exists, create a spreadsheet, read emails, post to Slack, search Drive, etc. Use the exact Composio action slug (e.g. GOOGLESHEETS_CREATE_SPREADSHEET, GOOGLESHEETS_BATCH_GET, GMAIL_SEND_EMAIL). Only call this for providers the user has actually connected.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        action_slug: {
-          type: 'string' as const,
-          description:
-            'Exact Composio action slug in ALL_CAPS_UNDERSCORES format (e.g. GOOGLESHEETS_CREATE_SPREADSHEET)',
-        },
-        arguments: {
-          type: 'object' as const,
-          description: 'Arguments required by the action as key-value pairs',
-        },
-        provider: {
-          type: 'string' as const,
-          description:
-            'Provider key (e.g. "google", "github", "slack") — must match a connected provider',
-        },
-      },
-      required: ['action_slug', 'arguments', 'provider'] as string[],
-    },
-  },
-];
-
-const TOOL_LABELS: Record<string, string> = {
-  get_run_errors: 'Reading error logs…',
-  execute_composio_action: 'Executing action…',
-};
-
-// ── Tool execution ─────────────────────────────────────────────────────────
-
-async function executeTool(
-  name: string,
-  input: Record<string, unknown>,
-  missionId: string,
-  tenantId: string,
-  supabase: ReturnType<typeof createServiceClient>
-): Promise<{ content: string; summary: string }> {
-
-  // ── get_run_errors ──────────────────────────────────────────────────────
-  if (name === 'get_run_errors') {
-    const { data: latestRun } = await supabase
-      .from('mission_runs')
-      .select('id, run_number, status, started_at, agents_failed, agents_done, agents_total, summary')
-      .eq('mission_id', missionId)
-      .eq('tenant_id', tenantId)
-      .order('started_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!latestRun) {
-      return { content: 'No runs found for this mission yet.', summary: 'No runs found' };
-    }
-
-    const runMeta = `Run #${latestRun.run_number} — status: ${latestRun.status}, started: ${latestRun.started_at}\nAgents: ${latestRun.agents_done ?? 0} completed, ${latestRun.agents_failed ?? 0} failed out of ${latestRun.agents_total ?? 0} total`;
-
-    // Get error events for this specific run
-    const { data: errorEvents } = await supabase
-      .from('events')
-      .select('event_type, payload, created_at')
-      .eq('run_id', latestRun.id)
-      .eq('tenant_id', tenantId)
-      .in('event_type', ['mission.failed', 'agent.failed', 'agent.error', 'circuit_breaker.triggered'])
-      .order('created_at', { ascending: true });
-
-    const errors = (errorEvents ?? [])
-      .map(e => {
-        const msg = e.payload?.error ?? e.payload?.message ?? e.payload?.reason ?? JSON.stringify(e.payload ?? {});
-        return `[${e.event_type}] ${msg}`;
-      })
-      .join('\n');
-
-    // Get run summary if it exists (generated at completion)
-    const summary = latestRun.summary ? `\nRun summary: ${latestRun.summary}` : '';
-
-    const content = [
-      runMeta,
-      errors ? `\nErrors detected:\n${errors}` : '\n(No specific error events found — the run may have timed out or been interrupted externally)',
-      summary,
-    ].join('');
-
-    return {
-      content,
-      summary: `${errorEvents?.length ?? 0} error(s) found in Run #${latestRun.run_number}`,
-    };
-  }
-
-  // ── execute_composio_action ─────────────────────────────────────────────
-  if (name === 'execute_composio_action') {
-    const actionSlug = input.action_slug as string;
-    const args = (input.arguments ?? {}) as Record<string, unknown>;
-
-    if (!actionSlug) {
-      return { content: 'Missing action_slug parameter.', summary: 'Invalid parameters' };
-    }
-
-    const apiKey = process.env.COMPOSIO_API_KEY;
-    if (!apiKey) {
-      return { content: 'Service integration not configured on this platform.', summary: 'Not configured' };
-    }
-
-    try {
-      const { default: Composio } = await import('@composio/client');
-      const client = new Composio({ apiKey });
-
-      const result = await (client.tools as any).execute(actionSlug, {
-        user_id: tenantId,
-        arguments: args,
-      });
-
-      const resultStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-      const truncated =
-        resultStr.length > 4000 ? resultStr.slice(0, 4000) + '\n…(truncated)' : resultStr;
-
-      return {
-        content: `Action "${actionSlug}" completed.\n\nResult:\n${truncated}`,
-        summary: `${actionSlug} succeeded`,
-      };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: `Action "${actionSlug}" failed: ${msg}`,
-        summary: `${actionSlug} failed`,
-      };
-    }
-  }
-
-  return { content: `Unknown tool: ${name}`, summary: 'Unknown tool' };
-}
+const MAX_TOOL_ROUNDS = 15;
+const MAX_TOKENS_PER_LOOP = 40_000; // safety: stop looping if token budget exhausted
+const TOOL_TIMEOUT_MS = 30_000;     // per-tool-call timeout
 
 // ── Streaming parser ───────────────────────────────────────────────────────
 
@@ -189,7 +50,6 @@ async function parseAnthropicStream(
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
 
@@ -197,18 +57,12 @@ async function parseAnthropicStream(
       if (!line.startsWith('data: ')) continue;
       const raw = line.slice(6).trim();
       if (raw === '[DONE]') continue;
-
       try {
         const evt = JSON.parse(raw) as {
           type: string;
           index?: number;
           content_block?: { type: string; id?: string; name?: string };
-          delta?: {
-            type: string;
-            text?: string;
-            partial_json?: string;
-            stop_reason?: string;
-          };
+          delta?: { type: string; text?: string; partial_json?: string; stop_reason?: string };
           usage?: { output_tokens?: number };
           message?: { usage?: { input_tokens?: number; output_tokens?: number } };
         };
@@ -216,44 +70,30 @@ async function parseAnthropicStream(
         if (evt.type === 'message_start' && evt.message?.usage) {
           inputTokens = evt.message.usage.input_tokens ?? 0;
         }
-
         if (evt.type === 'content_block_start' && evt.content_block) {
           const idx = evt.index ?? contentBlocks.length;
           const cb = evt.content_block;
-          if (cb.type === 'text') {
-            contentBlocks[idx] = { type: 'text', text: '' };
-          } else if (cb.type === 'tool_use') {
-            contentBlocks[idx] = { type: 'tool_use', id: cb.id, name: cb.name, inputJson: '' };
-          }
+          if (cb.type === 'text') contentBlocks[idx] = { type: 'text', text: '' };
+          else if (cb.type === 'tool_use') contentBlocks[idx] = { type: 'tool_use', id: cb.id, name: cb.name, inputJson: '' };
         }
-
         if (evt.type === 'content_block_delta' && evt.delta) {
           const idx = evt.index ?? contentBlocks.length - 1;
           const block = contentBlocks[idx];
           if (!block) continue;
-
           if (evt.delta.type === 'text_delta' && evt.delta.text && block.type === 'text') {
             block.text = (block.text ?? '') + evt.delta.text;
             fullText += evt.delta.text;
             onTextDelta(evt.delta.text);
           }
-
-          if (
-            evt.delta.type === 'input_json_delta' &&
-            evt.delta.partial_json &&
-            block.type === 'tool_use'
-          ) {
+          if (evt.delta.type === 'input_json_delta' && evt.delta.partial_json && block.type === 'tool_use') {
             block.inputJson = (block.inputJson ?? '') + evt.delta.partial_json;
           }
         }
-
         if (evt.type === 'message_delta') {
           stopReason = (evt.delta as Record<string, unknown>)?.stop_reason as string ?? stopReason;
           outputTokens = evt.usage?.output_tokens ?? outputTokens;
         }
-      } catch {
-        /* skip malformed SSE lines */
-      }
+      } catch { /* skip malformed SSE lines */ }
     }
   }
 
@@ -262,22 +102,31 @@ async function parseAnthropicStream(
 
 // ── Agentic chat loop ──────────────────────────────────────────────────────
 
-async function runChatLoop(
-  systemPrompt: string,
-  initialMessages: Array<{ role: string; content: unknown }>,
-  apiKey: string,
-  missionId: string,
-  tenantId: string,
-  supabase: ReturnType<typeof createServiceClient>,
-  send: (obj: Record<string, unknown>) => void
-): Promise<{ fullText: string; inputTokens: number; outputTokens: number }> {
+async function runChatLoop(params: {
+  systemPrompt: string;
+  initialMessages: Array<{ role: string; content: unknown }>;
+  apiKey: string;
+  missionId: string;
+  tenantId: string;
+  supabase: ReturnType<typeof createServiceClient>;
+  tools: AnthropicTool[];
+  toolMeta: Map<string, ToolMeta>;
+  send: (obj: Record<string, unknown>) => void;
+}): Promise<{ fullText: string; inputTokens: number; outputTokens: number; toolsUsed: string[] }> {
+  const { systemPrompt, initialMessages, apiKey, missionId, tenantId, supabase, tools, toolMeta, send } = params;
   const messages = [...initialMessages];
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let fullText = '';
-  const MAX_TOOL_ROUNDS = 5;
+  const toolsUsed: string[] = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    // Token budget guard — prevent runaway loops
+    if (totalInputTokens + totalOutputTokens > MAX_TOKENS_PER_LOOP) {
+      send({ type: 'delta', text: '\n\n*(Reached maximum context — wrapping up.)*' });
+      break;
+    }
+
     const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -290,7 +139,7 @@ async function runChatLoop(
         max_tokens: 4096,
         stream: true,
         system: systemPrompt,
-        tools: CHAT_TOOLS,
+        tools,
         messages,
       }),
     });
@@ -303,22 +152,20 @@ async function runChatLoop(
     }
 
     const { textContent, contentBlocks, stopReason, inputTokens, outputTokens } =
-      await parseAnthropicStream(anthropicRes, (text) => send({ type: 'delta', text }));
+      await parseAnthropicStream(anthropicRes, text => send({ type: 'delta', text }));
 
     totalInputTokens += inputTokens;
     totalOutputTokens += outputTokens;
     if (textContent) fullText += textContent;
 
-    // Build assistant content blocks for history
+    // Build assistant message for conversation history
     const assistantContent: unknown[] = [];
     for (const block of contentBlocks) {
       if (block.type === 'text' && block.text) {
         assistantContent.push({ type: 'text', text: block.text });
       } else if (block.type === 'tool_use' && block.id) {
         let parsedInput: Record<string, unknown> = {};
-        try {
-          parsedInput = JSON.parse(block.inputJson ?? '{}');
-        } catch { /* leave empty */ }
+        try { parsedInput = JSON.parse(block.inputJson ?? '{}'); } catch { /* leave empty */ }
         assistantContent.push({ type: 'tool_use', id: block.id, name: block.name, input: parsedInput });
       }
     }
@@ -326,34 +173,68 @@ async function runChatLoop(
     const toolBlocks = contentBlocks.filter(b => b.type === 'tool_use' && b.id && b.name);
     if (stopReason !== 'tool_use' || toolBlocks.length === 0) break;
 
-    // Execute each tool and collect results
+    // Execute all tool calls in this round
     const toolResults: unknown[] = [];
     for (const block of toolBlocks) {
-      const label = TOOL_LABELS[block.name!] ?? `Running ${block.name}…`;
-      send({ type: 'tool_status', name: block.name, status: 'running', label });
+      const meta = toolMeta.get(block.name!);
+      const providerSlug = meta?.providerSlug ?? 'system';
+      const logoUrl = meta?.logoUrl ?? null;
+      const displayName = meta?.displayName ?? block.name!;
 
       let parsedInput: Record<string, unknown> = {};
-      try {
-        parsedInput = JSON.parse(block.inputJson ?? '{}');
-      } catch { /* leave empty */ }
+      try { parsedInput = JSON.parse(block.inputJson ?? '{}'); } catch { /* leave empty */ }
 
-      const result = await executeTool(block.name!, parsedInput, missionId, tenantId, supabase);
-      send({ type: 'tool_status', name: block.name, status: 'done', summary: result.summary });
+      const label = describeToolCall(block.name!, parsedInput);
+
+      // Emit running event with full metadata
+      send({
+        type: 'tool_status',
+        name: block.name,
+        provider: providerSlug,
+        displayName,
+        status: 'running',
+        label,
+        logoUrl,
+      });
+
+      toolsUsed.push(block.name!);
+
+      let result: { content: string; summary: string };
+      try {
+        // Per-tool timeout via Promise.race
+        result = await Promise.race([
+          executeTool(block.name!, parsedInput, tenantId, missionId, supabase),
+          new Promise<{ content: string; summary: string }>((_, reject) =>
+            setTimeout(() => reject(new Error('Tool timed out')), TOOL_TIMEOUT_MS)
+          ),
+        ]);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        result = { content: `Tool "${block.name}" timed out: ${msg}`, summary: `${block.name} timed out` };
+      }
+
+      send({
+        type: 'tool_status',
+        name: block.name,
+        provider: providerSlug,
+        displayName,
+        status: result.summary.includes('failed') || result.summary.includes('timed out') ? 'error' : 'done',
+        summary: result.summary,
+        logoUrl,
+      });
 
       toolResults.push({ type: 'tool_result', tool_use_id: block.id!, content: result.content });
     }
 
-    // Append assistant + tool results for the next round
     messages.push({ role: 'assistant', content: assistantContent });
     messages.push({ role: 'user', content: toolResults });
   }
 
-  return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
+  return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, toolsUsed };
 }
 
 // ── Route handler ──────────────────────────────────────────────────────────
 
-// POST /api/missions/[id]/chat
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -371,7 +252,7 @@ export async function POST(
 
   const encoder = new TextEncoder();
 
-  // First-load probe: emit proactive alert if any, no LLM call, no credits
+  // First-load probe — emit proactive alert only, no LLM call
   if (isFirstLoad && (!messages || messages.length === 0)) {
     const { proactiveAlert } = await buildChatContext(missionId, tenantId, true);
     const stream = new ReadableStream({
@@ -384,11 +265,7 @@ export async function POST(
       },
     });
     return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
     });
   }
 
@@ -399,20 +276,20 @@ export async function POST(
   const creditCheck = await checkCredits(tenantId, 2);
   if (!creditCheck.allowed) {
     return new Response(JSON.stringify({ error: creditCheck.reason ?? 'Insufficient credits' }), {
-      status: 402,
-      headers: { 'Content-Type': 'application/json' },
+      status: 402, headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  let { systemPrompt } = await buildChatContext(missionId, tenantId, isFirstLoad ?? false);
+  let { systemPrompt, connectedProviders } = await buildChatContext(missionId, tenantId, isFirstLoad ?? false);
 
-  // ── API key paste detection ───────────────────────────────────────────────
+  // ── API key paste detection ──────────────────────────────────────────
   const lastUserMsg = messages[messages.length - 1];
   if (lastUserMsg?.role === 'user') {
     const detectedKey = detectApiKey(lastUserMsg.content);
     if (detectedKey) {
       const verifyResult = await verifyApiKey(detectedKey.provider, { apiKey: detectedKey.key });
       const label = providerLabel(detectedKey.provider);
+      const enc2 = new TextEncoder();
       if (verifyResult.verified) {
         const supabaseKv = createServiceClient();
         await supabaseKv.from('tenant_permissions').upsert(
@@ -421,24 +298,21 @@ export async function POST(
         );
         const info = verifyResult.accountInfo ? ` ${verifyResult.accountInfo}.` : '';
         const reply = `Your ${label} key is now connected and ready to use.${info}`;
-        const encoder2 = new TextEncoder();
         const stream = new ReadableStream({
           start(c) {
-            c.enqueue(encoder2.encode(`data: ${JSON.stringify({ type: 'delta', text: reply })}\n\n`));
-            c.enqueue(encoder2.encode(`data: ${JSON.stringify({ type: 'done', cleanText: reply, action: { type: 'key_connected', provider: detectedKey.provider, accountInfo: verifyResult.accountInfo } })}\n\n`));
+            c.enqueue(enc2.encode(`data: ${JSON.stringify({ type: 'delta', text: reply })}\n\n`));
+            c.enqueue(enc2.encode(`data: ${JSON.stringify({ type: 'done', cleanText: reply, action: { type: 'key_connected', provider: detectedKey.provider, accountInfo: verifyResult.accountInfo } })}\n\n`));
             c.close();
           },
         });
-        // Redact key in stored message
         lastUserMsg.content = redactKey(lastUserMsg.content, detectedKey);
         return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' } });
       } else {
         const reply = `That doesn't look like a valid ${label} key — ${verifyResult.error ?? 'please check and try again'}.`;
-        const encoder2 = new TextEncoder();
         const stream = new ReadableStream({
           start(c) {
-            c.enqueue(encoder2.encode(`data: ${JSON.stringify({ type: 'delta', text: reply })}\n\n`));
-            c.enqueue(encoder2.encode(`data: ${JSON.stringify({ type: 'done', cleanText: reply, action: null })}\n\n`));
+            c.enqueue(enc2.encode(`data: ${JSON.stringify({ type: 'delta', text: reply })}\n\n`));
+            c.enqueue(enc2.encode(`data: ${JSON.stringify({ type: 'done', cleanText: reply, action: null })}\n\n`));
             c.close();
           },
         });
@@ -447,7 +321,7 @@ export async function POST(
     }
   }
 
-  // ── RAG: inject relevant uploaded document context ────────────────────────
+  // ── RAG: inject relevant uploaded document context ───────────────────
   const userQuery = lastUserMsg?.content ?? '';
   const [ragContext, docList] = await Promise.all([
     retrieveRelevantChunks(tenantId, missionId, userQuery),
@@ -455,7 +329,16 @@ export async function POST(
   ]);
   if (docList) systemPrompt += `\n\n${docList}`;
   if (ragContext) systemPrompt += `\n\n${ragContext}`;
-  // ── End RAG ───────────────────────────────────────────────────────────────
+
+  // ── Dynamic tool loading ─────────────────────────────────────────────
+  const { tools, toolMeta, needsRefresh } = await loadMissionTools(tenantId, missionId, connectedProviders);
+
+  // If schemas are stale/missing, refresh in background for next call
+  if (needsRefresh && connectedProviders.length > 0) {
+    refreshMissionTools(tenantId, missionId, connectedProviders).catch(err =>
+      console.error('[chat] Tool refresh error:', err)
+    );
+  }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -471,17 +354,19 @@ export async function POST(
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
 
       try {
-        const { fullText, inputTokens, outputTokens } = await runChatLoop(
+        const { fullText, inputTokens, outputTokens, toolsUsed } = await runChatLoop({
           systemPrompt,
-          recentMessages,
+          initialMessages: recentMessages,
           apiKey,
           missionId,
           tenantId,
           supabase,
-          send
-        );
+          tools,
+          toolMeta,
+          send,
+        });
 
-        // Extract <action> block from the complete text
+        // Extract <action> block
         const actionMatch = fullText.match(/<action>([\s\S]*?)<\/action>/);
         let actionPayload: Record<string, unknown> | null = null;
         let cleanText = fullText;
@@ -489,44 +374,38 @@ export async function POST(
           try {
             actionPayload = JSON.parse(actionMatch[1]);
             cleanText = fullText.replace(/<action>[\s\S]*?<\/action>/, '').trim();
-          } catch { /* malformed action — ignore */ }
+          } catch { /* malformed — ignore */ }
         }
 
-        // Deduct credits (fire-and-forget)
+        // Deduct credits
         const credits = await calculateChatCreditCost(inputTokens, outputTokens, 'claude-sonnet-4-6');
         deductCredits(tenantId, credits, 'chat_message', {
-          provider: 'anthropic',
-          model: 'claude-sonnet-4-6',
-          inputTokens,
-          outputTokens,
+          provider: 'anthropic', model: 'claude-sonnet-4-6', inputTokens, outputTokens,
         }).catch(console.error);
 
-        // Persist chat messages (fire-and-forget)
-        const chatId =
-          sessionId ?? (await ensureSession(supabase, missionId, tenantId, recentMessages));
+        // Persist messages + write episode memory (all fire-and-forget)
+        const chatId = sessionId ?? (await ensureSession(supabase, missionId, tenantId, recentMessages));
         const userMsg = recentMessages[recentMessages.length - 1];
+
         ;(async () => {
           const { error: ue } = await supabase.from('mission_chat_messages').insert({
-            chat_id: chatId,
-            tenant_id: tenantId,
-            role: userMsg.role,
-            content: userMsg.content,
+            chat_id: chatId, tenant_id: tenantId, role: userMsg.role, content: userMsg.content,
           });
           if (ue) { console.error('[chat/persist user]', ue); return; }
+
           await supabase.from('mission_chat_messages').insert({
-            chat_id: chatId,
-            tenant_id: tenantId,
-            role: 'assistant',
-            content: cleanText,
+            chat_id: chatId, tenant_id: tenantId,
+            role: 'assistant', content: cleanText,
             action_payload: actionPayload,
-            input_tokens: inputTokens,
-            output_tokens: outputTokens,
-            credits_deducted: credits,
+            input_tokens: inputTokens, output_tokens: outputTokens, credits_deducted: credits,
           });
-          await supabase
-            .from('mission_chats')
-            .update({ updated_at: new Date().toISOString() })
-            .eq('id', chatId);
+
+          await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
+
+          // Write episode memory in background (extract + store after session)
+          const allMsgs = recentMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: String(m.content) }));
+          allMsgs.push({ role: 'assistant', content: cleanText });
+          writeEpisode(tenantId, missionId, allMsgs, toolsUsed).catch(console.error);
         })().catch(console.error);
 
         send({ type: 'done', credits, inputTokens, outputTokens, sessionId: chatId, cleanText, action: actionPayload });
@@ -553,12 +432,13 @@ async function ensureSession(
   supabase: ReturnType<typeof createServiceClient>,
   missionId: string,
   tenantId: string,
-  messages: Array<{ role: string; content: string }>
+  messages: Array<{ role: string; content: unknown }>
 ): Promise<string> {
   const firstUser = messages.find(m => m.role === 'user')?.content ?? '';
-  const words = firstUser.trim().split(/\s+/).slice(0, 8).join(' ');
-  const title =
-    words.length > 0 ? (words.length < firstUser.trim().length ? words + '…' : words) : 'New Chat';
+  const words = String(firstUser).trim().split(/\s+/).slice(0, 8).join(' ');
+  const title = words.length > 0
+    ? (words.length < String(firstUser).trim().length ? words + '…' : words)
+    : 'New Chat';
 
   const { data, error } = await supabase
     .from('mission_chats')

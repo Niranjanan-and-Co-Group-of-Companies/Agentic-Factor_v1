@@ -63,9 +63,47 @@ export async function GET(request: NextRequest) {
 
     console.log(`[Composio Callback] Connected ${provider} for tenant ${tenantId}`);
 
+    // Refresh tool schemas for all missions that require this provider (fire-and-forget)
+    refreshToolsForMissions(supabase, tenantId, provider).catch(err =>
+      console.error('[Composio Callback] Tool refresh error:', err)
+    );
+
     return new NextResponse(successHtml(provider), { headers: { 'Content-Type': 'text/html' } });
   } catch (err) {
     console.error('[Composio Callback] Error:', err);
     return new NextResponse(errorHtml('Connection failed'), { headers: { 'Content-Type': 'text/html' } });
   }
+}
+
+async function refreshToolsForMissions(
+  supabase: ReturnType<typeof import('@/lib/supabase/server').createServiceClient>,
+  tenantId: string,
+  newProvider: string
+): Promise<void> {
+  // Get all tenant's missions
+  const { data: missions } = await supabase
+    .from('missions')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .limit(20);
+
+  if (!missions || missions.length === 0) return;
+
+  // Get all connected providers for this tenant
+  const { data: perms } = await supabase
+    .from('tenant_permissions')
+    .select('provider')
+    .eq('tenant_id', tenantId);
+
+  const connectedProviders = (perms ?? []).map(p => p.provider);
+  if (connectedProviders.length === 0) return;
+
+  const { refreshMissionTools } = await import('@/lib/services/tool-registry');
+
+  // Refresh tools for each mission in the background
+  await Promise.allSettled(
+    missions.map(m => refreshMissionTools(tenantId, m.id as string, connectedProviders))
+  );
+
+  console.log(`[Composio Callback] Refreshed tools for ${missions.length} missions after connecting ${newProvider}`);
 }
