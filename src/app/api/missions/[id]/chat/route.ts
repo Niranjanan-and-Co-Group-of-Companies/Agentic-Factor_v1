@@ -3,6 +3,9 @@ import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 import { buildChatContext } from '@/lib/services/chat-context';
 import { calculateChatCreditCost, checkCredits, deductCredits } from '@/lib/middleware/billing';
+import { retrieveRelevantChunks, listUploadedDocuments } from '@/lib/services/rag-retrieval';
+import { detectApiKey, redactKey, providerLabel } from '@/lib/services/apikey-detector';
+import { verifyApiKey } from '@/lib/services/apikey-verifier';
 
 export const maxDuration = 120;
 
@@ -401,7 +404,58 @@ export async function POST(
     });
   }
 
-  const { systemPrompt } = await buildChatContext(missionId, tenantId, isFirstLoad ?? false);
+  let { systemPrompt } = await buildChatContext(missionId, tenantId, isFirstLoad ?? false);
+
+  // ── API key paste detection ───────────────────────────────────────────────
+  const lastUserMsg = messages[messages.length - 1];
+  if (lastUserMsg?.role === 'user') {
+    const detectedKey = detectApiKey(lastUserMsg.content);
+    if (detectedKey) {
+      const verifyResult = await verifyApiKey(detectedKey.provider, { apiKey: detectedKey.key });
+      const label = providerLabel(detectedKey.provider);
+      if (verifyResult.verified) {
+        const supabaseKv = createServiceClient();
+        await supabaseKv.from('tenant_permissions').upsert(
+          { tenant_id: tenantId, provider: detectedKey.provider, access_token: detectedKey.key, refresh_token: null, expires_at: null, scopes: ['apikey'], updated_at: new Date().toISOString() },
+          { onConflict: 'tenant_id,provider' }
+        );
+        const info = verifyResult.accountInfo ? ` ${verifyResult.accountInfo}.` : '';
+        const reply = `Your ${label} key is now connected and ready to use.${info}`;
+        const encoder2 = new TextEncoder();
+        const stream = new ReadableStream({
+          start(c) {
+            c.enqueue(encoder2.encode(`data: ${JSON.stringify({ type: 'delta', text: reply })}\n\n`));
+            c.enqueue(encoder2.encode(`data: ${JSON.stringify({ type: 'done', cleanText: reply, action: { type: 'key_connected', provider: detectedKey.provider, accountInfo: verifyResult.accountInfo } })}\n\n`));
+            c.close();
+          },
+        });
+        // Redact key in stored message
+        lastUserMsg.content = redactKey(lastUserMsg.content, detectedKey);
+        return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' } });
+      } else {
+        const reply = `That doesn't look like a valid ${label} key — ${verifyResult.error ?? 'please check and try again'}.`;
+        const encoder2 = new TextEncoder();
+        const stream = new ReadableStream({
+          start(c) {
+            c.enqueue(encoder2.encode(`data: ${JSON.stringify({ type: 'delta', text: reply })}\n\n`));
+            c.enqueue(encoder2.encode(`data: ${JSON.stringify({ type: 'done', cleanText: reply, action: null })}\n\n`));
+            c.close();
+          },
+        });
+        return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' } });
+      }
+    }
+  }
+
+  // ── RAG: inject relevant uploaded document context ────────────────────────
+  const userQuery = lastUserMsg?.content ?? '';
+  const [ragContext, docList] = await Promise.all([
+    retrieveRelevantChunks(tenantId, missionId, userQuery),
+    listUploadedDocuments(tenantId, missionId),
+  ]);
+  if (docList) systemPrompt += `\n\n${docList}`;
+  if (ragContext) systemPrompt += `\n\n${ragContext}`;
+  // ── End RAG ───────────────────────────────────────────────────────────────
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {

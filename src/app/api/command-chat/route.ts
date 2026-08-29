@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { calculateChatCreditCost, checkCredits, deductCredits } from '@/lib/middleware/billing';
 import { detectApiKey, redactKey, providerLabel } from '@/lib/services/apikey-detector';
 import { verifyApiKey } from '@/lib/services/apikey-verifier';
+import { retrieveRelevantChunks, listUploadedDocuments } from '@/lib/services/rag-retrieval';
 
 export const maxDuration = 120;
 
@@ -369,8 +370,18 @@ export async function POST(request: NextRequest) {
     return new Response(JSON.stringify({ error: 'LLM not configured' }), { status: 500 });
   }
 
-  const { systemPrompt, connectedProviders: tenantProviders } = await buildCommandContext(tenantId);
+  let { systemPrompt, connectedProviders: tenantProviders } = await buildCommandContext(tenantId);
   const recentMessages = messages.slice(-20);
+
+  // ── RAG: inject relevant uploaded document context ────────────────────────
+  const ccUserQuery = messages[messages.length - 1]?.content ?? '';
+  const [ragCtx, docListCtx] = await Promise.all([
+    retrieveRelevantChunks(tenantId, null, ccUserQuery),
+    listUploadedDocuments(tenantId, null),
+  ]);
+  if (docListCtx) systemPrompt += `\n\n${docListCtx}`;
+  if (ragCtx) systemPrompt += `\n\n${ragCtx}`;
+  // ── End RAG ───────────────────────────────────────────────────────────────
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({

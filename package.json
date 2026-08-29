@@ -19,6 +19,7 @@
     "imap-simple": "^5.1.0",
     "inngest": "^4.4.0",
     "jose": "^6.2.3",
+    "jszip": "^3.10.1",
     "mailparser": "^3.9.8",
     "mammoth": "^1.12.0",
     "next": "16.2.4",
@@ -32,6 +33,7 @@
     "remark-gfm": "^4.0.1",
     "simple-icons": "^16.23.0",
     "uuid": "^14.0.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {

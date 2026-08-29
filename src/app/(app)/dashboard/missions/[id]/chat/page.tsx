@@ -202,9 +202,12 @@ export default function MissionChatPage() {
   const [inlineApiKeySaving, setInlineApiKeySaving] = useState(false);
   const [inlineApiKeyError, setInlineApiKeyError] = useState<string | null>(null);
 
+  const [pendingFile, setPendingFile] = useState<{ name: string; assetId?: string; uploading: boolean; error?: string } | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const runPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
@@ -475,7 +478,11 @@ export default function MissionChatPage() {
     setProactiveAlert(null);
     setVoiceError(null);
 
-    const userMsg: ChatMessage = { role: 'user', content: trimmed, ts: Date.now() };
+    const attachment = pendingFile && !pendingFile.uploading && !pendingFile.error ? pendingFile : null;
+    const finalText = attachment ? `[Attached: ${attachment.name}]\n\n${trimmed}` : trimmed;
+    if (attachment) setPendingFile(null);
+
+    const userMsg: ChatMessage = { role: 'user', content: finalText, ts: Date.now() };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setIsStreaming(true);
@@ -717,6 +724,28 @@ export default function MissionChatPage() {
       showToast('❌ Something went wrong. Please try again.');
     }
     setApplyingAction(null);
+  };
+
+  // ── File upload ───────────────────────────────────────────────
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setPendingFile({ name: file.name, uploading: true });
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('missionId', missionId);
+      const res = await fetch('/api/upload-file', { method: 'POST', credentials: 'include', body: fd });
+      const data = await res.json() as { success?: boolean; assetId?: string; error?: string };
+      if (!res.ok || !data.success) {
+        setPendingFile({ name: file.name, uploading: false, error: data.error ?? 'Upload failed' });
+      } else {
+        setPendingFile({ name: file.name, assetId: data.assetId, uploading: false });
+      }
+    } catch {
+      setPendingFile({ name: file.name, uploading: false, error: 'Upload failed' });
+    }
   };
 
   // ── Voice recording ───────────────────────────────────────────
@@ -1173,12 +1202,46 @@ export default function MissionChatPage() {
                 <div style={{ fontSize: '0.75rem', color: 'var(--rose)', marginBottom: 8, paddingLeft: 4 }}>{voiceError}</div>
               )}
 
+              {/* File attachment chip */}
+              {pendingFile && (
+                <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 20, padding: '4px 10px 4px 8px', fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: '100%' }}>
+                    <span>{pendingFile.uploading ? '⏳' : pendingFile.error ? '⚠️' : '📎'}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}>{pendingFile.name}</span>
+                    {pendingFile.uploading && <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>uploading…</span>}
+                    {pendingFile.error && <span style={{ color: 'var(--rose)', fontSize: '0.75rem' }}>{pendingFile.error}</span>}
+                    {!pendingFile.uploading && (
+                      <button onClick={() => setPendingFile(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: 1, padding: '0 2px' }}>✕</button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Hidden file input */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="*/*"
+                style={{ display: 'none' }}
+                onChange={handleFileSelect}
+              />
+
               {/* Input row */}
               <div style={{
                 display: 'flex', alignItems: 'flex-end', gap: 10,
                 background: 'var(--bg-input)', border: '1px solid var(--border)',
                 borderRadius: 'var(--radius-lg)', padding: '10px 12px',
               }}>
+                {/* Paperclip */}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isStreaming || (!!pendingFile && pendingFile.uploading)}
+                  title="Attach a file"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0, fontSize: '1.1rem', lineHeight: 1, paddingBottom: 2, color: 'var(--text-muted)', opacity: isStreaming ? 0.4 : 1 }}
+                >
+                  📎
+                </button>
+
                 <button onClick={toggleVoice} title={isRecording ? 'Stop recording' : 'Voice input'}
                   style={{
                     background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0,
@@ -1220,7 +1283,7 @@ export default function MissionChatPage() {
               </div>
 
               <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: 8 }}>
-                Enter to send · Shift+Enter for new line · 🎤 for voice input
+                Enter to send · Shift+Enter for new line · 📎 attach file · 🎤 voice
               </div>
             </div>
           </div>

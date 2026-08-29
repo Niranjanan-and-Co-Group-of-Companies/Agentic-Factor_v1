@@ -173,6 +173,10 @@ function CommandCenterPageInner() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  // File upload
+  const [pendingFile, setPendingFile] = useState<{ name: string; assetId?: string; uploading: boolean; error?: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [blueprintSteps, setBlueprintSteps] = useState<Record<string, string>>({});
 
   // Inline connector state (for connecting directly from blueprint card in chat)
@@ -445,8 +449,12 @@ function CommandCenterPageInner() {
     const trimmed = text.trim();
     if (!trimmed || isStreaming) return;
     setInput('');
+    // Prepend attachment notice so the AI knows a file was shared
+    const attachment = pendingFile && !pendingFile.uploading && !pendingFile.error ? pendingFile : null;
+    const finalText = attachment ? `[Attached: ${attachment.name}]\n\n${trimmed}` : trimmed;
+    if (attachment) setPendingFile(null);
 
-    const userMsg: ChatMessage = { role: 'user', content: trimmed, ts: Date.now() };
+    const userMsg: ChatMessage = { role: 'user', content: finalText, ts: Date.now() };
     const newMessages = [...messages, userMsg];
     setMessages([...newMessages, { role: 'assistant', content: '', isStreaming: true }]);
     setIsStreaming(true);
@@ -564,6 +572,28 @@ function CommandCenterPageInner() {
   };
 
   // ── Voice input ────────────────────────────────────────────────────────────
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!fileInputRef.current) fileInputRef.current = e.target;
+    e.target.value = '';
+    if (!file) return;
+    setPendingFile({ name: file.name, uploading: true });
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      // No missionId for Command Center — platform-level asset
+      const res = await fetch('/api/upload-file', { method: 'POST', credentials: 'include', body: fd });
+      const data = await res.json() as { success?: boolean; assetId?: string; error?: string };
+      if (!res.ok || !data.success) {
+        setPendingFile({ name: file.name, uploading: false, error: data.error ?? 'Upload failed' });
+      } else {
+        setPendingFile({ name: file.name, assetId: data.assetId, uploading: false });
+      }
+    } catch {
+      setPendingFile({ name: file.name, uploading: false, error: 'Upload failed' });
+    }
+  };
+
   const toggleVoice = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop(); setIsRecording(false); return;
@@ -1238,27 +1268,58 @@ function CommandCenterPageInner() {
 
           {/* Input */}
           <div style={{ padding: '12px 20px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg-secondary)', flexShrink: 0 }}>
-            <div style={{ maxWidth: 780, margin: '0 auto', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px'; }}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
-                placeholder="Ask anything or give a command…"
-                rows={1}
-                style={{ flex: 1, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: '0.88rem', color: 'var(--text-primary)', resize: 'none', outline: 'none', fontFamily: 'var(--font-sans)', lineHeight: 1.55, minHeight: 42, maxHeight: 140, transition: 'border-color 0.15s' }}
-                disabled={isStreaming}
-              />
-              <button
-                onClick={toggleVoice}
-                style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: isRecording ? '#ef4444' : 'var(--bg-card)', border: '1px solid var(--border)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s', animation: isRecording ? 'pulse 1s infinite' : 'none' }}
-                title="Voice input"
-              >🎤</button>
-              <button
-                onClick={() => sendMessage(input)}
-                disabled={!input.trim() || isStreaming}
-                style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: input.trim() && !isStreaming ? 'var(--accent)' : 'var(--bg-card)', border: '1px solid var(--border)', cursor: input.trim() && !isStreaming ? 'pointer' : 'not-allowed', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: input.trim() && !isStreaming ? 1 : 0.4, transition: 'all 0.15s' }}
-              >↑</button>
+            <div style={{ maxWidth: 780, margin: '0 auto' }}>
+              {/* File attachment chip */}
+              {pendingFile && (
+                <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 20, padding: '4px 10px 4px 8px', fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: '100%' }}>
+                    <span>{pendingFile.uploading ? '⏳' : pendingFile.error ? '⚠️' : '📎'}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}>{pendingFile.name}</span>
+                    {pendingFile.uploading && <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>uploading…</span>}
+                    {pendingFile.error && <span style={{ color: '#ef4444', fontSize: '0.75rem' }}>{pendingFile.error}</span>}
+                    {!pendingFile.uploading && (
+                      <button onClick={() => setPendingFile(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: 1, padding: '0 2px' }}>✕</button>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                {/* Hidden file input */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="*/*"
+                  style={{ display: 'none' }}
+                  onChange={handleFileSelect}
+                />
+                {/* Paperclip button */}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isStreaming || (!!pendingFile && pendingFile.uploading)}
+                  title="Attach a file"
+                  style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: 'var(--bg-card)', border: '1px solid var(--border)', cursor: 'pointer', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: isStreaming ? 0.4 : 1, transition: 'all 0.15s' }}
+                >📎</button>
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px'; }}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
+                  placeholder="Ask anything or give a command…"
+                  rows={1}
+                  style={{ flex: 1, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: '0.88rem', color: 'var(--text-primary)', resize: 'none', outline: 'none', fontFamily: 'var(--font-sans)', lineHeight: 1.55, minHeight: 42, maxHeight: 140, transition: 'border-color 0.15s' }}
+                  disabled={isStreaming}
+                />
+                <button
+                  onClick={toggleVoice}
+                  style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: isRecording ? '#ef4444' : 'var(--bg-card)', border: '1px solid var(--border)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s', animation: isRecording ? 'pulse 1s infinite' : 'none' }}
+                  title="Voice input"
+                >🎤</button>
+                <button
+                  onClick={() => sendMessage(input)}
+                  disabled={!input.trim() || isStreaming}
+                  style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: input.trim() && !isStreaming ? 'var(--accent)' : 'var(--bg-card)', border: '1px solid var(--border)', cursor: input.trim() && !isStreaming ? 'pointer' : 'not-allowed', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: input.trim() && !isStreaming ? 1 : 0.4, transition: 'all 0.15s' }}
+                >↑</button>
+              </div>
             </div>
           </div>
         </div>
