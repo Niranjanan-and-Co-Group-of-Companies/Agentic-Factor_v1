@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import OnboardingTour from '@/components/OnboardingTour';
 import MissionsSidebar from '@/components/MissionsSidebar';
+import { renderMarkdown } from '@/lib/utils/render-markdown';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -74,30 +75,6 @@ function statusDot(status: string) {
   return colors[status] ?? 'var(--text-muted)';
 }
 
-function renderMarkdown(text: string): React.ReactNode {
-  const lines = text.split('\n');
-  const out: React.ReactNode[] = [];
-  let listItems: string[] = [];
-  const flushList = (key: string) => {
-    if (!listItems.length) return;
-    out.push(<ul key={key} style={{ margin: '6px 0 6px 18px', padding: 0 }}>{listItems.map((li, i) => <li key={i} style={{ marginBottom: 3 }}>{inlineFmt(li)}</li>)}</ul>);
-    listItems = [];
-  };
-  const inlineFmt = (s: string): React.ReactNode[] =>
-    s.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g).map((p, i) => {
-      if (p.startsWith('**') && p.endsWith('**')) return <strong key={i}>{p.slice(2, -2)}</strong>;
-      if (p.startsWith('*') && p.endsWith('*')) return <em key={i}>{p.slice(1, -1)}</em>;
-      if (p.startsWith('`') && p.endsWith('`')) return <code key={i} style={{ background: 'var(--bg-secondary)', borderRadius: 3, padding: '1px 5px', fontSize: '0.83em', fontFamily: 'monospace' }}>{p.slice(1, -1)}</code>;
-      return p;
-    });
-  lines.forEach((line, i) => {
-    const t = line.trim();
-    if (/^[-•]\s/.test(t)) { listItems.push(t.replace(/^[-•]\s/, '')); }
-    else { flushList(`l-${i}`); if (t) out.push(<span key={`s-${i}`} style={{ display: 'block' }}>{inlineFmt(t)}</span>); else if (out.length) out.push(<br key={`b-${i}`} />); }
-  });
-  flushList('end');
-  return out;
-}
 
 const QUICK_CHIPS = ['What ran today?', 'Check my credits', 'Show all missions', 'Create a new mission'];
 const CONNECTOR_LABELS: Record<string, string> = {
