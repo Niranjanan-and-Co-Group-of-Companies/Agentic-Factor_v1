@@ -56,10 +56,24 @@ const SYSTEM_TOOLS: AnthropicTool[] = [
       'Call this whenever the user asks why it failed, what went wrong, or how to fix it.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
+  {
+    name: 'search_connectors',
+    description:
+      'Search the full integration catalog to check if a specific app, tool, or service is available to connect. ' +
+      'Use whenever the customer asks whether a particular connector exists, or what connectors are available for a given service.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'App or service name to search for (e.g. "HubSpot", "Shopify", "Slack")' },
+      },
+      required: ['query'],
+    },
+  },
 ];
 
 const SYSTEM_TOOL_META: ToolMeta[] = [
   { actionName: 'get_run_errors', providerSlug: 'system', displayName: 'Reading error logs', logoUrl: null },
+  { actionName: 'search_connectors', providerSlug: 'system', displayName: 'Searching integrations', logoUrl: null },
 ];
 
 // Hardcoded tools for API-key-only providers that aren't in Composio
@@ -345,6 +359,54 @@ export async function executeTool(
       content: [runMeta, errors ? `\nErrors:\n${errors}` : '\n(No specific error events found)', latestRun.summary ? `\nSummary: ${latestRun.summary}` : ''].join(''),
       summary: `${errorEvents?.length ?? 0} error(s) in Run #${latestRun.run_number}`,
     };
+  }
+
+  // ── System tool: search_connectors ────────────────────────────────────
+  if (name === 'search_connectors') {
+    const query = String(input.query ?? '').trim();
+    if (!query) return { content: 'No query provided.', summary: 'Missing query' };
+
+    const PLATFORM_TOOLS = ['buffer', 'openai', 'gemini', 'canva', 'elevenlabs', 'tavily'];
+    const q = query.toLowerCase();
+
+    try {
+      const apiKey = process.env.COMPOSIO_API_KEY;
+      let catalogMatches: string[] = [];
+      if (apiKey) {
+        const { default: Composio } = await import('@composio/client');
+        const client = new Composio({ apiKey });
+        const result = await (client.toolkits as unknown as { list: (opts: unknown) => Promise<{ items?: Array<{ slug: string; name: string }> }> }).list({ limit: 10, search: query } as unknown as Record<string, unknown>);
+        catalogMatches = (result.items ?? []).map((tk) => tk.name);
+      }
+
+      const { data: perms } = await supabase
+        .from('tenant_permissions')
+        .select('provider')
+        .eq('tenant_id', tenantId);
+      const connectedProviders = (perms ?? []).map((p: { provider: string }) => p.provider);
+      const connectedMatch = connectedProviders.find(p => p.toLowerCase().includes(q) || q.includes(p.toLowerCase()));
+      const platformMatch = PLATFORM_TOOLS.find(t => t.includes(q) || q.includes(t));
+
+      if (catalogMatches.length > 0) {
+        const names = catalogMatches.slice(0, 3).join(', ');
+        const isConnected = connectedMatch || platformMatch;
+        return {
+          content: `Found in catalog: ${names}.${isConnected ? ` The customer already has "${isConnected}" connected.` : ' Not yet connected — customer can add it from the Connectors page.'}`,
+          summary: `Found: ${names}`,
+        };
+      }
+
+      if (platformMatch) {
+        return { content: `"${platformMatch}" is available as a platform tool.${connectedMatch ? ' Already connected.' : ' Can be added from the Connectors page.'}`, summary: `${platformMatch} available` };
+      }
+
+      return {
+        content: `"${query}" is not currently available in the integration catalog. Let the customer know this connector isn't available yet, and suggest they contact the admin team to request it.`,
+        summary: `${query} not found`,
+      };
+    } catch (err) {
+      return { content: `Connector search failed: ${err instanceof Error ? err.message : String(err)}`, summary: 'Search failed' };
+    }
   }
 
   // ── Legacy generic action (fallback when schemas not yet loaded) ───────

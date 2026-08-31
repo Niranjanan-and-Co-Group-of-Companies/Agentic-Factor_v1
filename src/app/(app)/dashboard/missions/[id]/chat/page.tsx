@@ -224,48 +224,160 @@ function stripActionTags(text: string): string {
   return text.replace(/<action>[\s\S]*?<\/action>/g, '').replace(/<action>[\s\S]*$/, '').trim();
 }
 
-// Simple inline markdown → React elements (no external deps)
+// ── Rich content rendering helpers ────────────────────────────────────────────
+const IMAGE_URL_RE = /\.(png|jpe?g|gif|webp|svg|avif)(\?[^\s]*)?$/i;
+const VIDEO_URL_RE = /\.(mp4|webm|ogg|mov|m4v)(\?[^\s]*)?$/i;
+const FILE_URL_RE  = /\.(pdf|docx?|xlsx?|pptx?|csv|zip|txt|json|xml)(\?[^\s]*)?$/i;
+
+const FILE_ICONS: Record<string, string> = {
+  pdf: '📄', doc: '📝', docx: '📝', xls: '📊', xlsx: '📊',
+  ppt: '📋', pptx: '📋', csv: '📊', zip: '🗜️', txt: '📄', json: '🔧', xml: '🔧',
+};
+
+function FileDownloadCard({ url }: { url: string }) {
+  const filename = decodeURIComponent(url.split('?')[0].split('/').pop() ?? 'file');
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  const icon = FILE_ICONS[ext] ?? '📎';
+  return (
+    <a href={url} download target="_blank" rel="noreferrer"
+       style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 14px',
+                background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+                borderRadius: 8, textDecoration: 'none', color: 'var(--text-primary)',
+                fontSize: '0.82rem', margin: '4px 0', cursor: 'pointer' }}>
+      <span style={{ fontSize: '1.1rem' }}>{icon}</span>
+      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{filename}</span>
+      <span style={{ color: 'var(--accent)', fontSize: '0.75rem', fontWeight: 600 }}>↓</span>
+    </a>
+  );
+}
+
+function ImageGrid({ images }: { images: { url: string; alt: string }[] }) {
+  const cols = images.length === 1 ? 1 : images.length <= 4 ? 2 : 3;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 6, margin: '8px 0' }}>
+      {images.map((img, j) => (
+        <a key={j} href={img.url} target="_blank" rel="noreferrer" style={{ display: 'block' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={img.url} alt={img.alt || 'image'}
+               style={{ width: '100%', borderRadius: 8, objectFit: 'cover',
+                        maxHeight: 260, display: 'block', border: '1px solid var(--border)' }} />
+        </a>
+      ))}
+    </div>
+  );
+}
+
+// Inline markdown + rich URL → React elements
 function renderMarkdown(text: string): React.ReactNode {
   const lines = text.split('\n');
   const out: React.ReactNode[] = [];
   let listItems: string[] = [];
+  let orderedList = false;
+  const imgBuf: { url: string; alt: string }[] = [];
 
-  const flushList = (key: string) => {
+  const flushImgBuf = (key: string) => {
+    if (imgBuf.length === 0) return;
+    out.push(<ImageGrid key={key} images={[...imgBuf]} />);
+    imgBuf.length = 0;
+  };
+
+  const flushListBuf = (key: string) => {
     if (listItems.length === 0) return;
+    const Tag = orderedList ? 'ol' : 'ul';
     out.push(
-      <ul key={key} style={{ margin: '6px 0 6px 16px', padding: 0 }}>
-        {listItems.map((li, i) => (
-          <li key={i} style={{ marginBottom: 3, listStyleType: 'disc' }}>{inlineFormat(li)}</li>
+      <Tag key={key} style={{ margin: '6px 0 6px 16px', padding: 0 }}>
+        {listItems.map((li, j) => (
+          <li key={j} style={{ marginBottom: 3, listStyleType: orderedList ? 'decimal' : 'disc' }}>{inlineText(li)}</li>
         ))}
-      </ul>
+      </Tag>
     );
     listItems = [];
   };
 
-  const inlineFormat = (s: string): React.ReactNode[] => {
-    const parts = s.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
-    return parts.map((p, i) => {
-      if (p.startsWith('**') && p.endsWith('**')) return <strong key={i}>{p.slice(2, -2)}</strong>;
-      if (p.startsWith('*') && p.endsWith('*')) return <em key={i}>{p.slice(1, -1)}</em>;
-      if (p.startsWith('`') && p.endsWith('`')) return <code key={i} style={{ background: 'var(--bg-secondary)', borderRadius: 3, padding: '1px 5px', fontSize: '0.84em', fontFamily: 'monospace' }}>{p.slice(1, -1)}</code>;
-      return p;
-    });
-  };
+  const flushAll = (key: string) => { flushListBuf(`${key}-l`); flushImgBuf(`${key}-i`); };
+
+  const inlineText = (s: string): React.ReactNode[] =>
+    s.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<>"']+)/g)
+     .map((p, i): React.ReactNode => {
+       if (p.startsWith('**') && p.endsWith('**')) return <strong key={i}>{p.slice(2, -2)}</strong>;
+       if (p.startsWith('*') && p.endsWith('*')) return <em key={i}>{p.slice(1, -1)}</em>;
+       if (p.startsWith('`') && p.endsWith('`')) return <code key={i} style={{ background: 'var(--bg-secondary)', borderRadius: 3, padding: '1px 5px', fontSize: '0.84em', fontFamily: 'monospace' }}>{p.slice(1, -1)}</code>;
+       if (p.startsWith('![')) {
+         const m = p.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+         if (m) { if (IMAGE_URL_RE.test(m[2])) { imgBuf.push({ url: m[2], alt: m[1] }); return ''; } return <a key={i} href={m[2]} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>{m[1] || m[2]}</a>; }
+       }
+       if (p.startsWith('[')) {
+         const m = p.match(/\[([^\]]+)\]\(([^)]+)\)/);
+         if (m) { if (IMAGE_URL_RE.test(m[2])) { imgBuf.push({ url: m[2], alt: m[1] }); return ''; } return <a key={i} href={m[2]} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>{m[1]}</a>; }
+       }
+       if (p.startsWith('http')) {
+         if (IMAGE_URL_RE.test(p)) { imgBuf.push({ url: p, alt: '' }); return ''; }
+         return <a key={i} href={p} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline', wordBreak: 'break-all' }}>{p}</a>;
+       }
+       return p;
+     });
 
   lines.forEach((line, i) => {
     const trimmed = line.trim();
-    if (/^[-•]\s/.test(trimmed)) {
-      listItems.push(trimmed.replace(/^[-•]\s/, ''));
-    } else {
-      flushList(`list-${i}`);
-      if (trimmed === '') {
-        if (out.length > 0) out.push(<br key={`br-${i}`} />);
-      } else {
-        out.push(<span key={`line-${i}`} style={{ display: 'block' }}>{inlineFormat(trimmed)}</span>);
-      }
+
+    const hMatch = trimmed.match(/^(#{1,3}) (.+)/);
+    if (hMatch) {
+      flushAll(`h${i}`);
+      const level = hMatch[1].length as 1 | 2 | 3;
+      const sz = ['1.15rem', '1.05rem', '0.95rem'][level - 1];
+      const mg = [16, 14, 12][level - 1];
+      const Tag = `h${level}` as 'h1' | 'h2' | 'h3';
+      out.push(<Tag key={`h${i}`} style={{ fontSize: sz, fontWeight: 700, margin: `${mg}px 0 5px` }}>{inlineText(hMatch[2])}</Tag>);
+      return;
     }
+
+    if (/^[-*_]{3,}$/.test(trimmed)) {
+      flushAll(`hr${i}`);
+      out.push(<hr key={`hr${i}`} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '10px 0' }} />);
+      return;
+    }
+
+    const olMatch = trimmed.match(/^(\d+)\. (.+)/);
+    if (olMatch) {
+      flushImgBuf(`img${i}`);
+      if (listItems.length > 0 && !orderedList) flushListBuf(`ul${i}`);
+      orderedList = true; listItems.push(olMatch[2]); return;
+    }
+
+    if (/^[-•*] /.test(trimmed)) {
+      flushImgBuf(`img${i}`);
+      if (listItems.length > 0 && orderedList) flushListBuf(`ol${i}`);
+      orderedList = false; listItems.push(trimmed.replace(/^[-•*] /, '')); return;
+    }
+
+    if (trimmed === '') {
+      flushAll(`blank${i}`);
+      if (out.length > 0) out.push(<br key={`br${i}`} />);
+      return;
+    }
+
+    flushListBuf(`list${i}`);
+
+    if (/^https?:\/\/[^\s]+$/.test(trimmed)) {
+      if (IMAGE_URL_RE.test(trimmed)) { imgBuf.push({ url: trimmed, alt: '' }); return; }
+      if (VIDEO_URL_RE.test(trimmed)) { flushImgBuf(`img${i}`); out.push(<video key={`vid${i}`} src={trimmed} controls style={{ maxWidth: '100%', borderRadius: 8, margin: '8px 0', display: 'block' }} />); return; }
+      if (FILE_URL_RE.test(trimmed)) { flushImgBuf(`img${i}`); out.push(<FileDownloadCard key={`file${i}`} url={trimmed} />); return; }
+    }
+
+    const prevLen = imgBuf.length;
+    const nodes = inlineText(trimmed);
+    const newImages = imgBuf.splice(prevLen);
+    const hasText = nodes.some(n => typeof n === 'string' ? (n as string).trim() !== '' : Boolean(n));
+
+    if (!hasText && newImages.length > 0) { imgBuf.push(...newImages); return; }
+
+    flushImgBuf(`img-pre${i}`);
+    out.push(<span key={`ln${i}`} style={{ display: 'block' }}>{nodes}</span>);
+    imgBuf.push(...newImages);
+    flushImgBuf(`img-post${i}`);
   });
-  flushList('list-end');
+
+  flushAll('end');
   return out;
 }
 

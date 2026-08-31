@@ -141,6 +141,8 @@ export default function ConnectorsPage() {
   const [customForm, setCustomForm]           = useState({ name: "", api_key: "", base_url: "", auth_type: "bearer" });
   const [savingCustom, setSavingCustom]       = useState(false);
   const [customError, setCustomError]         = useState<string | null>(null);
+  const [searchResults, setSearchResults]     = useState<Toolkit[] | null>(null);
+  const [searching, setSearching]             = useState(false);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -204,6 +206,24 @@ export default function ConnectorsPage() {
     fetchCustomConnectors();
   }, [loadCatalog, checkConnectionStatus, fetchCustomConnectors]);
 
+  // Server-side search — debounced 400ms
+  useEffect(() => {
+    if (!search.trim()) { setSearchResults(null); return; }
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const params = new URLSearchParams({ search: search.trim(), limit: "50" });
+        const res = await fetch(`/api/composio/apps?${params}`);
+        if (res.ok) {
+          const data = await res.json() as { items: Toolkit[]; next_cursor: string | null; total_items: number };
+          setSearchResults(data.items);
+        }
+      } catch { /* silent */ }
+      setSearching(false);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   // ── OAuth popup listener ───────────────────────────────────
   useEffect(() => {
     const handle = (e: MessageEvent) => {
@@ -228,24 +248,31 @@ export default function ConnectorsPage() {
 
   // ── Filtered list ─────────────────────────────────────────
   const filtered = useMemo(() => {
-    let list = toolkits;
-    if (activeCategory !== "all") list = list.filter(tk => tk.categories.includes(activeCategory));
+    // When search is active, use server results (accurate, full-catalog);
+    // fall back to client-side filter only while server results are loading.
+    let list: Toolkit[];
     if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(tk =>
-        tk.name.toLowerCase().includes(q) ||
-        tk.slug.toLowerCase().includes(q) ||
-        tk.description.toLowerCase().includes(q) ||
-        tk.categories.some(c => c.includes(q))
-      );
+      if (searchResults !== null) {
+        list = searchResults;
+      } else {
+        const q = search.toLowerCase();
+        list = toolkits.filter(tk =>
+          tk.name.toLowerCase().includes(q) ||
+          tk.slug.toLowerCase().includes(q) ||
+          tk.description.toLowerCase().includes(q) ||
+          tk.categories.some(c => c.includes(q))
+        );
+      }
+    } else {
+      list = toolkits;
     }
-    // Connected apps float to top
+    if (activeCategory !== "all") list = list.filter(tk => tk.categories.includes(activeCategory));
     return [...list].sort((a, b) => {
       const ac = connectedSlugs.has(a.slug) ? 0 : 1;
       const bc = connectedSlugs.has(b.slug) ? 0 : 1;
       return ac - bc;
     });
-  }, [toolkits, activeCategory, search, connectedSlugs]);
+  }, [toolkits, searchResults, activeCategory, search, connectedSlugs]);
 
   const connectedCount = toolkits.filter(tk => connectedSlugs.has(tk.slug)).length;
 
@@ -810,12 +837,19 @@ export default function ConnectorsPage() {
         })}
       </div>
 
-      {/* ── Load More ── */}
-      {nextCursor && (
+      {/* ── Load More (hidden during search) ── */}
+      {nextCursor && !search.trim() && (
         <div style={{ textAlign: "center", marginTop: "var(--space-xl)" }}>
           <button className="btn btn-ghost" onClick={() => loadCatalog(nextCursor)} disabled={loadingMore}>
             {loadingMore ? "Loading..." : `Load more integrations`}
           </button>
+        </div>
+      )}
+
+      {/* ── Server search indicator ── */}
+      {searching && (
+        <div style={{ textAlign: "center", marginTop: "var(--space-md)", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+          Searching all integrations…
         </div>
       )}
 

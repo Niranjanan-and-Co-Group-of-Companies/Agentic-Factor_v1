@@ -266,6 +266,17 @@ const CC_TOOLS = [
       required: ['mission_id'] as string[],
     },
   },
+  {
+    name: 'search_connectors',
+    description: 'Search the full integration catalog to check if a specific app, tool, or service is available to connect. Use whenever the customer asks about a specific connector, tool, or integration by name.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string' as const, description: 'App or service name to search for (e.g. "HubSpot", "Shopify", "WhatsApp")' },
+      },
+      required: ['query'] as string[],
+    },
+  },
 ];
 
 // Streaming parser (same pattern as mission chat)
@@ -380,6 +391,56 @@ async function executeCCTool(
     }
   }
 
+  if (name === 'search_connectors') {
+    const query = String(input.query ?? '').trim();
+    if (!query) return { content: 'No query provided.', summary: 'Missing query' };
+
+    // Platform-hardcoded tools (not in Composio)
+    const PLATFORM_TOOLS = ['buffer', 'openai', 'gemini', 'canva', 'elevenlabs', 'tavily'];
+
+    try {
+      // 1. Search Composio live catalog
+      const apiKey = process.env.COMPOSIO_API_KEY;
+      let catalogMatches: string[] = [];
+      if (apiKey) {
+        const { default: Composio } = await import('@composio/client');
+        const client = new Composio({ apiKey });
+        const result = await (client.toolkits as unknown as { list: (opts: unknown) => Promise<{ items?: Array<{ slug: string; name: string }> }> }).list({ limit: 10, search: query } as unknown as Record<string, unknown>);
+        catalogMatches = (result.items ?? []).map((tk) => tk.name);
+      }
+
+      // 2. Check customer's connected tools
+      const { data: perms } = await supabase
+        .from('tenant_permissions')
+        .select('provider')
+        .eq('tenant_id', tenantId);
+      const connectedProviders = (perms ?? []).map((p: { provider: string }) => p.provider);
+      const q = query.toLowerCase();
+      const connectedMatch = connectedProviders.find(p => p.toLowerCase().includes(q) || q.includes(p.toLowerCase()));
+      const platformMatch = PLATFORM_TOOLS.find(t => t.includes(q) || q.includes(t));
+
+      if (catalogMatches.length > 0) {
+        const names = catalogMatches.slice(0, 3).join(', ');
+        const isConnected = connectedMatch || platformMatch;
+        return {
+          content: `Found in catalog: ${names}.${isConnected ? ` The customer already has "${isConnected}" connected.` : ' Not yet connected — customer can add it from the Connectors page.'}`,
+          summary: `Found: ${names}`,
+        };
+      }
+
+      if (platformMatch) {
+        return { content: `"${platformMatch}" is available as a platform tool.${connectedMatch ? ' Already connected.' : ' Customer can add it from the Connectors page.'}`, summary: `${platformMatch} available` };
+      }
+
+      return {
+        content: `"${query}" is not currently available in our integration catalog. Please let the customer know they can contact the admin team to request it.`,
+        summary: `${query} not found`,
+      };
+    } catch (err) {
+      return { content: `Connector search failed: ${err instanceof Error ? err.message : String(err)}`, summary: 'Search failed' };
+    }
+  }
+
   return { content: `Unknown tool: ${name}`, summary: 'Unknown tool' };
 }
 
@@ -429,12 +490,17 @@ async function runCommandLoop(params: {
       let inp: Record<string, unknown> = {};
       try { inp = JSON.parse(block.inputJson ?? '{}'); } catch { /* empty */ }
 
-      const label = block.name === 'search_web' ? `Searching "${inp.query}"…` : `Fetching mission details…`;
-      send({ type: 'tool_status', name: block.name, provider: block.name === 'search_web' ? 'tavily' : 'system', displayName: block.name === 'search_web' ? 'Web Search' : 'Mission Details', status: 'running', label, logoUrl: block.name === 'search_web' ? 'https://tavily.com/favicon.ico' : null });
+      const toolMeta: Record<string, { displayName: string; provider: string; label: string; logoUrl: string | null }> = {
+        search_web: { displayName: 'Web Search', provider: 'tavily', label: `Searching "${inp.query}"…`, logoUrl: 'https://tavily.com/favicon.ico' },
+        get_mission_details: { displayName: 'Mission Details', provider: 'system', label: 'Fetching mission details…', logoUrl: null },
+        search_connectors: { displayName: 'Connector Search', provider: 'system', label: `Searching integrations for "${inp.query}"…`, logoUrl: null },
+      };
+      const meta = toolMeta[block.name!] ?? { displayName: block.name!, provider: 'system', label: `Running ${block.name}…`, logoUrl: null };
+      send({ type: 'tool_status', name: block.name, provider: meta.provider, displayName: meta.displayName, status: 'running', label: meta.label, logoUrl: meta.logoUrl });
 
       const result = await executeCCTool(block.name!, inp, tenantId, supabase);
 
-      send({ type: 'tool_status', name: block.name, provider: block.name === 'search_web' ? 'tavily' : 'system', displayName: block.name === 'search_web' ? 'Web Search' : 'Mission Details', status: 'done', summary: result.summary, logoUrl: block.name === 'search_web' ? 'https://tavily.com/favicon.ico' : null });
+      send({ type: 'tool_status', name: block.name, provider: meta.provider, displayName: meta.displayName, status: 'done', summary: result.summary, logoUrl: meta.logoUrl });
 
       toolResults.push({ type: 'tool_result', tool_use_id: block.id!, content: result.content });
     }

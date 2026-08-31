@@ -27,8 +27,8 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get('search')?.toLowerCase() ?? '';
 
   try {
-    // Serve from cache when no search (full catalog fetch)
-    if (!search && catalogCache && catalogCache.expiresAt > Date.now()) {
+    // Serve from cache only for first-page no-search requests
+    if (!search && !cursor && catalogCache && catalogCache.expiresAt > Date.now()) {
       return NextResponse.json(catalogCache.data);
     }
 
