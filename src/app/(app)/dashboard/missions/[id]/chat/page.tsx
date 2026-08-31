@@ -274,6 +274,12 @@ function renderMarkdown(text: string): React.ReactNode {
   let listItems: string[] = [];
   let orderedList = false;
   const imgBuf: { url: string; alt: string }[] = [];
+  let tableRows: string[][] = [];
+  let tableHasHeader = false;
+
+  const isTableRow = (s: string) => s.startsWith('|') && s.endsWith('|') && s.length > 2;
+  const isTableSep  = (s: string) => isTableRow(s) && /^[\|\s\-:]+$/.test(s) && s.includes('-');
+  const parseTableRow = (s: string): string[] => s.split('|').slice(1, -1).map(c => c.trim());
 
   const flushImgBuf = (key: string) => {
     if (imgBuf.length === 0) return;
@@ -294,7 +300,55 @@ function renderMarkdown(text: string): React.ReactNode {
     listItems = [];
   };
 
-  const flushAll = (key: string) => { flushListBuf(`${key}-l`); flushImgBuf(`${key}-i`); };
+  const flushTable = (key: string) => {
+    if (tableRows.length === 0) return;
+    const prelen = imgBuf.length;
+    const header = tableHasHeader ? tableRows[0] : null;
+    const body   = tableHasHeader ? tableRows.slice(1) : tableRows;
+    out.push(
+      <div key={key} style={{ overflowX: 'auto', margin: '10px 0', borderRadius: 8, border: '1px solid var(--border)' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', minWidth: 360 }}>
+          {header && (
+            <thead>
+              <tr>
+                {header.map((cell, ci) => (
+                  <th key={ci} style={{
+                    padding: '9px 14px', textAlign: 'left', fontWeight: 700,
+                    background: 'var(--bg-secondary)', color: 'var(--text-primary)',
+                    borderBottom: '2px solid var(--border)', whiteSpace: 'nowrap',
+                  }}>
+                    {inlineText(cell)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+          )}
+          <tbody>
+            {body.map((row, ri) => (
+              <tr key={ri} style={{ borderBottom: ri < body.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                {row.map((cell, ci) => (
+                  <td key={ci} style={{
+                    padding: '8px 14px', verticalAlign: 'top',
+                    color: ci === 0 ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    fontWeight: ci === 0 ? 600 : 400,
+                    background: ri % 2 === 1 ? 'var(--bg-secondary)' : 'transparent',
+                  }}>
+                    {inlineText(cell)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+    // discard any images buffered from table cell inlineText calls
+    imgBuf.length = prelen;
+    tableRows = [];
+    tableHasHeader = false;
+  };
+
+  const flushAll = (key: string) => { flushListBuf(`${key}-l`); flushTable(`${key}-t`); flushImgBuf(`${key}-i`); };
 
   const inlineText = (s: string): React.ReactNode[] =>
     s.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<>"']+)/g)
@@ -320,6 +374,20 @@ function renderMarkdown(text: string): React.ReactNode {
   lines.forEach((line, i) => {
     const trimmed = line.trim();
 
+    // ── Table rows (must be checked before heading/HR/list) ──────────────
+    if (isTableRow(trimmed)) {
+      if (tableRows.length === 0) flushAll(`pre-tbl${i}`); // flush any pending content
+      if (isTableSep(trimmed)) {
+        if (tableRows.length === 1) tableHasHeader = true; // the row before sep is the header
+      } else {
+        tableRows.push(parseTableRow(trimmed));
+      }
+      return;
+    }
+    // Non-table line → flush any pending table
+    if (tableRows.length > 0) flushTable(`tbl${i}`);
+
+    // ── Headings ──────────────────────────────────────────────────────────
     const hMatch = trimmed.match(/^(#{1,3}) (.+)/);
     if (hMatch) {
       flushAll(`h${i}`);
