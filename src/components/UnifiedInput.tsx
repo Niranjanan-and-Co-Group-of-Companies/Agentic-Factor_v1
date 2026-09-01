@@ -155,7 +155,7 @@ export default function UnifiedInput({
         {/* Voice trigger */}
         <button
           className={`ub-icon-btn ${recording ? "ub-rec" : ""}`}
-          title={recording ? "Stop recording" : "Voice input (Gemini Live)"}
+          title={recording ? "Stop recording" : "Voice input"}
           onClick={toggleVoice}
         >
           {recording ? "⏹" : "🎙️"}
@@ -173,7 +173,7 @@ export default function UnifiedInput({
 
       {/* Recording indicator */}
       {recording && (
-        <div className="gemini-wave" style={{ marginTop: "var(--space-xs)" }}>
+        <div className="voice-wave" style={{ marginTop: "var(--space-xs)" }}>
           <span /><span /><span /><span /><span />
         </div>
       )}

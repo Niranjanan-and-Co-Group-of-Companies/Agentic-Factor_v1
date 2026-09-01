@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import MissionsSidebar from '@/components/MissionsSidebar';
 import { renderMarkdown } from '@/lib/utils/render-markdown';
 
@@ -287,6 +288,9 @@ export default function MissionChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  // Inngest / Realtime execution state
+  const waitingForInngestRef = useRef(false);
+  const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -401,6 +405,16 @@ export default function MissionChatPage() {
   }, [missionId]);
 
   useEffect(() => () => { if (runPollRef.current) clearInterval(runPollRef.current); }, []);
+
+  // Clean up Realtime subscription on unmount
+  useEffect(() => {
+    return () => {
+      if (realtimeChannelRef.current) {
+        getSupabase().removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+    };
+  }, []);
 
   // ── Proactive alert on first open ────────────────────────────
   useEffect(() => {
@@ -567,6 +581,53 @@ export default function MissionChatPage() {
     const streamingMsg: ChatMessage = { role: 'assistant', content: '', isStreaming: true };
     setMessages([...newMessages, streamingMsg]);
     setToolStatusLines([]);
+    waitingForInngestRef.current = false;
+
+    // ── Handlers for Inngest Realtime events ────────────────────
+    const finaliseFromInngest = (cleanText: string, action: ActionPayload | null, sid?: string) => {
+      const supabase = getSupabase();
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+      waitingForInngestRef.current = false;
+
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: 'assistant', content: cleanText,
+          action_payload: action, isStreaming: false, ts: Date.now(),
+        };
+        return updated;
+      });
+      setToolStatusLines([]);
+      setIsStreaming(false);
+
+      if (sid && !activeSessionId) setActiveSessionId(sid);
+      if (action?.type === 'suggest_connector') setQuickChips(QUICK_CHIPS_AFTER_CONNECT);
+      else if (cleanText.toLowerCase().includes('fail') || cleanText.toLowerCase().includes('error'))
+        setQuickChips(QUICK_CHIPS_AFTER_FAIL);
+      else setQuickChips(QUICK_CHIPS_DEFAULT);
+
+      inputRef.current?.focus();
+    };
+
+    const errorFromInngest = (message: string) => {
+      const supabase = getSupabase();
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+      waitingForInngestRef.current = false;
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { role: 'assistant', content: `⚠️ ${message}` };
+        return updated;
+      });
+      setToolStatusLines([]);
+      setIsStreaming(false);
+      inputRef.current?.focus();
+    };
 
     try {
       const apiMessages = newMessages.map(m => ({ role: m.role, content: m.content }));
@@ -601,7 +662,7 @@ export default function MissionChatPage() {
           if (!line.startsWith('data: ')) continue;
           try {
             const evt = JSON.parse(line.slice(6)) as {
-              type: string; text?: string; cleanText?: string;
+              type: string; text?: string; cleanText?: string; executionId?: string;
               action?: ActionPayload | null; sessionId?: string; message?: string;
               name?: string; provider?: string; displayName?: string;
               status?: 'running' | 'done' | 'error'; label?: string; summary?: string; logoUrl?: string | null;
@@ -609,7 +670,6 @@ export default function MissionChatPage() {
 
             if (evt.type === 'delta' && evt.text) {
               streamedText += evt.text;
-              // Strip <action> blocks before showing to user
               const displayText = stripActionTags(streamedText);
               setMessages(prev => {
                 const updated = [...prev];
@@ -630,29 +690,76 @@ export default function MissionChatPage() {
                   summary: evt.summary,
                   logoUrl: evt.logoUrl,
                 };
-                if (existing >= 0) {
-                  const updated = [...prev];
-                  updated[existing] = entry;
-                  return updated;
-                }
+                if (existing >= 0) { const updated = [...prev]; updated[existing] = entry; return updated; }
                 return [...prev, entry];
               });
             }
 
+            // ── Inngest handoff ─────────────────────────────────────────
+            if (evt.type === 'agent_queued' && evt.executionId) {
+              if (evt.sessionId && !activeSessionId) setActiveSessionId(evt.sessionId);
+              waitingForInngestRef.current = true;
+
+              // Subscribe to Supabase Realtime for tool status and completion
+              const supabase = getSupabase();
+              if (realtimeChannelRef.current) supabase.removeChannel(realtimeChannelRef.current);
+
+              const channel = supabase
+                .channel(`agent-exec-${evt.executionId}`)
+                .on(
+                  'postgres_changes',
+                  { event: 'INSERT', schema: 'public', table: 'agent_execution_events', filter: `session_id=eq.${evt.executionId}` },
+                  (payload) => {
+                    const row = payload.new as { event_type: string; payload: Record<string, unknown> };
+                    const p = row.payload;
+
+                    if (row.event_type === 'tool_status') {
+                      setToolStatusLines(prev => {
+                        const existing = prev.findIndex(t => t.name === p.name as string);
+                        const entry = {
+                          name: p.name as string,
+                          provider: (p.provider as string) ?? 'system',
+                          displayName: (p.displayName as string) ?? (p.name as string),
+                          status: (p.status as 'running' | 'done' | 'error') ?? 'running',
+                          label: (p.label as string) ?? (p.name as string),
+                          summary: p.summary as string | undefined,
+                          logoUrl: p.logoUrl as string | null | undefined,
+                        };
+                        if (existing >= 0) { const updated = [...prev]; updated[existing] = entry; return updated; }
+                        return [...prev, entry];
+                      });
+                    }
+
+                    if (row.event_type === 'agent_completed') {
+                      finaliseFromInngest(
+                        (p.cleanText as string) ?? '',
+                        (p.action as ActionPayload | null) ?? null,
+                        p.sessionId as string | undefined,
+                      );
+                    }
+
+                    if (row.event_type === 'agent_error') {
+                      errorFromInngest((p.message as string) ?? 'Something went wrong. Please try again.');
+                    }
+                  }
+                )
+                .subscribe();
+
+              realtimeChannelRef.current = channel;
+            }
+
             if (evt.type === 'done') {
-              const finalText = evt.cleanText ?? stripActionTags(streamedText);
+              const ft = evt.cleanText ?? stripActionTags(streamedText);
               setMessages(prev => {
                 const updated = [...prev];
                 updated[updated.length - 1] = {
-                  role: 'assistant', content: finalText,
+                  role: 'assistant', content: ft,
                   action_payload: evt.action ?? null, isStreaming: false, ts: Date.now(),
                 };
                 return updated;
               });
               setToolStatusLines([]);
-              if (evt.sessionId && !activeSessionId) {
-                setActiveSessionId(evt.sessionId);
-              }
+              if (evt.sessionId && !activeSessionId) setActiveSessionId(evt.sessionId);
               if (evt.action?.type === 'suggest_connector') setQuickChips(QUICK_CHIPS_AFTER_CONNECT);
               else if (streamedText.toLowerCase().includes('fail') || streamedText.toLowerCase().includes('error'))
                 setQuickChips(QUICK_CHIPS_AFTER_FAIL);
@@ -675,8 +782,11 @@ export default function MissionChatPage() {
       setMessages([...newMessages, { role: 'assistant', content: '⚠️ Connection error. Please check your internet and try again.' }]);
     }
 
-    setIsStreaming(false);
-    setToolStatusLines([]);
+    // Only clear streaming state if we're NOT waiting for Inngest to complete
+    if (!waitingForInngestRef.current) {
+      setIsStreaming(false);
+      setToolStatusLines([]);
+    }
     inputRef.current?.focus();
   };
 
@@ -975,7 +1085,8 @@ export default function MissionChatPage() {
               {/* Welcome / empty state */}
               {messages.length === 0 && !proactiveAlert && (
                 <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-                  <div style={{ fontSize: '2.5rem', marginBottom: 16 }}>✦</div>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo.png" alt="" style={{ height: 56, objectFit: 'contain', marginBottom: 16, display: 'inline-block' }} />
                   <h2 style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>
                     Your Mission Assistant
                   </h2>
@@ -1082,12 +1193,16 @@ export default function MissionChatPage() {
                   <div style={{
                     width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: msg.role === 'user' ? '0.75rem' : '1rem', fontWeight: 700,
+                    fontSize: '0.75rem', fontWeight: 700,
                     background: msg.role === 'user' ? 'var(--accent)' : 'var(--bg-card)',
                     border: msg.role === 'assistant' ? '1px solid var(--border)' : 'none',
                     color: msg.role === 'user' ? '#fff' : 'var(--accent)',
+                    overflow: 'hidden',
                   }}>
-                    {msg.role === 'user' ? 'You' : '✦'}
+                    {msg.role === 'user' ? 'You' : (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src="/logo.png" alt="Assistant" style={{ width: 22, height: 22, objectFit: 'contain', borderRadius: 2 }} />
+                    )}
                   </div>
 
                   <div style={{ flex: 1, minWidth: 0, maxWidth: '84%' }}>

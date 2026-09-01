@@ -90,7 +90,8 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
             display: 'flex', alignItems: 'center', gap: 8,
           }}
         >
-          <span style={{ fontSize: '1rem', lineHeight: 1, flexShrink: 0 }}>✦</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="" style={{ width: 20, height: 20, objectFit: 'contain', flexShrink: 0 }} />
           <div style={{ minWidth: 0 }}>
             <div style={{
               fontSize: '0.8rem', fontWeight: 700,

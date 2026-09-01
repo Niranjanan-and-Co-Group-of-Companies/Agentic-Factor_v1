@@ -131,6 +131,23 @@ export async function GET(request: NextRequest) {
         const creditCheck = await checkCredits(tenantId, CREDIT_COSTS.schedule_daily);
         if (!creditCheck.allowed) {
           console.log(`[Cron Scheduler] Skipping mission ${missionId} — insufficient credits.`);
+          // Record the skip so it's visible in the audit log and can trigger a notification
+          supabase.from('events').insert({
+            tenant_id: tenantId,
+            event_type: 'mission.schedule_skipped',
+            entity_type: 'mission',
+            entity_id: missionId,
+            payload: {
+              reason: 'insufficient_credits',
+              creditsRemaining: creditCheck.creditsRemaining ?? 0,
+              skippedAt: now.toISOString(),
+            },
+          }).then(() => {}, () => {});
+          // Notify the tenant that their scheduled mission couldn't run
+          try {
+            const { notifyMissionStatus } = await import('@/lib/services/notifications');
+            await notifyMissionStatus(tenantId, missionId, missionId, 'paused');
+          } catch { /* non-fatal */ }
           continue;
         }
 

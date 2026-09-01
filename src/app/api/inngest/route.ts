@@ -3,6 +3,7 @@ import { inngest } from '@/lib/inngest/client';
 import { executeMissionBackground, generateBlueprintBackground } from '@/lib/inngest/functions';
 import { handleInboundEmail } from '@/lib/inngest/email-functions';
 import { generateWelcomeMessages } from '@/lib/inngest/message-cron';
+import { executeChatAgent } from '@/lib/inngest/chat-agent-function';
 
 // ═══════════════════════════════════════════════════════════
 // /api/inngest — Inngest webhook endpoint
@@ -19,5 +20,6 @@ export const { GET, POST, PUT } = serve({
     generateBlueprintBackground,
     handleInboundEmail,
     generateWelcomeMessages,
+    executeChatAgent,
   ],
 });

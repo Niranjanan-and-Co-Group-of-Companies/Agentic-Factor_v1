@@ -1,18 +1,15 @@
 "use client";
 import { useState, useRef, useCallback } from "react";
 
-// ============================================================
-// Gemini Live — Persistent Floating Mic
-// Voice-to-text via Web Speech API. Feeds transcript into
-// the active input context (intake, blueprint, or clarification).
-// ============================================================
+// Voice Input — floating mic button for speech-to-text via Web Speech API.
+// Feeds transcript into the active input context (intake, blueprint, etc.)
 
-interface GeminiLiveProps {
+interface VoiceInputProps {
   onTranscript: (text: string) => void;
   context?: string; // "intake" | "blueprint" | "clarification"
 }
 
-export default function GeminiLive({ onTranscript, context = "intake" }: GeminiLiveProps) {
+export default function GeminiLive({ onTranscript, context = "intake" }: VoiceInputProps) {
   const [open, setOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -42,18 +39,12 @@ export default function GeminiLive({ onTranscript, context = "intake" }: GeminiL
         setTranscript((prev) => (prev + " " + final).trim());
       }
       if (interim) {
-        // Show interim in the panel
         setTranscript((prev) => prev ? prev + " " + interim : interim);
       }
     };
 
-    recognition.onerror = () => {
-      setRecording(false);
-    };
-
-    recognition.onend = () => {
-      setRecording(false);
-    };
+    recognition.onerror = () => { setRecording(false); };
+    recognition.onend = () => { setRecording(false); };
 
     recognitionRef.current = recognition;
     recognition.start();
@@ -78,15 +69,13 @@ export default function GeminiLive({ onTranscript, context = "intake" }: GeminiL
 
   return (
     <>
-      {/* Floating panel */}
       {open && (
-        <div className="gemini-panel">
+        <div className="voice-panel">
           <div className="card-header" style={{ marginBottom: "var(--space-sm)" }}>
-            <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>🎙️ Gemini Live</span>
+            <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>🎙️ Voice Input</span>
             <span className="badge badge-purple" style={{ fontSize: "0.6rem" }}>{contextLabels[context]}</span>
           </div>
 
-          {/* History */}
           <div style={{ maxHeight: 180, overflowY: "auto", marginBottom: "var(--space-md)" }}>
             {history.length === 0 && (
               <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", textAlign: "center", padding: "var(--space-md)" }}>
@@ -103,10 +92,9 @@ export default function GeminiLive({ onTranscript, context = "intake" }: GeminiL
             ))}
           </div>
 
-          {/* Live waveform */}
           {recording && (
             <div style={{ marginBottom: "var(--space-md)" }}>
-              <div className="gemini-wave">
+              <div className="voice-wave">
                 <span /><span /><span /><span /><span />
               </div>
               {transcript && (
@@ -117,7 +105,6 @@ export default function GeminiLive({ onTranscript, context = "intake" }: GeminiL
             </div>
           )}
 
-          {/* Controls */}
           <div className="row" style={{ justifyContent: "center" }}>
             {!recording ? (
               <button className="btn btn-primary btn-sm" onClick={startRecording}>🎙️ Start Speaking</button>
@@ -129,11 +116,10 @@ export default function GeminiLive({ onTranscript, context = "intake" }: GeminiL
         </div>
       )}
 
-      {/* FAB */}
       <button
-        className={`gemini-fab ${recording ? "recording" : ""}`}
+        className={`voice-fab ${recording ? "recording" : ""}`}
         onClick={() => { if (recording) stopRecording(); else setOpen(!open); }}
-        title="Gemini Live — Voice Input"
+        title="Voice Input"
       >
         {recording ? "⏹" : "🎙️"}
       </button>

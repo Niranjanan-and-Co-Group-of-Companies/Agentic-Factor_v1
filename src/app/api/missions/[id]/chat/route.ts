@@ -6,16 +6,13 @@ import { calculateChatCreditCost, checkCredits, deductCredits } from '@/lib/midd
 import { retrieveRelevantChunks, listUploadedDocuments } from '@/lib/services/rag-retrieval';
 import { detectApiKey, redactKey, providerLabel } from '@/lib/services/apikey-detector';
 import { verifyApiKey } from '@/lib/services/apikey-verifier';
-import { loadMissionTools, refreshMissionTools, executeTool, describeToolCall, type AnthropicTool, type ToolMeta } from '@/lib/services/tool-registry';
+import { loadMissionTools, refreshMissionTools, describeToolCall, type AnthropicTool, type ToolMeta } from '@/lib/services/tool-registry';
 import { writeEpisode } from '@/lib/services/agent-memory';
+import { inngest } from '@/lib/inngest/client';
 
-export const maxDuration = 300; // 5 minutes — agentic loops with many tool calls need time
+export const maxDuration = 300; // 5-minute safety buffer for the first LLM streaming call
 
-const MAX_TOOL_ROUNDS = 15;
-const MAX_TOKENS_PER_LOOP = 40_000; // safety: stop looping if token budget exhausted
-const TOOL_TIMEOUT_MS = 30_000;     // per-tool-call timeout
-
-// ── Streaming parser ───────────────────────────────────────────────────────
+// ── Streaming parser (for the first Vercel LLM call only) ─────────────────
 
 interface ContentBlock {
   type: 'text' | 'tool_use';
@@ -100,139 +97,6 @@ async function parseAnthropicStream(
   return { textContent: fullText, contentBlocks, stopReason, inputTokens, outputTokens };
 }
 
-// ── Agentic chat loop ──────────────────────────────────────────────────────
-
-async function runChatLoop(params: {
-  systemPrompt: string;
-  initialMessages: Array<{ role: string; content: unknown }>;
-  apiKey: string;
-  missionId: string;
-  tenantId: string;
-  supabase: ReturnType<typeof createServiceClient>;
-  tools: AnthropicTool[];
-  toolMeta: Map<string, ToolMeta>;
-  send: (obj: Record<string, unknown>) => void;
-}): Promise<{ fullText: string; inputTokens: number; outputTokens: number; toolsUsed: string[] }> {
-  const { systemPrompt, initialMessages, apiKey, missionId, tenantId, supabase, tools, toolMeta, send } = params;
-  const messages = [...initialMessages];
-  let totalInputTokens = 0;
-  let totalOutputTokens = 0;
-  let fullText = '';
-  const toolsUsed: string[] = [];
-
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    // Token budget guard — prevent runaway loops
-    if (totalInputTokens + totalOutputTokens > MAX_TOKENS_PER_LOOP) {
-      send({ type: 'delta', text: '\n\n*(Reached maximum context — wrapping up.)*' });
-      break;
-    }
-
-    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
-        stream: true,
-        system: systemPrompt,
-        tools,
-        messages,
-      }),
-    });
-
-    if (!anthropicRes.ok) {
-      const err = await anthropicRes.text();
-      console.error('[chat] Anthropic error:', err);
-      send({ type: 'error', message: 'AI service temporarily unavailable. Please try again.' });
-      break;
-    }
-
-    const { textContent, contentBlocks, stopReason, inputTokens, outputTokens } =
-      await parseAnthropicStream(anthropicRes, text => send({ type: 'delta', text }));
-
-    totalInputTokens += inputTokens;
-    totalOutputTokens += outputTokens;
-    if (textContent) fullText += textContent;
-
-    // Build assistant message for conversation history
-    const assistantContent: unknown[] = [];
-    for (const block of contentBlocks) {
-      if (block.type === 'text' && block.text) {
-        assistantContent.push({ type: 'text', text: block.text });
-      } else if (block.type === 'tool_use' && block.id) {
-        let parsedInput: Record<string, unknown> = {};
-        try { parsedInput = JSON.parse(block.inputJson ?? '{}'); } catch { /* leave empty */ }
-        assistantContent.push({ type: 'tool_use', id: block.id, name: block.name, input: parsedInput });
-      }
-    }
-
-    const toolBlocks = contentBlocks.filter(b => b.type === 'tool_use' && b.id && b.name);
-    if (stopReason !== 'tool_use' || toolBlocks.length === 0) break;
-
-    // Execute all tool calls in this round
-    const toolResults: unknown[] = [];
-    for (const block of toolBlocks) {
-      const meta = toolMeta.get(block.name!);
-      const providerSlug = meta?.providerSlug ?? 'system';
-      const logoUrl = meta?.logoUrl ?? null;
-      const displayName = meta?.displayName ?? block.name!;
-
-      let parsedInput: Record<string, unknown> = {};
-      try { parsedInput = JSON.parse(block.inputJson ?? '{}'); } catch { /* leave empty */ }
-
-      const label = describeToolCall(block.name!, parsedInput);
-
-      // Emit running event with full metadata
-      send({
-        type: 'tool_status',
-        name: block.name,
-        provider: providerSlug,
-        displayName,
-        status: 'running',
-        label,
-        logoUrl,
-      });
-
-      toolsUsed.push(block.name!);
-
-      let result: { content: string; summary: string };
-      try {
-        // Per-tool timeout via Promise.race
-        result = await Promise.race([
-          executeTool(block.name!, parsedInput, tenantId, missionId, supabase),
-          new Promise<{ content: string; summary: string }>((_, reject) =>
-            setTimeout(() => reject(new Error('Tool timed out')), TOOL_TIMEOUT_MS)
-          ),
-        ]);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        result = { content: `Tool "${block.name}" timed out: ${msg}`, summary: `${block.name} timed out` };
-      }
-
-      send({
-        type: 'tool_status',
-        name: block.name,
-        provider: providerSlug,
-        displayName,
-        status: result.summary.includes('failed') || result.summary.includes('timed out') ? 'error' : 'done',
-        summary: result.summary,
-        logoUrl,
-      });
-
-      toolResults.push({ type: 'tool_result', tool_use_id: block.id!, content: result.content });
-    }
-
-    messages.push({ role: 'assistant', content: assistantContent });
-    messages.push({ role: 'user', content: toolResults });
-  }
-
-  return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, toolsUsed };
-}
-
 // ── Route handler ──────────────────────────────────────────────────────────
 
 export async function POST(
@@ -273,7 +137,8 @@ export async function POST(
     return new Response(JSON.stringify({ error: 'messages required' }), { status: 400 });
   }
 
-  const creditCheck = await checkCredits(tenantId, 2);
+  // Credit pre-flight — need at least 10 credits (one LLM call + one tool round)
+  const creditCheck = await checkCredits(tenantId, 10);
   if (!creditCheck.allowed) {
     return new Response(JSON.stringify({ error: creditCheck.reason ?? 'Insufficient credits' }), {
       status: 402, headers: { 'Content-Type': 'application/json' },
@@ -282,7 +147,7 @@ export async function POST(
 
   let { systemPrompt, connectedProviders } = await buildChatContext(missionId, tenantId, isFirstLoad ?? false);
 
-  // ── API key paste detection ──────────────────────────────────────────
+  // ── API key paste detection ──────────────────────────────────────────────
   const lastUserMsg = messages[messages.length - 1];
   if (lastUserMsg?.role === 'user') {
     const detectedKey = detectApiKey(lastUserMsg.content);
@@ -321,7 +186,7 @@ export async function POST(
     }
   }
 
-  // ── RAG: inject relevant uploaded document context ───────────────────
+  // ── RAG: inject relevant uploaded document context ───────────────────────
   const userQuery = lastUserMsg?.content ?? '';
   const [ragContext, docList] = await Promise.all([
     retrieveRelevantChunks(tenantId, missionId, userQuery),
@@ -330,10 +195,9 @@ export async function POST(
   if (docList) systemPrompt += `\n\n${docList}`;
   if (ragContext) systemPrompt += `\n\n${ragContext}`;
 
-  // ── Dynamic tool loading ─────────────────────────────────────────────
+  // ── Dynamic tool loading ─────────────────────────────────────────────────
   const { tools, toolMeta, needsRefresh } = await loadMissionTools(tenantId, missionId, connectedProviders);
 
-  // If schemas are stale/missing, refresh in background for next call
   if (needsRefresh && connectedProviders.length > 0) {
     refreshMissionTools(tenantId, missionId, connectedProviders).catch(err =>
       console.error('[chat] Tool refresh error:', err)
@@ -345,6 +209,7 @@ export async function POST(
     return new Response(JSON.stringify({ error: 'LLM not configured' }), { status: 500 });
   }
 
+  const model = 'claude-sonnet-4-6';
   const recentMessages = messages.slice(-20);
   const supabase = createServiceClient();
 
@@ -354,67 +219,115 @@ export async function POST(
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
 
       try {
-        const { fullText, inputTokens, outputTokens, toolsUsed } = await runChatLoop({
-          systemPrompt,
-          initialMessages: recentMessages,
-          apiKey,
-          missionId,
-          tenantId,
-          supabase,
-          tools,
-          toolMeta,
-          send,
+        // ── First (and only Vercel) LLM call — streaming ─────────────────
+        const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 4096,
+            stream: true,
+            system: systemPrompt,
+            tools,
+            messages: recentMessages,
+          }),
         });
 
-        // Extract <action> block
-        const actionMatch = fullText.match(/<action>([\s\S]*?)<\/action>/);
-        let actionPayload: Record<string, unknown> | null = null;
-        let cleanText = fullText;
-        if (actionMatch) {
-          try {
-            actionPayload = JSON.parse(actionMatch[1]);
-            cleanText = fullText.replace(/<action>[\s\S]*?<\/action>/, '').trim();
-          } catch { /* malformed — ignore */ }
+        if (!anthropicRes.ok) {
+          const err = await anthropicRes.text();
+          console.error('[chat] Anthropic error:', err);
+          send({ type: 'error', message: 'AI service temporarily unavailable. Please try again.' });
+          controller.close();
+          return;
         }
 
-        // Deduct credits
-        const credits = await calculateChatCreditCost(inputTokens, outputTokens, 'claude-sonnet-4-6');
-        deductCredits(tenantId, credits, 'chat_message', {
-          provider: 'anthropic', model: 'claude-sonnet-4-6', inputTokens, outputTokens,
-        }).catch(console.error);
+        const { textContent, contentBlocks, stopReason, inputTokens, outputTokens } =
+          await parseAnthropicStream(anthropicRes, text => send({ type: 'delta', text }));
 
-        // Persist messages + write episode memory (all fire-and-forget)
+        const toolBlocks = contentBlocks.filter(b => b.type === 'tool_use' && b.id && b.name);
+
+        // ── Simple text response — no tools needed ────────────────────────
+        if (stopReason !== 'tool_use' || toolBlocks.length === 0) {
+          const actionMatch = textContent.match(/<action>([\s\S]*?)<\/action>/);
+          let actionPayload: Record<string, unknown> | null = null;
+          let cleanText = textContent;
+          if (actionMatch) {
+            try { actionPayload = JSON.parse(actionMatch[1]); cleanText = textContent.replace(/<action>[\s\S]*?<\/action>/, '').trim(); } catch { /* ignore */ }
+          }
+
+          const credits = await calculateChatCreditCost(inputTokens, outputTokens, model);
+          deductCredits(tenantId, credits, 'chat_message', {
+            provider: 'anthropic', model, inputTokens, outputTokens,
+          }).catch(console.error);
+
+          const chatId = sessionId ?? (await ensureSession(supabase, missionId, tenantId, recentMessages));
+          const userMsg = recentMessages[recentMessages.length - 1];
+
+          ;(async () => {
+            await supabase.from('mission_chat_messages').insert({ chat_id: chatId, tenant_id: tenantId, role: userMsg.role, content: userMsg.content });
+            await supabase.from('mission_chat_messages').insert({
+              chat_id: chatId, tenant_id: tenantId, role: 'assistant', content: cleanText,
+              action_payload: actionPayload, input_tokens: inputTokens, output_tokens: outputTokens, credits_deducted: credits,
+            });
+            await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
+            const allMsgs = recentMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: String(m.content) }));
+            allMsgs.push({ role: 'assistant', content: cleanText });
+            writeEpisode(tenantId, missionId, allMsgs, []).catch(console.error);
+          })().catch(console.error);
+
+          send({ type: 'done', credits, inputTokens, outputTokens, sessionId: chatId, cleanText, action: actionPayload });
+          controller.close();
+          return;
+        }
+
+        // ── Tool use detected — hand off to Inngest ───────────────────────
         const chatId = sessionId ?? (await ensureSession(supabase, missionId, tenantId, recentMessages));
-        const userMsg = recentMessages[recentMessages.length - 1];
+        const executionId = crypto.randomUUID();
 
-        ;(async () => {
-          const { error: ue } = await supabase.from('mission_chat_messages').insert({
-            chat_id: chatId, tenant_id: tenantId, role: userMsg.role, content: userMsg.content,
-          });
-          if (ue) { console.error('[chat/persist user]', ue); return; }
-
-          await supabase.from('mission_chat_messages').insert({
-            chat_id: chatId, tenant_id: tenantId,
-            role: 'assistant', content: cleanText,
-            action_payload: actionPayload,
-            input_tokens: inputTokens, output_tokens: outputTokens, credits_deducted: credits,
+        // Serialize contentBlocks for the Inngest event (parse inputJson → input)
+        const firstAssistantContent = contentBlocks
+          .filter(b => (b.type === 'text' && b.text) || (b.type === 'tool_use' && b.id))
+          .map(b => {
+            if (b.type === 'text') return { type: 'text', text: b.text! };
+            let input: Record<string, unknown> = {};
+            try { input = JSON.parse(b.inputJson ?? '{}'); } catch { /* leave empty */ }
+            return { type: 'tool_use', id: b.id!, name: b.name!, input };
           });
 
-          await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
+        // Deduct planning call credits (non-fatal)
+        calculateChatCreditCost(inputTokens, outputTokens, model)
+          .then(cost => deductCredits(tenantId, cost, 'chat_planning', { provider: 'anthropic', model, inputTokens, outputTokens }))
+          .catch(() => {});
 
-          // Write episode memory in background (extract + store after session)
-          const allMsgs = recentMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: String(m.content) }));
-          allMsgs.push({ role: 'assistant', content: cleanText });
-          writeEpisode(tenantId, missionId, allMsgs, toolsUsed).catch(console.error);
-        })().catch(console.error);
+        // Fire Inngest — this is where all tool execution happens
+        await inngest.send({
+          name: 'chat.agent.execute',
+          data: {
+            tenantId,
+            missionId,
+            chatId,
+            executionId,
+            recentMessages: recentMessages.map(m => ({ role: m.role, content: m.content })),
+            firstAssistantContent,
+            planningText: textContent,
+            connectedProviders,
+            model,
+          },
+        });
 
-        send({ type: 'done', credits, inputTokens, outputTokens, sessionId: chatId, cleanText, action: actionPayload });
+        // Tell the frontend to switch to Realtime mode
+        send({ type: 'agent_queued', executionId, sessionId: chatId });
+        controller.close();
+
       } catch (err) {
         console.error('[chat/stream]', err);
         send({ type: 'error', message: 'Something went wrong. Please try again.' });
+        controller.close();
       }
-
-      controller.close();
     },
   });
 

@@ -341,8 +341,8 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: hsla(215, 20%, 30%, 0.5); border-radius: 3px; }
 
-/* ── Floating Mic (Gemini Live) ── */
-.gemini-fab {
+/* ── Floating Mic (Voice Input) ── */
+.voice-fab {
   position: fixed; bottom: 28px; right: 28px; z-index: 1000;
   width: 56px; height: 56px; border-radius: 50%; border: none; cursor: pointer;
   background: linear-gradient(135deg, var(--accent), var(--purple));
@@ -350,11 +350,11 @@ body {
   box-shadow: 0 4px 24px hsla(217,91%,60%,0.4);
   transition: all var(--duration) var(--ease);
 }
-.gemini-fab:hover { transform: scale(1.08); box-shadow: 0 6px 32px hsla(217,91%,60%,0.5); }
-.gemini-fab.recording { animation: micPulse 1s infinite; background: linear-gradient(135deg, var(--rose), hsl(330,80%,50%)); }
+.voice-fab:hover { transform: scale(1.08); box-shadow: 0 6px 32px hsla(217,91%,60%,0.5); }
+.voice-fab.recording { animation: micPulse 1s infinite; background: linear-gradient(135deg, var(--rose), hsl(330,80%,50%)); }
 @keyframes micPulse { 0%,100% { box-shadow: 0 0 0 0 hsla(0,84%,60%,0.4); } 50% { box-shadow: 0 0 0 14px hsla(0,84%,60%,0); } }
 
-.gemini-panel {
+.voice-panel {
   position: fixed; bottom: 96px; right: 28px; z-index: 999;
   width: 360px; max-height: 400px;
   background: var(--bg-card); backdrop-filter: blur(20px);
@@ -362,15 +362,15 @@ body {
   padding: var(--space-lg); box-shadow: var(--shadow-md);
   animation: slideIn 0.25s var(--ease);
 }
-.gemini-wave { display: flex; align-items: flex-end; gap: 3px; height: 24px; justify-content: center; }
-.gemini-wave span {
+.voice-wave { display: flex; align-items: flex-end; gap: 3px; height: 24px; justify-content: center; }
+.voice-wave span {
   width: 3px; border-radius: 2px; background: var(--accent);
   animation: waveBar 0.8s ease-in-out infinite;
 }
-.gemini-wave span:nth-child(2) { animation-delay: 0.1s; }
-.gemini-wave span:nth-child(3) { animation-delay: 0.2s; }
-.gemini-wave span:nth-child(4) { animation-delay: 0.3s; }
-.gemini-wave span:nth-child(5) { animation-delay: 0.4s; }
+.voice-wave span:nth-child(2) { animation-delay: 0.1s; }
+.voice-wave span:nth-child(3) { animation-delay: 0.2s; }
+.voice-wave span:nth-child(4) { animation-delay: 0.3s; }
+.voice-wave span:nth-child(5) { animation-delay: 0.4s; }
 @keyframes waveBar { 0%,100% { height: 6px; } 50% { height: 22px; } }
 
 /* ── File Drop Zone ── */
@@ -611,7 +611,7 @@ body {
   .main-content { padding: var(--space-lg); }
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
-  .gemini-panel { width: 300px; right: 16px; bottom: 80px; }
+  .voice-panel { width: 300px; right: 16px; bottom: 80px; }
   .agent-settings-panel { width: 220px; }
   .command-popup { width: 280px; }
 }
@@ -625,8 +625,8 @@ body {
     padding-top: calc(60px + var(--space-md));
   }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
-  .gemini-panel { width: calc(100vw - 32px); right: 16px; }
-  .gemini-fab { bottom: 16px; right: 16px; }
+  .voice-panel { width: calc(100vw - 32px); right: 16px; }
+  .voice-fab { bottom: 16px; right: 16px; }
   .command-popup { width: calc(100vw - 32px); left: 16px; transform: none; }
   .page-title { font-size: 1.4rem; }
   .stat-value { font-size: 1.5rem; }
