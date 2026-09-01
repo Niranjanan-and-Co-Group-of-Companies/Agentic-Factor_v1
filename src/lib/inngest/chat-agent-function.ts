@@ -181,15 +181,16 @@ export const executeChatAgent = inngest.createFunction(
       // ── Next LLM call (non-streaming) ────────────────────────────────────
       const llmResult = await step.run(`llm-round-${round}`, async () => {
         const { checkCredits, deductCredits, calculateChatCreditCost } = await import('@/lib/middleware/billing');
+        const supabase = createServiceClient();
 
         // Pre-flight credit check for LLM call
         const creditCheck = await checkCredits(tenantId, 4);
         if (!creditCheck.allowed) {
-          return { stopReason: 'credit_exhausted', content: [], inputTokens: 0, outputTokens: 0 };
+          return { stopReason: 'credit_exhausted', content: [], inputTokens: 0, outputTokens: 0, roundText: '' };
         }
 
         const apiKey = process.env.ANTHROPIC_API_KEY;
-        if (!apiKey) return { stopReason: 'error', content: [], inputTokens: 0, outputTokens: 0 };
+        if (!apiKey) return { stopReason: 'error', content: [], inputTokens: 0, outputTokens: 0, roundText: '' };
 
         const response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
@@ -211,7 +212,7 @@ export const executeChatAgent = inngest.createFunction(
         if (!response.ok) {
           const err = await response.text();
           console.error('[chat-agent] Anthropic error:', err);
-          return { stopReason: 'error', content: [], inputTokens: 0, outputTokens: 0 };
+          return { stopReason: 'error', content: [], inputTokens: 0, outputTokens: 0, roundText: '' };
         }
 
         const data = await response.json() as {
@@ -227,11 +228,30 @@ export const executeChatAgent = inngest.createFunction(
           }))
           .catch(() => {});
 
+        // Emit the complete text from this round as one discrete event.
+        // ONE blob per round (not token-by-token) — safe for Realtime.
+        const roundText = (data.content as SerializedContentBlock[])
+          .filter(b => b.type === 'text' && b.text)
+          .map(b => b.text!)
+          .join('');
+
+        if (roundText) {
+          await supabase.from('agent_execution_events').insert({
+            session_id: executionId,
+            tenant_id: tenantId,
+            mission_id: missionId,
+            chat_id: chatId,
+            event_type: 'text_delta',
+            payload: { text: roundText },
+          });
+        }
+
         return {
           stopReason: data.stop_reason,
           content: data.content,
           inputTokens: data.usage.input_tokens,
           outputTokens: data.usage.output_tokens,
+          roundText,
         };
       });
 
@@ -248,9 +268,8 @@ export const executeChatAgent = inngest.createFunction(
         return { success: false, reason: 'llm_error' };
       }
 
-      // Accumulate text from this LLM response
-      const textBlocks = (llmResult.content as SerializedContentBlock[]).filter(b => b.type === 'text' && b.text);
-      fullAdditionalText += textBlocks.map(b => b.text!).join('');
+      // Accumulate text from this round (already emitted live via text_delta event above)
+      fullAdditionalText += llmResult.roundText ?? '';
 
       // Add to messages for next round
       messages.push({ role: 'assistant', content: llmResult.content });

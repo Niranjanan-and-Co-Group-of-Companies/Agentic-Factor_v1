@@ -29,6 +29,7 @@ interface ChatMessage {
   action_applied?: boolean;
   isStreaming?: boolean;
   ts?: number;
+  toolCards?: ToolCard[];
 }
 
 interface ActionPayload {
@@ -592,15 +593,19 @@ export default function MissionChatPage() {
       }
       waitingForInngestRef.current = false;
 
-      setMessages(prev => {
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          role: 'assistant', content: cleanText,
-          action_payload: action, isStreaming: false, ts: Date.now(),
-        };
-        return updated;
+      // Capture current tool cards atomically and clear in one update to avoid stale closure
+      setToolStatusLines(currentCards => {
+        setMessages(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: 'assistant', content: cleanText,
+            action_payload: action, isStreaming: false, ts: Date.now(),
+            toolCards: currentCards.length > 0 ? [...currentCards] : undefined,
+          };
+          return updated;
+        });
+        return [];
       });
-      setToolStatusLines([]);
       setIsStreaming(false);
 
       if (sid && !activeSessionId) setActiveSessionId(sid);
@@ -728,6 +733,26 @@ export default function MissionChatPage() {
                         if (existing >= 0) { const updated = [...prev]; updated[existing] = entry; return updated; }
                         return [...prev, entry];
                       });
+                    }
+
+                    // One complete paragraph per LLM round — safe Realtime (not token streaming)
+                    if (row.event_type === 'text_delta') {
+                      const deltaText = (p.text as string) ?? '';
+                      if (deltaText) {
+                        setMessages(prev => {
+                          const updated = [...prev];
+                          const last = updated[updated.length - 1];
+                          if (last?.role === 'assistant' && last.isStreaming) {
+                            const base = last.content;
+                            const sep = base && !base.endsWith('\n') ? '\n\n' : '';
+                            updated[updated.length - 1] = {
+                              ...last,
+                              content: stripActionTags(base + sep + deltaText),
+                            };
+                          }
+                          return updated;
+                        });
+                      }
                     }
 
                     if (row.event_type === 'agent_completed') {
@@ -1215,9 +1240,12 @@ export default function MissionChatPage() {
                       color: msg.role === 'user' ? '#fff' : 'var(--text-primary)',
                       fontSize: '0.88rem', lineHeight: 1.65,
                     }}>
-                      {/* Tool call cards — shown while streaming, persist on done */}
-                      {(msg.isStreaming ? toolStatusLines.length > 0 : false) && (
+                      {/* Tool call cards — live while streaming, persisted in completed messages */}
+                      {msg.isStreaming && toolStatusLines.length > 0 && (
                         <ToolCallCards cards={toolStatusLines} />
+                      )}
+                      {!msg.isStreaming && msg.toolCards && msg.toolCards.length > 0 && (
+                        <ToolCallCards cards={msg.toolCards} />
                       )}
                       {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
                       {msg.isStreaming && (
