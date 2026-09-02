@@ -57,17 +57,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Storage upload failed' }, { status: 500 });
     }
 
-    // ── 2. Extract text content ─────────────────────────────────────────────
-    const anthropicApiKey = process.env.ANTHROPIC_API_KEY ?? '';
-    const extracted = await extractFileContent(buffer, file.name, mimeType, anthropicApiKey);
+    // ── 2. Resolve tenant AI keys for smart vision ──────────────────────────
+    // Images are described by the best available vision model:
+    // tenant's OpenAI (GPT-4o) → tenant's Gemini → platform Claude Haiku
+    const { data: aiPerms } = await supabase
+      .from('tenant_permissions')
+      .select('provider, access_token')
+      .eq('tenant_id', tenantId)
+      .in('provider', ['openai', 'gemini']);
 
-    // ── 3. Create tenant_assets record ─────────────────────────────────────
+    const openaiPerm = aiPerms?.find(p => p.provider === 'openai');
+    const geminiPerm = aiPerms?.find(p => p.provider === 'gemini');
+
+    const visionConfig = {
+      openaiKey: openaiPerm?.access_token && openaiPerm.access_token !== 'composio_managed'
+        ? (openaiPerm.access_token as string) : undefined,
+      geminiKey: geminiPerm?.access_token && geminiPerm.access_token !== 'composio_managed'
+        ? (geminiPerm.access_token as string) : undefined,
+    };
+
+    // ── 3. Extract text content ─────────────────────────────────────────────
+    const anthropicApiKey = process.env.ANTHROPIC_API_KEY ?? '';
+    const extracted = await extractFileContent(buffer, file.name, mimeType, anthropicApiKey, visionConfig);
+
+    // ── 4. Create tenant_assets record ─────────────────────────────────────
+    // DB constraint: asset_type IN ('url', 'file', 'text') — map 'image' → 'file'
     const { data: assetRow, error: assetError } = await supabase
       .from('tenant_assets')
       .insert({
         tenant_id: tenantId,
         mission_id: missionId || null,
-        asset_type: extracted.assetType,
+        asset_type: extracted.assetType === 'image' ? 'file' : extracted.assetType,
         classification: 'resource',
         source_uri: storagePath,
         title: extracted.summary.slice(0, 500),
@@ -82,7 +102,7 @@ export async function POST(request: NextRequest) {
 
     const assetId = assetRow.id;
 
-    // ── 4. Chunk + embed ────────────────────────────────────────────────────
+    // ── 5. Chunk + embed ────────────────────────────────────────────────────
     // Run asynchronously — client gets a response immediately, embeddings
     // are ready within a few seconds.
     embedAsync(supabase, assetId, tenantId, missionId, extracted.text).catch(err =>

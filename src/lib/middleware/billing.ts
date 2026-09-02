@@ -165,10 +165,10 @@ export async function checkCredits(tenantId: string, cost: number = 1): Promise<
     return { allowed: false, plan, reason: `Subscription cancelled. Please resubscribe to continue.${frozenMsg}` };
   }
 
-  // Enforce monthly spending cap
+  // Enforce monthly spending cap — top-up credits bypass it (explicitly purchased, non-expiring)
   const monthlyLimit = billing?.monthly_credit_limit ?? null;
   const usedThisMonth = billing?.credits_used_this_month ?? 0;
-  if (monthlyLimit !== null && usedThisMonth + cost > monthlyLimit) {
+  if (monthlyLimit !== null && usedThisMonth + cost > monthlyLimit && creditsTopup < cost) {
     return {
       allowed: false,
       plan,
@@ -300,8 +300,8 @@ export async function deductCredits(
       throw new Error(`Insufficient credits: ${totalAvailable} remaining (${creditsMonthly} monthly + ${creditsTopup} top-up), ${amount} needed for ${actionType}`);
     }
 
-    // Hard stop: refuse to deduct if monthly spending cap would be exceeded
-    if (monthlyLimit !== null && usedThisMonth + amount > monthlyLimit) {
+    // Hard stop: refuse to deduct if monthly spending cap would be exceeded (top-up bypasses cap)
+    if (monthlyLimit !== null && usedThisMonth + amount > monthlyLimit && creditsTopup < amount) {
       throw new Error(`Monthly spending cap of ${monthlyLimit} credits reached (${usedThisMonth} used). Mission paused. Raise your cap in Usage & Credits.`);
     }
 

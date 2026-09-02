@@ -123,6 +123,15 @@ export function verifyWebhookSignature(
 }
 
 /**
+ * Fetch a Razorpay order by ID (used to retrieve notes from top-up payments).
+ * Razorpay does not copy order notes to payment objects — must look up the order.
+ */
+export async function fetchOrder(orderId: string): Promise<any> {
+  const razorpay = getRazorpay();
+  return await razorpay.orders.fetch(orderId);
+}
+
+/**
  * Map a Razorpay plan ID back to our internal plan name.
  */
 export function resolvePlanName(razorpayPlanId: string): string {

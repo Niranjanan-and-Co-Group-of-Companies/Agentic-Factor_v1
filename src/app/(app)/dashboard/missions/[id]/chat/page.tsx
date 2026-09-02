@@ -6,6 +6,7 @@ import { createBrowserClient } from '@supabase/ssr';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import MissionsSidebar from '@/components/MissionsSidebar';
 import { renderMarkdown } from '@/lib/utils/render-markdown';
+import { sanitizeTitle } from '@/lib/utils/sanitize-title';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -33,11 +34,12 @@ interface ChatMessage {
 }
 
 interface ActionPayload {
-  type: 'schedule' | 'run_now' | 'resume_run' | 'go_live' | 'suggest_connector' | 'webhook';
+  type: 'schedule' | 'run_now' | 'resume_run' | 'go_live' | 'suggest_connector' | 'webhook' | 'update_mission';
   label: string;
   cron?: string;
   timezone?: string;
   provider?: string;
+  summary?: string; // used by update_mission
 }
 
 interface LiveRun {
@@ -360,7 +362,7 @@ export default function MissionChatPage() {
 
       // Title: prefer missions.title column, fall back to mission_json.title
       const resolvedTitle = mission?.title || (missionJson?.title as string | undefined);
-      if (resolvedTitle) setMissionTitle(resolvedTitle);
+      if (resolvedTitle) setMissionTitle(sanitizeTitle(resolvedTitle));
       if (mission?.status) setMissionStatus(mission.status);
 
       // Permissions live inside mission_json, not a separate column
@@ -421,7 +423,7 @@ export default function MissionChatPage() {
       if (data?.status) setMissionStatus(data.status);
       // Fill in title if it wasn't set on initial load
       const pollTitle = data?.title || (data?.mission_json as any)?.title;
-      if (pollTitle) setMissionTitle((prev) => (prev === 'Mission' ? pollTitle : prev));
+      if (pollTitle) setMissionTitle((prev) => (prev === 'Mission' ? sanitizeTitle(pollTitle) : prev));
     }, 8000);
     return () => clearInterval(poll);
   }, [missionId]);
@@ -559,12 +561,29 @@ export default function MissionChatPage() {
         setConnectingSlug(null);
         return;
       }
-      window.open(data.authUrl, 'oauth_window', 'width=600,height=700,scrollbars=yes,resizable=yes');
+      const popup = window.open(data.authUrl, 'oauth_window', 'width=600,height=700,scrollbars=yes,resizable=yes');
+      // Poll for popup close — when it closes, mark as connected and persist to mission
+      const timer = setInterval(() => {
+        if (!popup || popup.closed) {
+          clearInterval(timer);
+          setConnectingSlug(null);
+          setConnectedInSession(prev => new Set([...prev, slug]));
+          setRequiredConnectors(prev => prev.map(c => c.service === slug ? { ...c, connected: true } : c));
+          showToast(`✅ ${label} connected!`);
+          // Persist connector to mission_json.permissions (non-fatal)
+          fetch(`/api/missions/${missionId}/add-connector`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ provider: slug }),
+          }).catch(() => {});
+        }
+      }, 600);
     } catch {
       showToast('❌ Could not start connection');
       setConnectingSlug(null);
     }
-  }, []);
+  }, [missionId]);
 
   // ── Save API key from inline modal ────────────────────────────
   const handleInlineApiKeySave = useCallback(async () => {
@@ -602,6 +621,13 @@ export default function MissionChatPage() {
       setInlineApiKeyModal(null);
       setInlineApiKeyValue('');
       showToast(`✅ ${label} connected!`);
+      // Persist connector to mission_json.permissions (non-fatal)
+      fetch(`/api/missions/${missionId}/add-connector`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ provider: slug, type: 'api_key' }),
+      }).catch(() => {});
     } catch {
       setInlineApiKeyError('Could not save the key. Please try again.');
     }
@@ -998,6 +1024,27 @@ export default function MissionChatPage() {
         const url = `${window.location.origin}/api/webhooks/trigger/${missionId}`;
         try { await navigator.clipboard.writeText(url); } catch { /* ignore */ }
         showToast(`📋 Webhook URL copied!`);
+
+      } else if (action.type === 'update_mission') {
+        showToast('⚙️ Updating mission blueprint…');
+        const res = await fetch(`/api/missions/${missionId}/update-blueprint`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ request: action.summary ?? action.label }),
+        });
+        if (res.ok) {
+          const data = await res.json() as { title?: string };
+          if (data.title) setMissionTitle(sanitizeTitle(data.title));
+          showToast('✅ Mission updated!');
+          setMessages(prev => [
+            ...prev,
+            { role: 'assistant', content: 'Done — the mission has been updated with your changes. You can run it now or keep refining.', ts: Date.now() },
+          ]);
+        } else {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          showToast(`❌ ${err.error ?? 'Could not update mission. Please try again.'}`);
+        }
       }
     } catch {
       showToast('❌ Something went wrong. Please try again.');
@@ -1366,7 +1413,7 @@ export default function MissionChatPage() {
                           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 3 }}>
-                                {a.type === 'schedule' ? '📅' : a.type === 'run_now' ? '🚀' : a.type === 'resume_run' ? '▶' : a.type === 'go_live' ? '🟢' : a.type === 'suggest_connector' ? '🔌' : '🔗'}{' '}
+                                {a.type === 'schedule' ? '📅' : a.type === 'run_now' ? '🚀' : a.type === 'resume_run' ? '▶' : a.type === 'go_live' ? '🟢' : a.type === 'suggest_connector' ? '🔌' : a.type === 'update_mission' ? '⚙️' : '🔗'}{' '}
                                 {a.label}
                               </div>
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
@@ -1374,6 +1421,7 @@ export default function MissionChatPage() {
                                  a.type === 'run_now' ? (missionStatus === 'draft' ? 'Will build and start this mission for the first time.' : 'Will trigger a fresh run of all agents.') :
                                  a.type === 'resume_run' ? 'Skips completed agents and retries only from the failed point.' :
                                  a.type === 'go_live' ? 'Switches from preview mode — real emails, posts, and actions will execute.' :
+                                 a.type === 'update_mission' ? (a.summary ?? 'Applies the described changes to this mission\'s blueprint.') :
                                  connectorDesc ?? 'Connects this service to your mission.' }
                               </div>
                               {isConnector && connectorSlug && (

@@ -8,6 +8,14 @@ export interface ExtractResult {
   assetType: 'file' | 'text' | 'image';
 }
 
+// Vision provider config — passed from upload route so tenant's connected AI
+// is used when available. Priority: OpenAI (GPT-4o) → Gemini → Claude Haiku.
+export interface VisionConfig {
+  anthropicKey: string;  // platform key — always present as final fallback
+  openaiKey?: string;    // tenant's OpenAI key → GPT-4o vision
+  geminiKey?: string;    // tenant's Gemini key → Gemini Flash vision
+}
+
 // Image MIME types — sent to Claude Vision for description + text extraction
 const IMAGE_MIMES = new Set([
   'image/jpeg', 'image/jpg', 'image/png', 'image/webp',
@@ -29,13 +37,15 @@ export async function extractFileContent(
   buffer: Buffer,
   fileName: string,
   mimeType: string,
-  anthropicApiKey: string
+  anthropicApiKey: string,
+  visionConfig?: Pick<VisionConfig, 'openaiKey' | 'geminiKey'>
 ): Promise<ExtractResult> {
   const lower = fileName.toLowerCase();
+  const vision: VisionConfig = { anthropicKey: anthropicApiKey, ...visionConfig };
 
   // ── Images ─────────────────────────────────────────────────────────────────
   if (IMAGE_MIMES.has(mimeType) || /\.(jpe?g|png|webp|gif|bmp|tiff?|svg|heic|heif)$/i.test(lower)) {
-    return extractImage(buffer, fileName, mimeType, anthropicApiKey);
+    return extractImage(buffer, fileName, mimeType, vision);
   }
 
   // ── PDF ────────────────────────────────────────────────────────────────────
@@ -72,7 +82,7 @@ export async function extractFileContent(
 
   // ── ZIP archive ────────────────────────────────────────────────────────────
   if (mimeType === 'application/zip' || mimeType === 'application/x-zip-compressed' || lower.endsWith('.zip')) {
-    return extractZip(buffer, fileName, anthropicApiKey);
+    return extractZip(buffer, fileName, vision);
   }
 
   // ── CSV (explicit check before plain-text fallback) ────────────────────────
@@ -110,56 +120,101 @@ export async function extractFileContent(
 
 // ── Extractors ─────────────────────────────────────────────────────────────
 
+const IMAGE_PROMPT = 'Describe this image in detail. Extract ALL visible text, numbers, data, and labels exactly as they appear. Include: subject matter, key elements, any charts/graphs/tables data, any text overlays, and overall context. Be thorough — this description is used for search and retrieval.';
+
 async function extractImage(
   buffer: Buffer,
   fileName: string,
   mimeType: string,
-  anthropicApiKey: string
+  vision: VisionConfig
 ): Promise<ExtractResult> {
-  try {
-    const base64 = buffer.toString('base64');
-    // Normalise MIME type for Anthropic API (it doesn't accept heic/heif)
-    const safeMime = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mimeType)
-      ? mimeType
-      : 'image/jpeg';
+  const base64 = buffer.toString('base64');
+  // Normalise MIME for providers that don't accept heic/heif
+  const safeMime = (['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as string[]).includes(mimeType)
+    ? mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+    : 'image/jpeg' as const;
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': anthropicApiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: safeMime, data: base64 },
-            },
-            {
-              type: 'text',
-              text: 'Describe this image in detail. Extract ALL visible text, numbers, data, and labels exactly as they appear. Include: subject matter, key elements, any charts/graphs/tables data, any text overlays, and the overall context. Be thorough — this description will be used for search and retrieval.',
-            },
-          ],
-        }],
-      }),
-      signal: AbortSignal.timeout(20_000),
-    });
+  // ── 1st choice: tenant's OpenAI key → GPT-4o vision ──────────────────────
+  if (vision.openaiKey) {
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${vision.openaiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          max_tokens: 1024,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: `data:${safeMime};base64,${base64}`, detail: 'high' } },
+              { type: 'text', text: IMAGE_PROMPT },
+            ],
+          }],
+        }),
+        signal: AbortSignal.timeout(25_000),
+      });
+      if (res.ok) {
+        const data = await res.json() as { choices: Array<{ message: { content: string } }> };
+        const description = data.choices?.[0]?.message?.content ?? '';
+        if (description) {
+          return { text: `Image: ${fileName}\n\n${description}`, summary: `Image: ${fileName} — ${description.slice(0, 100)}`, assetType: 'image' };
+        }
+      }
+    } catch { /* fall through */ }
+  }
 
-    if (res.ok) {
-      const data = await res.json() as { content: Array<{ text: string }> };
-      const description = data.content?.[0]?.text ?? '';
-      return {
-        text: `Image: ${fileName}\n\n${description}`,
-        summary: `Image: ${fileName} — ${description.slice(0, 100)}`,
-        assetType: 'image',
-      };
-    }
-  } catch { /* fall through to simple description */ }
+  // ── 2nd choice: tenant's Gemini key → Gemini Flash vision ────────────────
+  if (vision.geminiKey) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${vision.geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [
+              { inline_data: { mime_type: safeMime, data: base64 } },
+              { text: IMAGE_PROMPT },
+            ]}],
+          }),
+          signal: AbortSignal.timeout(25_000),
+        }
+      );
+      if (res.ok) {
+        const data = await res.json() as { candidates: Array<{ content: { parts: Array<{ text: string }> } }> };
+        const description = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        if (description) {
+          return { text: `Image: ${fileName}\n\n${description}`, summary: `Image: ${fileName} — ${description.slice(0, 100)}`, assetType: 'image' };
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  // ── Fallback: platform Claude Haiku vision ────────────────────────────────
+  if (vision.anthropicKey) {
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': vision.anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1024,
+          messages: [{ role: 'user', content: [
+            { type: 'image', source: { type: 'base64', media_type: safeMime, data: base64 } },
+            { type: 'text', text: IMAGE_PROMPT },
+          ]}],
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (res.ok) {
+        const data = await res.json() as { content: Array<{ text: string }> };
+        const description = data.content?.[0]?.text ?? '';
+        if (description) {
+          return { text: `Image: ${fileName}\n\n${description}`, summary: `Image: ${fileName} — ${description.slice(0, 100)}`, assetType: 'image' };
+        }
+      }
+    } catch { /* fall through */ }
+  }
 
   return {
     text: `Image uploaded: ${fileName} (${Math.round(buffer.length / 1024)}KB)`,
@@ -256,7 +311,7 @@ async function extractPptx(buffer: Buffer, fileName: string): Promise<ExtractRes
 async function extractZip(
   buffer: Buffer,
   fileName: string,
-  anthropicApiKey: string
+  vision: VisionConfig
 ): Promise<ExtractResult> {
   try {
     const JSZip = (await import('jszip')).default;
@@ -275,7 +330,7 @@ async function extractZip(
       const inferredMime = EXT_TO_MIME[ext] ?? 'application/octet-stream';
 
       try {
-        const result = await extractFileContent(entryBuffer, name, inferredMime, anthropicApiKey);
+        const result = await extractFileContent(entryBuffer, name, inferredMime, vision.anthropicKey, { openaiKey: vision.openaiKey, geminiKey: vision.geminiKey });
         if (result.text.length > 30) {
           parts.push(`\n--- ${name} ---\n${result.text.slice(0, 3000)}`);
           processed++;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyWebhookSignature } from '@/lib/services/razorpay';
+import { verifyWebhookSignature, fetchOrder } from '@/lib/services/razorpay';
 import { createServiceClient } from '@/lib/supabase/server';
 import { sendEmail } from '@/lib/services/notifications';
 
@@ -278,7 +278,18 @@ export async function POST(request: NextRequest) {
           const payment = payload.payment?.entity;
           if (!payment) break;
 
-          const notes = payment.notes || {};
+          // Razorpay does NOT copy order notes to payment objects.
+          // Must fetch the order by order_id to get the notes we set at order creation.
+          let notes: Record<string, string> = {};
+          if (payment.order_id) {
+            try {
+              const order = await fetchOrder(payment.order_id);
+              notes = order.notes || {};
+            } catch (err) {
+              console.error('[Razorpay Webhook] Could not fetch order for payment', payment.id, err);
+            }
+          }
+
           // Only process top-up payments (not subscription payments)
           if (notes.type !== 'topup' || !notes.tenant_id || !notes.pack_credits) break;
 

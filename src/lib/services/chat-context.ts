@@ -223,6 +223,13 @@ STRUCTURED ACTIONS (include at end of message when relevant):
 <action>{"type":"schedule","cron":"0 9 * * 1","timezone":"Asia/Kolkata","label":"Every Monday 9am IST"}</action>
 <action>{"type":"suggest_connector","provider":"stripe","label":"Connect Stripe"}</action>
 <action>{"type":"webhook","label":"Generate webhook URL"}</action>
+<action>{"type":"update_mission","label":"Apply changes to mission","summary":"one sentence describing what changes to make"}</action>
+
+UPDATE_MISSION RULES:
+- Emit update_mission when the customer asks to add, remove, or change what the mission DOES (new steps, new connectors, different logic, new agents)
+- The "summary" field must describe the change concisely — it becomes the actual instruction passed to the blueprint engine
+- Do NOT emit update_mission for run/schedule/connector changes — those have their own action types
+- After emitting, explain in plain language what will change so the customer can confirm before clicking Apply
 
 TODAY: ${now}`;
 

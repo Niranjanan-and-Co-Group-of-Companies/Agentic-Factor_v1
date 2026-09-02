@@ -508,9 +508,14 @@ function extractJsonFromResponse(text: string): string {
   return trimmed;
 }
 
-// ── Embeddings (for vector memory — use OpenAI or fallback) ──
+// ── Embeddings ────────────────────────────────────────────────────────────────
+// Both OpenAI and Gemini are normalized to 768 dimensions so their vectors
+// are comparable in the same pgvector column.
+// OpenAI text-embedding-3-small supports Matryoshka (output dimension param).
+// Gemini text-embedding-004 natively outputs 768 dims.
+// If neither is available, gracefully return null (RAG skipped for that call).
 export async function generateEmbedding(text: string): Promise<number[] | null> {
-  // Try OpenAI embeddings first
+  // ── 1st: Platform OpenAI key (always preferred — consistent 768-dim output) ──
   if (process.env.OPENAI_API_KEY) {
     try {
       const OpenAI = (await import('openai')).default;
@@ -518,6 +523,7 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
       const res = await openai.embeddings.create({
         model: 'text-embedding-3-small',
         input: text,
+        dimensions: 768, // Matryoshka truncation — matches Gemini output dims
       });
       return res.data[0].embedding;
     } catch {
@@ -525,7 +531,7 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
     }
   }
 
-  // Gemini embeddings via REST
+  // ── 2nd: Platform Gemini key (native 768 dims — compatible with above) ──
   if (process.env.GEMINI_API_KEY) {
     try {
       const res = await fetch(
@@ -533,22 +539,13 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            content: { parts: [{ text }] },
-          }),
+          body: JSON.stringify({ content: { parts: [{ text }] } }),
         }
       );
       if (res.ok) {
-        // Gemini's text-embedding-004 outputs 768 dims, not 1536. This used
-        // to zero-pad to fit the pgvector column, but a zero-padded vector is
-        // NOT mathematically comparable via cosine similarity to a real
-        // 1536-dim OpenAI embedding already stored in the same column —
-        // mixing the two silently corrupts every similarity search that
-        // touches both. Returning null is strictly safer: every caller
-        // already treats "no embedding" as a no-op graceful degradation, so
-        // this just means memory/template features are skipped for this
-        // call instead of returning wrong results.
-        return null;
+        const data = await res.json() as { embedding?: { values?: number[] } };
+        const values = data.embedding?.values;
+        if (values && values.length > 0) return values;
       }
     } catch {
       // Fall through

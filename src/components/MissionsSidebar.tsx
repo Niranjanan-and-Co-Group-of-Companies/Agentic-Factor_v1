@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
+import { sanitizeTitle } from '@/lib/utils/sanitize-title';
 
 interface Mission {
   id: string;
@@ -122,7 +123,7 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
                 <button
                   key={m.id}
                   onClick={() => router.push(`/dashboard/missions/${m.id}/chat`)}
-                  title={m.title}
+                  title={sanitizeTitle(m.title)}
                   style={{
                     width: '100%', textAlign: 'left',
                     background: isActive ? 'var(--accent-subtle)' : 'none',
@@ -142,7 +143,7 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     fontWeight: isActive ? 600 : 400,
                   }}>
-                    {m.title}
+                    {sanitizeTitle(m.title)}
                   </span>
                 </button>
               );
