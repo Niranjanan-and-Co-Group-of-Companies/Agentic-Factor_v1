@@ -149,3 +149,48 @@ export async function getComposioToken(
 ): Promise<string | null> {
   return null;
 }
+
+/**
+ * Register an API key / bearer token credential directly with Composio
+ * without going through an OAuth redirect. Supports API_KEY and BEARER_TOKEN
+ * auth schemes — Composio stores the credential and makes it available for
+ * action execution, exactly the same as an OAuth-connected account.
+ */
+export async function createComposioApiKeyConnection(
+  tenantId: string,
+  provider: string,
+  apiKey: string,
+): Promise<void> {
+  const toolkitSlug = toComposioApp(provider);
+  const authConfigId = await getOrCreateAuthConfig(toolkitSlug);
+  const client = getClient();
+
+  // Try API_KEY scheme first (most common for API-key-only services).
+  // Fall back to BEARER_TOKEN if API_KEY creation fails.
+  try {
+    await client.connectedAccounts.create({
+      auth_config: { id: authConfigId },
+      connection: {
+        user_id: tenantId,
+        state: {
+          authScheme: 'API_KEY',
+          val: { api_key: apiKey, generic_api_key: apiKey },
+        },
+      } as any,
+    });
+    return;
+  } catch (err) {
+    console.warn(`[Composio] API_KEY scheme failed for ${provider}, trying BEARER_TOKEN:`, (err as Error).message);
+  }
+
+  await client.connectedAccounts.create({
+    auth_config: { id: authConfigId },
+    connection: {
+      user_id: tenantId,
+      state: {
+        authScheme: 'BEARER_TOKEN',
+        val: { token: apiKey },
+      },
+    } as any,
+  });
+}

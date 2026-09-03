@@ -47,6 +47,7 @@ const API_KEY_LABELS: Record<string, string> = {
   firebase: "Web API Key",
   buffer: "Access Token (from buffer.com/developers/apps)",
   gemini: "API Key (from aistudio.google.com)",
+  perplexity: "API Key (pplx-...)",
 };
 
 // Hardcoded connector cards — not in Composio catalog
@@ -378,6 +379,13 @@ export default function ConnectorsPage() {
       });
       const saveData = await saveRes.json() as { success?: boolean; error?: string };
       if (!saveRes.ok || !saveData.success) { setKeyError(saveData.error ?? "Failed to save"); setSavingKey(false); return; }
+      // Register with Composio so agents can use its action catalog (non-fatal)
+      fetch('/api/composio/connect-apikey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ provider: apiKeyModal.slug, apiKey: apiKeyValue.trim() }),
+      }).catch(() => {});
       setKeySuccess(true);
       setTimeout(() => {
         showToast(`✅ ${apiKeyModal.name} connected!`);

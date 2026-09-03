@@ -177,7 +177,7 @@ function ToolCallCards({ cards }: { cards: ToolCard[] }) {
 const APIKEY_CONNECTORS = new Set([
   'openai', 'gemini', 'anthropic', 'buffer', 'sendgrid', 'twilio', 'apollo',
   'razorpay', 'elevenlabs', 'heygen', 'runwayml', 'tavily', 'custom_tavily',
-  'stripe', 'bamboohr', 'firebase', 'zendesk',
+  'stripe', 'bamboohr', 'firebase', 'zendesk', 'perplexity',
 ]);
 
 const API_KEY_FIELD_LABELS: Record<string, string> = {
@@ -198,6 +198,7 @@ const API_KEY_FIELD_LABELS: Record<string, string> = {
   bamboohr: 'API Key',
   firebase: 'Service Account JSON',
   zendesk: 'API Token',
+  perplexity: 'API Key (pplx-...)',
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -621,6 +622,13 @@ export default function MissionChatPage() {
       setInlineApiKeyModal(null);
       setInlineApiKeyValue('');
       showToast(`✅ ${label} connected!`);
+      // Register with Composio so action execution works (non-fatal)
+      fetch('/api/composio/connect-apikey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ provider: slug, apiKey: inlineApiKeyValue.trim() }),
+      }).catch(() => {});
       // Persist connector to mission_json.permissions (non-fatal)
       fetch(`/api/missions/${missionId}/add-connector`, {
         method: 'POST',
