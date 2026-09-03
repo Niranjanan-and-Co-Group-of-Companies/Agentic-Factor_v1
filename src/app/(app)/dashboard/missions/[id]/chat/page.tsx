@@ -682,12 +682,14 @@ export default function MissionChatPage() {
       const shouldAutoSpeak = lastInputWasVoiceRef.current;
       lastInputWasVoiceRef.current = false;
 
+      const finalText = stripActionTags(cleanText);
+
       // Capture current tool cards atomically and clear in one update to avoid stale closure
       setToolStatusLines(currentCards => {
         setMessages(prev => {
           const updated = [...prev];
           updated[updated.length - 1] = {
-            role: 'assistant', content: cleanText,
+            role: 'assistant', content: finalText,
             action_payload: action, isStreaming: false, ts: Date.now(),
             toolCards: currentCards.length > 0 ? [...currentCards] : undefined,
           };
@@ -697,7 +699,7 @@ export default function MissionChatPage() {
       });
       setIsStreaming(false);
 
-      if (shouldAutoSpeak) speakText(cleanText, willBeAtIdx);
+      if (shouldAutoSpeak) speakText(finalText, willBeAtIdx);
 
       if (sid && !activeSessionId) setActiveSessionId(sid);
       if (action?.type === 'suggest_connector') setQuickChips(QUICK_CHIPS_AFTER_CONNECT);
@@ -726,7 +728,12 @@ export default function MissionChatPage() {
     };
 
     try {
-      const apiMessages = newMessages.map(m => ({ role: m.role, content: m.content }));
+      // Sanitize outgoing history: strip any leaked action tags from prior
+      // assistant messages before they reach Claude's context window.
+      const apiMessages = newMessages.map(m => ({
+        role: m.role,
+        content: m.role === 'assistant' ? stripActionTags(m.content) : m.content,
+      }));
 
       const res = await fetch(`/api/missions/${missionId}/chat`, {
         method: 'POST',
@@ -865,7 +872,9 @@ export default function MissionChatPage() {
             }
 
             if (evt.type === 'done') {
-              const ft = evt.cleanText ?? stripActionTags(streamedText);
+              // Always strip action tags — even from server-provided cleanText,
+              // in case the server missed secondary action blocks.
+              const ft = stripActionTags(evt.cleanText ?? streamedText);
               setMessages(prev => {
                 const updated = [...prev];
                 updated[updated.length - 1] = {

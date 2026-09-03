@@ -97,6 +97,16 @@ async function parseAnthropicStream(
   return { textContent: fullText, contentBlocks, stopReason, inputTokens, outputTokens };
 }
 
+// Strips ALL <action>...</action> blocks from text — used server-side to
+// sanitize cleanText before storage and to scrub incoming message history.
+function stripAllActionTags(text: string): string {
+  return text
+    .replace(/<action>[\s\S]*?<\/action>/g, '')
+    .replace(/<action>[\s\S]*$/, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 // ── Route handler ──────────────────────────────────────────────────────────
 
 export async function POST(
@@ -210,7 +220,12 @@ export async function POST(
   }
 
   const model = 'claude-sonnet-4-6';
-  const recentMessages = messages.slice(-20);
+  // Sanitize history: strip action tags from prior assistant messages so they
+  // never appear as raw JSON in Claude's context window.
+  const recentMessages = messages.slice(-20).map(m => ({
+    role: m.role,
+    content: m.role === 'assistant' ? stripAllActionTags(m.content) : m.content,
+  }));
   const supabase = createServiceClient();
 
   const stream = new ReadableStream({
@@ -252,12 +267,14 @@ export async function POST(
 
         // ── Simple text response — no tools needed ────────────────────────
         if (stopReason !== 'tool_use' || toolBlocks.length === 0) {
-          const actionMatch = textContent.match(/<action>([\s\S]*?)<\/action>/);
+          // Parse ALL action tags — take the first valid one as the card payload.
+          // Strip ALL of them from cleanText so none leak into stored history.
+          const allActionMatches = [...textContent.matchAll(/<action>([\s\S]*?)<\/action>/g)];
           let actionPayload: Record<string, unknown> | null = null;
-          let cleanText = textContent;
-          if (actionMatch) {
-            try { actionPayload = JSON.parse(actionMatch[1]); cleanText = textContent.replace(/<action>[\s\S]*?<\/action>/, '').trim(); } catch { /* ignore */ }
+          for (const m of allActionMatches) {
+            try { actionPayload = JSON.parse(m[1]); break; } catch { /* skip malformed */ }
           }
+          const cleanText = stripAllActionTags(textContent);
 
           const credits = await calculateChatCreditCost(inputTokens, outputTokens, model);
           deductCredits(tenantId, credits, 'chat_message', {
