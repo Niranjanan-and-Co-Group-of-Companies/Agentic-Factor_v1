@@ -29,6 +29,8 @@ interface ChatMessage {
   action_payload?: ActionPayload | null;
   action_applied?: boolean;
   isStreaming?: boolean;
+  isAgentRunning?: boolean;
+  agentError?: string;
   ts?: number;
   toolCards?: ToolCard[];
 }
@@ -690,7 +692,7 @@ export default function MissionChatPage() {
           const updated = [...prev];
           updated[updated.length - 1] = {
             role: 'assistant', content: finalText,
-            action_payload: action, isStreaming: false, ts: Date.now(),
+            action_payload: action, isStreaming: false, isAgentRunning: false, ts: Date.now(),
             toolCards: currentCards.length > 0 ? [...currentCards] : undefined,
           };
           return updated;
@@ -717,12 +719,24 @@ export default function MissionChatPage() {
         realtimeChannelRef.current = null;
       }
       waitingForInngestRef.current = false;
-      setMessages(prev => {
-        const updated = [...prev];
-        updated[updated.length - 1] = { role: 'assistant', content: `⚠️ ${message}` };
-        return updated;
+      setToolStatusLines(currentCards => {
+        setMessages(prev => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          const existingContent = last?.content ?? '';
+          updated[updated.length - 1] = {
+            role: 'assistant',
+            content: existingContent,
+            isStreaming: false,
+            isAgentRunning: false,
+            agentError: message,
+            ts: Date.now(),
+            toolCards: currentCards.length > 0 ? [...currentCards] : undefined,
+          };
+          return updated;
+        });
+        return [];
       });
-      setToolStatusLines([]);
       setIsStreaming(false);
       inputRef.current?.focus();
     };
@@ -802,6 +816,15 @@ export default function MissionChatPage() {
             if (evt.type === 'agent_queued' && evt.executionId) {
               if (evt.sessionId && !activeSessionId) setActiveSessionId(evt.sessionId);
               waitingForInngestRef.current = true;
+              // Mark the in-progress message so UI shows the agent-running state
+              setMessages(prev => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                if (last?.role === 'assistant') {
+                  updated[updated.length - 1] = { ...last, isAgentRunning: true };
+                }
+                return updated;
+              });
 
               // Subscribe to Supabase Realtime for tool status and completion
               const supabase = getSupabase();
@@ -1378,8 +1401,22 @@ export default function MissionChatPage() {
                         <ToolCallCards cards={msg.toolCards} />
                       )}
                       {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
-                      {msg.isStreaming && (
+                      {msg.isStreaming && !msg.isAgentRunning && (
                         <span style={{ display: 'inline-block', width: 2, height: 16, background: 'var(--accent)', borderRadius: 1, marginLeft: 3, animation: 'blink 0.7s step-end infinite', verticalAlign: 'text-bottom' }} />
+                      )}
+                      {/* Agent-running buffering indicator */}
+                      {msg.isAgentRunning && (
+                        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                          <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--border)', borderTopColor: 'var(--accent)', display: 'inline-block', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
+                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Agent is working…</span>
+                        </div>
+                      )}
+                      {/* Inline agent error — shown below content so planning text is preserved */}
+                      {msg.agentError && (
+                        <div style={{ marginTop: 10, display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                          <span style={{ fontSize: '0.9rem', flexShrink: 0 }}>⚠️</span>
+                          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>{msg.agentError}</span>
+                        </div>
                       )}
                     </div>
 
