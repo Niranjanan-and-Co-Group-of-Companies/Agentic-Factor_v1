@@ -157,6 +157,21 @@ export const executeMissionBackground = inngest.createFunction(
         const outEdges = orchestration.edges?.filter((e: any) => e.from === agentId) || [];
         const isFinalAgent = outEdges.length === 0 && orchestration.pattern !== 'supervisor';
 
+        // ── Emit agent.started so the chat can show live per-agent status ──
+        await step.run(`agent-started-${agentToRun.role.replace(/\s+/g, '-').toLowerCase()}`, async () => {
+          const supabase = createServiceClient();
+          await supabase.from('events').insert({
+            tenant_id: tenantId,
+            event_type: 'agent.started',
+            entity_type: 'agent',
+            entity_id: agentToRun.id,
+            run_id: runId,
+            payload: { agentId: agentToRun.id, agentRole: agentToRun.role, agentIndex: agents.indexOf(agentToRun) },
+          });
+          // Also update mission_runs.current_agent for the top-bar indicator
+          await supabase.from('mission_runs').update({ current_agent: agentToRun.role }).eq('id', runId);
+        });
+
         // ── Each agent runs as its own Inngest step (own 5-min timeout) ──
         const agentResult = await step.run(`agent-${agentToRun.role.replace(/\s+/g, '-').toLowerCase()}`, async () => {
           console.log(`[Inngest] Starting agent: ${agentToRun.role} (${agentToRun.id})`);
@@ -215,6 +230,9 @@ export const executeMissionBackground = inngest.createFunction(
 
         if (agentResult.resumed) agentsDone++;
         else agentsDone++;
+
+        // Update mission_runs progress so chat monitors and the top bar refresh
+        await updateRun({ agents_done: agentsDone, agents_failed: agentsFailed, status: 'running' });
 
         const output = agentResult.output;
 

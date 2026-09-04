@@ -22,6 +22,12 @@ interface RequiredConnector {
   connected: boolean;
 }
 
+interface RunAgent {
+  id: string;
+  role: string;
+  status: 'queued' | 'running' | 'done' | 'failed' | 'skipped';
+}
+
 interface ChatMessage {
   id?: string;
   role: 'user' | 'assistant';
@@ -33,6 +39,13 @@ interface ChatMessage {
   agentError?: string;
   ts?: number;
   toolCards?: ToolCard[];
+  runMonitor?: {
+    runId: string;
+    agents: RunAgent[];
+    status: 'queued' | 'running' | 'completed' | 'failed';
+    agentsDone: number;
+    agentsTotal: number;
+  };
 }
 
 interface ActionPayload {
@@ -65,6 +78,95 @@ interface ToolCard {
   summary?: string;
   logoUrl?: string | null;
 }
+
+// ── RunMonitorCard — live per-agent progress inside a chat bubble ─────────────
+
+function RunMonitorCard({ monitor }: { monitor: NonNullable<ChatMessage['runMonitor']> }) {
+  const { agents, status, agentsDone, agentsTotal } = monitor;
+  const isFinished = status === 'completed' || status === 'failed';
+  const headerColor = status === 'completed' ? 'hsla(152,69%,45%,1)'
+    : status === 'failed' ? '#ef4444'
+    : 'var(--accent)';
+  const headerIcon = status === 'completed' ? '✅' : status === 'failed' ? '❌' : '🚀';
+  const headerLabel = status === 'completed' ? 'Mission completed'
+    : status === 'failed' ? 'Mission failed'
+    : status === 'running' ? 'Mission running…'
+    : 'Mission queued…';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        {!isFinished && (
+          <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--border)', borderTopColor: headerColor, display: 'inline-block', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
+        )}
+        {isFinished && <span style={{ fontSize: '0.9rem' }}>{headerIcon}</span>}
+        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: headerColor }}>{headerLabel}</span>
+        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+          {agentsDone}/{agentsTotal} agents
+        </span>
+      </div>
+
+      {/* Progress bar */}
+      {agentsTotal > 0 && (
+        <div style={{ height: 4, background: 'var(--border)', borderRadius: 4, overflow: 'hidden', marginBottom: 6 }}>
+          <div style={{
+            height: '100%', borderRadius: 4,
+            background: status === 'failed' ? '#ef4444' : headerColor,
+            width: `${Math.round((agentsDone / agentsTotal) * 100)}%`,
+            transition: 'width 0.5s ease',
+          }} />
+        </div>
+      )}
+
+      {/* Per-agent rows */}
+      {agents.map((agent, i) => {
+        const agentStatus = agent.status;
+        const statusColor = agentStatus === 'done' ? 'hsla(152,69%,45%,1)'
+          : agentStatus === 'failed' ? '#ef4444'
+          : agentStatus === 'running' ? 'var(--accent)'
+          : 'var(--text-muted)';
+        const statusIcon = agentStatus === 'done' ? '✓'
+          : agentStatus === 'failed' ? '✗'
+          : agentStatus === 'running' ? null
+          : '○';
+
+        return (
+          <div key={agent.id} style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '6px 10px', borderRadius: 8,
+            background: agentStatus === 'queued' ? 'transparent' : 'var(--bg-secondary)',
+            border: `1px solid ${agentStatus === 'queued' ? 'transparent' : agentStatus === 'done' ? 'hsla(152,69%,45%,0.2)' : agentStatus === 'failed' ? 'rgba(239,68,68,0.2)' : 'var(--border)'}`,
+            opacity: agentStatus === 'queued' ? 0.5 : 1,
+            transition: 'all 0.2s',
+          }}>
+            <div style={{ width: 18, height: 18, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {agentStatus === 'running' ? (
+                <span style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid var(--border)', borderTopColor: 'var(--accent)', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
+              ) : (
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: statusColor }}>{statusIcon}</span>
+              )}
+            </div>
+            <span style={{ fontSize: '0.8rem', color: agentStatus === 'queued' ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: agentStatus === 'running' ? 600 : 400 }}>
+              Agent {i + 1} — {agent.role}
+            </span>
+            {agentStatus === 'running' && (
+              <span style={{ fontSize: '0.7rem', color: 'var(--accent)', marginLeft: 'auto', fontWeight: 600 }}>Running</span>
+            )}
+            {agentStatus === 'done' && (
+              <span style={{ fontSize: '0.7rem', color: 'hsla(152,69%,45%,1)', marginLeft: 'auto' }}>Done</span>
+            )}
+            {agentStatus === 'failed' && (
+              <span style={{ fontSize: '0.7rem', color: '#ef4444', marginLeft: 'auto' }}>Failed</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── ToolCallCards component ───────────────────────────────────────────────────
 
 function ToolCallCards({ cards }: { cards: ToolCard[] }) {
   const [expanded, setExpanded] = React.useState<string | null>(null);
@@ -1004,11 +1106,83 @@ export default function MissionChatPage() {
           : `/api/missions/${missionId}/execute`;
         const res = await fetch(endpoint, { method: 'POST', credentials: 'include' });
         if (res.ok) {
-          showToast('✅ Mission started!');
+          const runData = await res.json() as { runId?: string; agents?: Array<{ id: string; role: string }> };
           startRunPolling();
+
+          if (runData.runId && runData.agents) {
+            // Insert a live run-monitor message into the chat
+            const runAgents: RunAgent[] = runData.agents.map(a => ({ ...a, status: 'queued' as const }));
+            const monitorMsgIdx = messages.length + (msgIndex >= 0 ? 0 : 0);
+            setMessages(prev => [
+              ...prev,
+              {
+                role: 'assistant',
+                content: '',
+                ts: Date.now(),
+                runMonitor: {
+                  runId: runData.runId!,
+                  agents: runAgents,
+                  status: 'queued',
+                  agentsDone: 0,
+                  agentsTotal: runData.agents!.length,
+                },
+              },
+            ]);
+
+            // Subscribe to mission_runs Realtime for progress updates
+            const supabase = getSupabase();
+            const runChannel = supabase
+              .channel(`run-monitor-${runData.runId}`)
+              .on(
+                'postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'mission_runs', filter: `id=eq.${runData.runId}` },
+                (payload) => {
+                  const row = payload.new as { status: string; agents_done: number; agents_failed: number; agents_total: number };
+                  setMessages(prev => prev.map(m => {
+                    if (!m.runMonitor || m.runMonitor.runId !== runData.runId) return m;
+                    return {
+                      ...m,
+                      runMonitor: {
+                        ...m.runMonitor,
+                        status: row.status as RunAgent['status'],
+                        agentsDone: row.agents_done,
+                        agentsTotal: row.agents_total,
+                      },
+                    };
+                  }));
+                }
+              )
+              .on(
+                'postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'events', filter: `run_id=eq.${runData.runId}` },
+                (payload) => {
+                  const row = payload.new as { event_type: string; entity_id: string; payload: any };
+                  setMessages(prev => prev.map(m => {
+                    if (!m.runMonitor || m.runMonitor.runId !== runData.runId) return m;
+                    const updatedAgents = m.runMonitor.agents.map(a => {
+                      if (a.id !== row.entity_id) return a;
+                      if (row.event_type === 'agent.started') return { ...a, status: 'running' as const };
+                      if (row.event_type === 'agent.completed') return { ...a, status: 'done' as const };
+                      if (row.event_type === 'agent.failed') return { ...a, status: 'failed' as const };
+                      return a;
+                    });
+                    const runStatus = row.event_type === 'mission.completed' ? 'completed'
+                      : row.event_type === 'mission.failed' ? 'failed'
+                      : m.runMonitor.status;
+                    return { ...m, runMonitor: { ...m.runMonitor, agents: updatedAgents, status: runStatus as any } };
+                  }));
+                }
+              )
+              .subscribe();
+
+            // Auto-unsubscribe after 30 minutes max
+            setTimeout(() => supabase.removeChannel(runChannel), 30 * 60 * 1000);
+          } else {
+            showToast('✅ Mission started!');
+          }
         } else {
-          const err = await res.json() as { error?: string };
-          showToast(`❌ ${err.error ?? 'Could not start run.'}`);
+          const err = await res.json().catch(() => ({})) as { error?: string; message?: string };
+          showToast(`❌ ${err.message ?? err.error ?? 'Could not start run.'}`);
         }
 
       } else if (action.type === 'resume_run') {
@@ -1393,14 +1567,16 @@ export default function MissionChatPage() {
                       color: msg.role === 'user' ? '#fff' : 'var(--text-primary)',
                       fontSize: '0.88rem', lineHeight: 1.65,
                     }}>
+                      {/* Run monitor — live per-agent progress card */}
+                      {msg.runMonitor && <RunMonitorCard monitor={msg.runMonitor} />}
                       {/* Tool call cards — live while streaming, persisted in completed messages */}
-                      {msg.isStreaming && toolStatusLines.length > 0 && (
+                      {!msg.runMonitor && msg.isStreaming && toolStatusLines.length > 0 && (
                         <ToolCallCards cards={toolStatusLines} />
                       )}
-                      {!msg.isStreaming && msg.toolCards && msg.toolCards.length > 0 && (
+                      {!msg.runMonitor && !msg.isStreaming && msg.toolCards && msg.toolCards.length > 0 && (
                         <ToolCallCards cards={msg.toolCards} />
                       )}
-                      {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
+                      {!msg.runMonitor && (msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content)}
                       {msg.isStreaming && !msg.isAgentRunning && (
                         <span style={{ display: 'inline-block', width: 2, height: 16, background: 'var(--accent)', borderRadius: 1, marginLeft: 3, animation: 'blink 0.7s step-end infinite', verticalAlign: 'text-bottom' }} />
                       )}
