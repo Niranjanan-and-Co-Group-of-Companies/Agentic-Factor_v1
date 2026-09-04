@@ -1144,7 +1144,7 @@ export default function MissionChatPage() {
                       ...m,
                       runMonitor: {
                         ...m.runMonitor,
-                        status: row.status as RunAgent['status'],
+                        status: row.status as 'queued' | 'running' | 'completed' | 'failed',
                         agentsDone: row.agents_done,
                         agentsTotal: row.agents_total,
                       },
