@@ -174,8 +174,10 @@ export const executeChatAgent = inngest.createFunction(
 
       if (toolResults.length === 0) break; // credit exhausted or empty
 
-      // Add tool results to message history
-      messages.push({ role: 'assistant', content: assistantContent });
+      // The assistant message (with tool_use blocks) is already in `messages`
+      // from initialization (round 0) or from line 275 (subsequent rounds).
+      // Only push the tool results as the user turn — pushing assistant again
+      // would create two consecutive assistant messages, which Anthropic rejects.
       messages.push({ role: 'user', content: toolResults });
 
       // ── Next LLM call (non-streaming) ────────────────────────────────────
