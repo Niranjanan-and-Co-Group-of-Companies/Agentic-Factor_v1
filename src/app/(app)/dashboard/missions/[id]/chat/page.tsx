@@ -49,12 +49,14 @@ interface ChatMessage {
 }
 
 interface ActionPayload {
-  type: 'schedule' | 'run_now' | 'resume_run' | 'go_live' | 'suggest_connector' | 'webhook' | 'update_mission';
+  type: 'schedule' | 'run_now' | 'resume_run' | 'go_live' | 'suggest_connector' | 'webhook' | 'update_mission' | 'run_selective';
   label: string;
   cron?: string;
   timezone?: string;
   provider?: string;
   summary?: string; // used by update_mission
+  agents?: string[]; // used by run_selective — array of agent IDs
+  executionMode?: 'sequential' | 'parallel'; // used by run_selective
 }
 
 interface LiveRun {
@@ -1098,6 +1100,64 @@ export default function MissionChatPage() {
       return u;
     });
 
+    // ── Shared helper: insert RunMonitorCard + subscribe to Realtime ──
+    const subscribeToRun = (runId: string, agents: Array<{ id: string; role: string }>) => {
+      const runAgents: RunAgent[] = agents.map(a => ({ ...a, status: 'queued' as const }));
+      setMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: '',
+          ts: Date.now(),
+          runMonitor: {
+            runId,
+            agents: runAgents,
+            status: 'queued' as const,
+            agentsDone: 0,
+            agentsTotal: agents.length,
+          },
+        },
+      ]);
+      const supabase = getSupabase();
+      const ch = supabase
+        .channel(`run-monitor-${runId}`)
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'mission_runs', filter: `id=eq.${runId}` },
+          (payload) => {
+            const row = payload.new as { status: string; agents_done: number; agents_total: number };
+            setMessages(prev => prev.map(m => {
+              if (!m.runMonitor || m.runMonitor.runId !== runId) return m;
+              return { ...m, runMonitor: { ...m.runMonitor, status: row.status as 'queued' | 'running' | 'completed' | 'failed', agentsDone: row.agents_done, agentsTotal: row.agents_total } };
+            }));
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'events', filter: `run_id=eq.${runId}` },
+          (payload) => {
+            const row = payload.new as { event_type: string; entity_id: string };
+            setMessages(prev => prev.map(m => {
+              if (!m.runMonitor || m.runMonitor.runId !== runId) return m;
+              const updatedAgents = m.runMonitor.agents.map(a => {
+                if (a.id !== row.entity_id) return a;
+                if (row.event_type === 'agent.started') return { ...a, status: 'running' as const };
+                if (row.event_type === 'agent.completed') return { ...a, status: 'done' as const };
+                if (row.event_type === 'agent.failed') return { ...a, status: 'failed' as const };
+                return a;
+              });
+              const runStatus: 'queued' | 'running' | 'completed' | 'failed' =
+                row.event_type === 'mission.completed' ? 'completed'
+                : row.event_type === 'mission.failed' ? 'failed'
+                : m.runMonitor.status;
+              return { ...m, runMonitor: { ...m.runMonitor, agents: updatedAgents, status: runStatus } };
+            }));
+          }
+        )
+        .subscribe();
+      setTimeout(() => supabase.removeChannel(ch), 30 * 60 * 1000);
+    };
+
     try {
       if (action.type === 'run_now') {
         showToast('🚀 Starting mission run…');
@@ -1108,81 +1168,41 @@ export default function MissionChatPage() {
         if (res.ok) {
           const runData = await res.json() as { runId?: string; agents?: Array<{ id: string; role: string }> };
           startRunPolling();
-
           if (runData.runId && runData.agents) {
-            // Insert a live run-monitor message into the chat
-            const runAgents: RunAgent[] = runData.agents.map(a => ({ ...a, status: 'queued' as const }));
-            const monitorMsgIdx = messages.length + (msgIndex >= 0 ? 0 : 0);
-            setMessages(prev => [
-              ...prev,
-              {
-                role: 'assistant',
-                content: '',
-                ts: Date.now(),
-                runMonitor: {
-                  runId: runData.runId!,
-                  agents: runAgents,
-                  status: 'queued',
-                  agentsDone: 0,
-                  agentsTotal: runData.agents!.length,
-                },
-              },
-            ]);
-
-            // Subscribe to mission_runs Realtime for progress updates
-            const supabase = getSupabase();
-            const runChannel = supabase
-              .channel(`run-monitor-${runData.runId}`)
-              .on(
-                'postgres_changes',
-                { event: 'UPDATE', schema: 'public', table: 'mission_runs', filter: `id=eq.${runData.runId}` },
-                (payload) => {
-                  const row = payload.new as { status: string; agents_done: number; agents_failed: number; agents_total: number };
-                  setMessages(prev => prev.map(m => {
-                    if (!m.runMonitor || m.runMonitor.runId !== runData.runId) return m;
-                    return {
-                      ...m,
-                      runMonitor: {
-                        ...m.runMonitor,
-                        status: row.status as 'queued' | 'running' | 'completed' | 'failed',
-                        agentsDone: row.agents_done,
-                        agentsTotal: row.agents_total,
-                      },
-                    };
-                  }));
-                }
-              )
-              .on(
-                'postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'events', filter: `run_id=eq.${runData.runId}` },
-                (payload) => {
-                  const row = payload.new as { event_type: string; entity_id: string; payload: any };
-                  setMessages(prev => prev.map(m => {
-                    if (!m.runMonitor || m.runMonitor.runId !== runData.runId) return m;
-                    const updatedAgents = m.runMonitor.agents.map(a => {
-                      if (a.id !== row.entity_id) return a;
-                      if (row.event_type === 'agent.started') return { ...a, status: 'running' as const };
-                      if (row.event_type === 'agent.completed') return { ...a, status: 'done' as const };
-                      if (row.event_type === 'agent.failed') return { ...a, status: 'failed' as const };
-                      return a;
-                    });
-                    const runStatus = row.event_type === 'mission.completed' ? 'completed'
-                      : row.event_type === 'mission.failed' ? 'failed'
-                      : m.runMonitor.status;
-                    return { ...m, runMonitor: { ...m.runMonitor, agents: updatedAgents, status: runStatus as any } };
-                  }));
-                }
-              )
-              .subscribe();
-
-            // Auto-unsubscribe after 30 minutes max
-            setTimeout(() => supabase.removeChannel(runChannel), 30 * 60 * 1000);
+            subscribeToRun(runData.runId, runData.agents);
           } else {
             showToast('✅ Mission started!');
           }
         } else {
           const err = await res.json().catch(() => ({})) as { error?: string; message?: string };
           showToast(`❌ ${err.message ?? err.error ?? 'Could not start run.'}`);
+        }
+
+      } else if (action.type === 'run_selective') {
+        showToast(`🚀 Starting selective run…`);
+        const endpoint = missionStatus === 'draft'
+          ? `/api/missions/${missionId}/run`
+          : `/api/missions/${missionId}/execute`;
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            selectedAgents: action.agents,
+            executionMode: action.executionMode ?? 'sequential',
+          }),
+        });
+        if (res.ok) {
+          const runData = await res.json() as { runId?: string; agents?: Array<{ id: string; role: string }> };
+          startRunPolling();
+          if (runData.runId && runData.agents) {
+            subscribeToRun(runData.runId, runData.agents);
+          } else {
+            showToast('✅ Selective run started!');
+          }
+        } else {
+          const err = await res.json().catch(() => ({})) as { error?: string; message?: string };
+          showToast(`❌ ${err.message ?? err.error ?? 'Could not start selective run.'}`);
         }
 
       } else if (action.type === 'resume_run') {

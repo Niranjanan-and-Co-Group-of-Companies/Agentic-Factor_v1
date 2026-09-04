@@ -29,7 +29,7 @@ export const executeMissionBackground = inngest.createFunction(
     triggers: [{ event: 'mission.execute' }],
   },
   async ({ event, step }) => {
-    const { missionId, tenantId, runId: incomingRunId, trigger: incomingTrigger, webhookPayload } = event.data;
+    const { missionId, tenantId, runId: incomingRunId, trigger: incomingTrigger, webhookPayload, selectedAgents, executionMode } = event.data;
 
     // ── Step 1: Fetch mission data + initialise run tracking ──
     const missionData = await step.run('fetch-mission', async () => {
@@ -145,6 +145,109 @@ export const executeMissionBackground = inngest.createFunction(
       if (error) console.warn('[Inngest] Failed to update mission_runs (non-fatal):', error.message);
     };
 
+    // ── Selective execution (run_selective action) ─────────────────────────
+    // When the chat triggers a subset of agents (with or without parallelism),
+    // we take this branch and return early — the full pipeline loop below is skipped.
+    if (selectedAgents && selectedAgents.length > 0) {
+      const filteredAgents = agents
+        .filter((a: any) => selectedAgents.includes(a.id))
+        .sort((a: any, b: any) => (a.agentIndex ?? 0) - (b.agentIndex ?? 0));
+
+      // Update agents_total to the selected count (route pre-creates the row, but
+      // update in case it was created by the scheduler/webhook without a selection).
+      await step.run('selective-init', async () => {
+        const supabase = createServiceClient();
+        await supabase.from('mission_runs').update({
+          status: 'running',
+          agents_total: filteredAgents.length,
+        }).eq('id', runId);
+      });
+
+      if (executionMode === 'parallel') {
+        // Fan-out: all selected agents run simultaneously
+        await Promise.all(
+          filteredAgents.map((agentToRun: any) =>
+            step.run(`selective-${agentToRun.id}-${agentToRun.role.replace(/\s+/g, '-').toLowerCase()}`, async () => {
+              const supabase = createServiceClient();
+
+              // Credit check
+              const { checkCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
+              const creditCheck = await checkCredits(tenantId, CREDIT_COSTS.code_execution + CREDIT_COSTS.llm_call_flash);
+              if (!creditCheck.allowed) throw new Error('InsufficientCredits');
+
+              // Emit started
+              await supabase.from('events').insert({
+                tenant_id: tenantId, event_type: 'agent.started', entity_type: 'agent',
+                entity_id: agentToRun.id, run_id: runId,
+                payload: { agentId: agentToRun.id, agentRole: agentToRun.role },
+              });
+
+              const result = await executeAgent(
+                tenantId, missionId, agentToRun, initialContext, tokens, true, mission.expectedOutputFormat, runId
+              );
+
+              // Emit completed
+              await supabase.from('events').insert({
+                tenant_id: tenantId, event_type: 'agent.completed', entity_type: 'agent',
+                entity_id: agentToRun.id, run_id: runId,
+                payload: { output: result.output },
+              });
+
+              return result;
+            })
+          )
+        );
+
+        agentsDone = filteredAgents.length;
+
+      } else {
+        // Sequential: run in agentIndex order, passing context forward
+        let context = initialContext;
+        for (const agentToRun of filteredAgents) {
+          await step.run(`selective-started-${agentToRun.id}`, async () => {
+            const supabase = createServiceClient();
+            await supabase.from('events').insert({
+              tenant_id: tenantId, event_type: 'agent.started', entity_type: 'agent',
+              entity_id: agentToRun.id, run_id: runId,
+              payload: { agentId: agentToRun.id, agentRole: agentToRun.role },
+            });
+            await supabase.from('mission_runs').update({ current_agent: agentToRun.role }).eq('id', runId);
+          });
+
+          const result = await step.run(`selective-${agentToRun.id}-${agentToRun.role.replace(/\s+/g, '-').toLowerCase()}`, async () => {
+            const { checkCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
+            const creditCheck = await checkCredits(tenantId, CREDIT_COSTS.code_execution + CREDIT_COSTS.llm_call_flash);
+            if (!creditCheck.allowed) throw new Error('InsufficientCredits');
+            return await executeAgent(tenantId, missionId, agentToRun, context, tokens, true, mission.expectedOutputFormat, runId);
+          });
+
+          context = result.output;
+          agentsDone++;
+          await updateRun({ agents_done: agentsDone, agents_failed: agentsFailed, status: 'running' });
+        }
+      }
+
+      // Mark selective run complete
+      await step.run('selective-complete', async () => {
+        const supabase = createServiceClient();
+        await supabase.from('events').insert({
+          tenant_id: tenantId, event_type: 'mission.completed', entity_type: 'mission',
+          entity_id: missionId, run_id: runId,
+          payload: { mode: 'selective', agents: selectedAgents },
+        });
+        await supabase.from('mission_runs').update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          duration_ms: Date.now() - startedAt,
+          agents_done: agentsDone,
+          agents_failed: agentsFailed,
+        }).eq('id', runId);
+      });
+
+      return { success: true, missionId, runId, mode: 'selective' };
+    }
+
+    // ── Full pipeline execution ────────────────────────────────────────────
     try {
       while (currentAgentId) {
         const agent = agentMap.get(currentAgentId);

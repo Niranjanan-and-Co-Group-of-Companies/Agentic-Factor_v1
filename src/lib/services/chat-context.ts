@@ -41,13 +41,13 @@ export async function buildChatContext(
   const missionStatus: string = missionRow?.status ?? 'unknown';
 
   // ── Agent definitions ────────────────────────────────────────────────
-  type AgentDef = { role?: string; agentIndex?: number; capabilities?: string[]; systemPrompt?: string };
+  type AgentDef = { id?: string; role?: string; agentIndex?: number; capabilities?: string[]; systemPrompt?: string };
   let agentsSummary = 'No agents configured yet.';
   let agentPrompts = '';
   if (Array.isArray(mission?.agents) && (mission.agents as AgentDef[]).length > 0) {
     const agents = (mission.agents as AgentDef[]).sort((a, b) => (a.agentIndex ?? 0) - (b.agentIndex ?? 0));
     agentsSummary = agents
-      .map((a, i) => `  Agent ${i + 1}: ${a.role ?? 'Unnamed'} — ${a.capabilities?.slice(0, 3).join(', ') || 'general purpose'}`)
+      .map((a, i) => `  Agent ${i + 1} [id:${a.id ?? '?'}]: ${a.role ?? 'Unnamed'} — ${a.capabilities?.slice(0, 3).join(', ') || 'general purpose'}`)
       .join('\n');
     // Include any custom systemPrompts from the blueprint
     const promptLines = agents.filter(a => a.systemPrompt).map(a => `[${a.role}] ${a.systemPrompt}`);
@@ -224,12 +224,22 @@ STRUCTURED ACTIONS (include at end of message when relevant):
 <action>{"type":"suggest_connector","provider":"stripe","label":"Connect Stripe"}</action>
 <action>{"type":"webhook","label":"Generate webhook URL"}</action>
 <action>{"type":"update_mission","label":"Apply changes to mission","summary":"one sentence describing what changes to make"}</action>
+<action>{"type":"run_selective","agents":["agent-id-1","agent-id-2"],"executionMode":"sequential","label":"Run Agent Name then Agent Name"}</action>
+<action>{"type":"run_selective","agents":["agent-id-1","agent-id-2"],"executionMode":"parallel","label":"Run Agent Name + Agent Name simultaneously"}</action>
 
 UPDATE_MISSION RULES:
 - Emit update_mission when the customer asks to add, remove, or change what the mission DOES (new steps, new connectors, different logic, new agents)
 - The "summary" field must describe the change concisely — it becomes the actual instruction passed to the blueprint engine
 - Do NOT emit update_mission for run/schedule/connector changes — those have their own action types
 - After emitting, explain in plain language what will change so the customer can confirm before clicking Apply
+
+RUN_SELECTIVE RULES:
+- Emit run_selective when the customer asks to run only specific agents (e.g. "run only the code writer", "run agents 2 and 3", "just run the test writer")
+- Use the agent IDs from the AGENTS IN THIS MISSION list above — they are shown as [id:xxx]
+- Use executionMode "parallel" when the customer wants agents to run simultaneously ("at the same time", "together", "in parallel")
+- Use executionMode "sequential" when order matters or not specified ("then", "after", one by one)
+- The "label" must describe exactly what will run: "Run Code Writer then Test Writer" or "Run Code Writer + Test Writer simultaneously"
+- NEVER include agents the customer did not ask for
 
 TODAY: ${now}`;
 

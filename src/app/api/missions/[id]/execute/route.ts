@@ -15,9 +15,15 @@ export async function POST(
 
   try {
     let mode: 'resume' | 'fresh' = 'fresh';
+    let selectedAgents: string[] | undefined;
+    let executionMode: 'sequential' | 'parallel' = 'sequential';
     try {
       const body = await request.json();
       if (body?.mode === 'resume') mode = 'resume';
+      if (Array.isArray(body?.selectedAgents) && body.selectedAgents.length > 0) {
+        selectedAgents = body.selectedAgents as string[];
+      }
+      if (body?.executionMode === 'parallel') executionMode = 'parallel';
     } catch { /* body is optional */ }
 
     const { createServiceClient } = await import('@/lib/supabase/server');
@@ -132,6 +138,12 @@ export async function POST(
       }
     }
 
+    // ── Resolve which agents will actually run ──────────────────────────────
+    const allAgents: Array<{ id: string; role: string }> = (missionJson?.agents ?? []).map((a: any) => ({ id: a.id, role: a.role }));
+    const runningAgents = selectedAgents && selectedAgents.length > 0
+      ? allAgents.filter(a => selectedAgents!.includes(a.id))
+      : allAgents;
+
     // ── Pre-create mission_runs row so Realtime subscription can start immediately ──
     const { count: priorRuns } = await supabase
       .from('mission_runs')
@@ -145,7 +157,7 @@ export async function POST(
       run_number: (priorRuns ?? 0) + 1,
       trigger: 'manual',
       status: 'queued',
-      agents_total: missionJson?.agents?.length ?? 0,
+      agents_total: runningAgents.length,
       agents_done: 0,
       agents_failed: 0,
     });
@@ -153,15 +165,18 @@ export async function POST(
     // ── Send to Inngest ─────────────────────────────────────────────────────
     await inngest.send({
       name: 'mission.execute',
-      data: { missionId, tenantId, mode, runId },
+      data: {
+        missionId, tenantId, mode, runId,
+        ...(selectedAgents ? { selectedAgents, executionMode } : {}),
+      },
     });
 
-    console.log(`[Execute] Mission ${missionId} sent to Inngest (mode=${mode}, runId=${runId}).`);
+    console.log(`[Execute] Mission ${missionId} sent to Inngest (mode=${mode}, runId=${runId}, selective=${!!selectedAgents}).`);
 
     return NextResponse.json({
       success: true,
       runId,
-      agents: (missionJson?.agents ?? []).map((a: any) => ({ id: a.id, role: a.role })),
+      agents: runningAgents,
       mode,
     });
   } catch (error) {

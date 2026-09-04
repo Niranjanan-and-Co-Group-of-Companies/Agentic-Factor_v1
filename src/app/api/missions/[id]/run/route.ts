@@ -18,6 +18,16 @@ export async function POST(
   const { tenantId } = authResult;
   const { id: missionId } = await context.params;
 
+  let selectedAgents: string[] | undefined;
+  let executionMode: 'sequential' | 'parallel' = 'sequential';
+  try {
+    const body = await request.json();
+    if (Array.isArray(body?.selectedAgents) && body.selectedAgents.length > 0) {
+      selectedAgents = body.selectedAgents as string[];
+    }
+    if (body?.executionMode === 'parallel') executionMode = 'parallel';
+  } catch { /* body is optional */ }
+
   try {
     const { createServiceClient } = await import('@/lib/supabase/server');
     const supabase = createServiceClient();
@@ -130,6 +140,12 @@ export async function POST(
       .select('*', { count: 'exact', head: true })
       .eq('mission_id', missionId);
 
+    // Resolve which agents will actually run
+    const allAgents: Array<{ id: string; role: string }> = (freshJson?.agents ?? []).map((a: any) => ({ id: a.id, role: a.role }));
+    const runningAgents = selectedAgents && selectedAgents.length > 0
+      ? allAgents.filter(a => selectedAgents!.includes(a.id))
+      : allAgents;
+
     await supabase.from('mission_runs').insert({
       id: runId,
       tenant_id: tenantId,
@@ -137,7 +153,7 @@ export async function POST(
       run_number: (priorRuns ?? 0) + 1,
       trigger: 'manual',
       status: 'queued',
-      agents_total: freshJson?.agents?.length ?? 0,
+      agents_total: runningAgents.length,
       agents_done: 0,
       agents_failed: 0,
     });
@@ -145,15 +161,18 @@ export async function POST(
     // Queue background execution via Inngest
     await inngest.send({
       name: 'mission.execute',
-      data: { missionId, tenantId, runId },
+      data: {
+        missionId, tenantId, runId,
+        ...(selectedAgents ? { selectedAgents, executionMode } : {}),
+      },
     });
 
-    console.log(`[Run] Mission ${missionId} provisioned and queued (runId=${runId}).`);
+    console.log(`[Run] Mission ${missionId} provisioned and queued (runId=${runId}, selective=${!!selectedAgents}).`);
 
     return NextResponse.json({
       success: true,
       runId,
-      agents: (freshJson?.agents ?? []).map((a: any) => ({ id: a.id, role: a.role })),
+      agents: runningAgents,
     });
   } catch (error) {
     console.error(`[POST /api/missions/${missionId}/run] Error:`, error);
