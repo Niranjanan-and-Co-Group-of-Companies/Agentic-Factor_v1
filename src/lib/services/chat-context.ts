@@ -112,6 +112,25 @@ export async function buildChatContext(
     }
   } catch { /* non-fatal */ }
 
+  // ── Version history ──────────────────────────────────────────────────
+  let versionHistory = '';
+  try {
+    const { data: versions } = await supabase
+      .from('mission_versions')
+      .select('version_number, change_summary, created_at')
+      .eq('mission_id', missionId)
+      .eq('tenant_id', tenantId)
+      .order('version_number', { ascending: false })
+      .limit(5);
+    if (versions && versions.length > 0) {
+      const lines = versions.map(v => {
+        const when = new Date(v.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' });
+        return `  v${v.version_number} (${when}): ${v.change_summary ?? 'No summary'}`;
+      });
+      versionHistory = '\nVERSION HISTORY (most recent first):\n' + lines.join('\n');
+    }
+  } catch { /* non-fatal */ }
+
   // ── Run history ──────────────────────────────────────────────────────
   let runsSummary = 'No runs yet.';
   try {
@@ -193,7 +212,7 @@ ${toolsBlock ? toolsBlock + '\n' : ''}
 ${profileBlock ? profileBlock + '\n\n' : ''}${episodesBlock ? episodesBlock + '\n\n' : ''}
 RECENT RUNS:
 ${runsSummary}
-
+${versionHistory}
 SCHEDULE: ${scheduleInfo}
 ${tenantFacts}
 
@@ -226,12 +245,14 @@ STRUCTURED ACTIONS (include at end of message when relevant):
 <action>{"type":"update_mission","label":"Apply changes to mission","summary":"one sentence describing what changes to make"}</action>
 <action>{"type":"run_selective","agents":["agent-id-1","agent-id-2"],"executionMode":"sequential","label":"Run Agent Name then Agent Name"}</action>
 <action>{"type":"run_selective","agents":["agent-id-1","agent-id-2"],"executionMode":"parallel","label":"Run Agent Name + Agent Name simultaneously"}</action>
+<action>{"type":"revert_version","versionNumber":2,"label":"Revert to version 2"}</action>
 
 UPDATE_MISSION RULES:
 - Emit update_mission when the customer asks to add, remove, or change what the mission DOES (new steps, new connectors, different logic, new agents)
 - The "summary" field must describe the change concisely — it becomes the actual instruction passed to the blueprint engine
 - Do NOT emit update_mission for run/schedule/connector changes — those have their own action types
 - After emitting, explain in plain language what will change so the customer can confirm before clicking Apply
+- Every update automatically saves the previous version — the customer can always revert
 
 RUN_SELECTIVE RULES:
 - Emit run_selective when the customer asks to run only specific agents (e.g. "run only the code writer", "run agents 2 and 3", "just run the test writer")
@@ -240,6 +261,12 @@ RUN_SELECTIVE RULES:
 - Use executionMode "sequential" when order matters or not specified ("then", "after", one by one)
 - The "label" must describe exactly what will run: "Run Code Writer then Test Writer" or "Run Code Writer + Test Writer simultaneously"
 - NEVER include agents the customer did not ask for
+
+REVERT_VERSION RULES:
+- Emit revert_version when the customer says "undo", "revert", "go back", "restore previous version", or references a specific version number
+- The versionNumber must be an integer — use the version number from version history if shown, otherwise use the most recent version (current − 1)
+- Label: "Revert to version N" or "Undo last change"
+- After reverting, the system saves the current state as a new version so the revert itself is undoable
 
 TODAY: ${now}`;
 

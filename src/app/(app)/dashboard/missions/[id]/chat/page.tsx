@@ -28,6 +28,12 @@ interface RunAgent {
   status: 'queued' | 'running' | 'done' | 'failed' | 'skipped';
 }
 
+interface BlueprintStep {
+  step: string;
+  label: string;
+  status: 'pending' | 'active' | 'done';
+}
+
 interface ChatMessage {
   id?: string;
   role: 'user' | 'assistant';
@@ -46,10 +52,17 @@ interface ChatMessage {
     agentsDone: number;
     agentsTotal: number;
   };
+  blueprintUpdate?: {
+    jobId: string;
+    steps: BlueprintStep[];
+    status: 'running' | 'completed' | 'error';
+    errorMessage?: string;
+    versionNumber?: number | null;
+  };
 }
 
 interface ActionPayload {
-  type: 'schedule' | 'run_now' | 'resume_run' | 'go_live' | 'suggest_connector' | 'webhook' | 'update_mission' | 'run_selective';
+  type: 'schedule' | 'run_now' | 'resume_run' | 'go_live' | 'suggest_connector' | 'webhook' | 'update_mission' | 'run_selective' | 'revert_version';
   label: string;
   cron?: string;
   timezone?: string;
@@ -57,6 +70,7 @@ interface ActionPayload {
   summary?: string; // used by update_mission
   agents?: string[]; // used by run_selective — array of agent IDs
   executionMode?: 'sequential' | 'parallel'; // used by run_selective
+  versionNumber?: number; // used by revert_version
 }
 
 interface LiveRun {
@@ -161,6 +175,78 @@ function RunMonitorCard({ monitor }: { monitor: NonNullable<ChatMessage['runMoni
             {agentStatus === 'failed' && (
               <span style={{ fontSize: '0.7rem', color: '#ef4444', marginLeft: 'auto' }}>Failed</span>
             )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── BlueprintUpdateCard — live step-by-step progress for mission updates ─────
+
+const BLUEPRINT_STEP_LABELS: Record<string, string> = {
+  analysing: 'Analysing change request',
+  generating: 'Generating updated blueprint',
+  validating_actions: 'Validating Composio actions',
+  validating_params: 'Validating parameter names',
+  saving: 'Saving blueprint',
+};
+
+function BlueprintUpdateCard({ update }: { update: NonNullable<ChatMessage['blueprintUpdate']> }) {
+  const { steps, status, errorMessage, versionNumber } = update;
+  const isFinished = status === 'completed' || status === 'error';
+  const headerColor = status === 'completed' ? 'hsla(152,69%,45%,1)'
+    : status === 'error' ? '#ef4444'
+    : 'var(--accent)';
+  const headerLabel = status === 'completed' ? 'Mission updated'
+    : status === 'error' ? 'Update failed'
+    : 'Updating mission…';
+  const headerIcon = status === 'completed' ? '✅' : status === 'error' ? '❌' : null;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        {!isFinished && (
+          <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--border)', borderTopColor: headerColor, display: 'inline-block', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
+        )}
+        {isFinished && <span style={{ fontSize: '0.9rem' }}>{headerIcon}</span>}
+        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: headerColor }}>{headerLabel}</span>
+        {status === 'completed' && versionNumber && (
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>v{versionNumber} saved</span>
+        )}
+      </div>
+
+      {status === 'error' && errorMessage && (
+        <div style={{ fontSize: '0.78rem', color: '#ef4444', padding: '6px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: 6, border: '1px solid rgba(239,68,68,0.2)' }}>
+          {errorMessage}
+        </div>
+      )}
+
+      {steps.map((s) => {
+        const stepColor = s.status === 'done' ? 'hsla(152,69%,45%,1)'
+          : s.status === 'active' ? 'var(--accent)'
+          : 'var(--text-muted)';
+        return (
+          <div key={s.step} style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '5px 10px', borderRadius: 8,
+            background: s.status === 'pending' ? 'transparent' : 'var(--bg-secondary)',
+            border: `1px solid ${s.status === 'pending' ? 'transparent' : s.status === 'done' ? 'hsla(152,69%,45%,0.2)' : 'var(--border)'}`,
+            opacity: s.status === 'pending' ? 0.45 : 1,
+            transition: 'all 0.2s',
+          }}>
+            <div style={{ width: 16, height: 16, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {s.status === 'active' ? (
+                <span style={{ width: 11, height: 11, borderRadius: '50%', border: '2px solid var(--border)', borderTopColor: 'var(--accent)', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
+              ) : s.status === 'done' ? (
+                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: stepColor }}>✓</span>
+              ) : (
+                <span style={{ fontSize: '0.72rem', color: stepColor }}>○</span>
+              )}
+            </div>
+            <span style={{ fontSize: '0.79rem', color: s.status === 'pending' ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: s.status === 'active' ? 600 : 400 }}>
+              {BLUEPRINT_STEP_LABELS[s.step] ?? s.label}
+            </span>
           </div>
         );
       })}
@@ -1260,24 +1346,126 @@ export default function MissionChatPage() {
         showToast(`📋 Webhook URL copied!`);
 
       } else if (action.type === 'update_mission') {
-        showToast('⚙️ Updating mission blueprint…');
-        const res = await fetch(`/api/missions/${missionId}/update-blueprint`, {
+        const jobId = crypto.randomUUID();
+        const STEPS = ['analysing', 'generating', 'validating_actions', 'validating_params', 'saving'];
+        const initialSteps: BlueprintStep[] = STEPS.map((s, i) => ({
+          step: s,
+          label: s,
+          status: i === 0 ? 'active' : 'pending',
+        }));
+
+        // Insert BlueprintUpdateCard message BEFORE firing the request
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: '',
+            ts: Date.now(),
+            blueprintUpdate: {
+              jobId,
+              steps: initialSteps,
+              status: 'running',
+            },
+          },
+        ]);
+
+        // Subscribe to Realtime for live step updates
+        const supabase = getSupabase();
+        const bpChannel = supabase
+          .channel(`blueprint-update-${jobId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'agent_execution_events',
+              filter: `session_id=eq.${jobId}`,
+            },
+            (payload) => {
+              const row = payload.new as { event_type: string; payload: { step?: string; label?: string; message?: string; versionNumber?: number | null; title?: string } };
+              if (row.event_type === 'blueprint_step' && row.payload.step) {
+                const arrivedStep = row.payload.step;
+                setMessages(prev => prev.map(m => {
+                  if (!m.blueprintUpdate || m.blueprintUpdate.jobId !== jobId) return m;
+                  const updatedSteps = m.blueprintUpdate.steps.map(s => {
+                    if (s.step === arrivedStep) return { ...s, status: 'active' as const };
+                    const arrivedIdx = STEPS.indexOf(arrivedStep);
+                    const sIdx = STEPS.indexOf(s.step);
+                    if (sIdx < arrivedIdx) return { ...s, status: 'done' as const };
+                    return s;
+                  });
+                  return { ...m, blueprintUpdate: { ...m.blueprintUpdate!, steps: updatedSteps } };
+                }));
+              } else if (row.event_type === 'blueprint_completed') {
+                if (row.payload.title) setMissionTitle(sanitizeTitle(row.payload.title));
+                setMessages(prev => prev.map(m => {
+                  if (!m.blueprintUpdate || m.blueprintUpdate.jobId !== jobId) return m;
+                  const completedSteps = m.blueprintUpdate.steps.map(s => ({ ...s, status: 'done' as const }));
+                  return { ...m, blueprintUpdate: { ...m.blueprintUpdate!, steps: completedSteps, status: 'completed', versionNumber: row.payload.versionNumber } };
+                }));
+              } else if (row.event_type === 'blueprint_error') {
+                setMessages(prev => prev.map(m => {
+                  if (!m.blueprintUpdate || m.blueprintUpdate.jobId !== jobId) return m;
+                  return { ...m, blueprintUpdate: { ...m.blueprintUpdate!, status: 'error', errorMessage: row.payload.message } };
+                }));
+              }
+            }
+          )
+          .subscribe();
+
+        // Fire the update request
+        try {
+          const res = await fetch(`/api/missions/${missionId}/update-blueprint`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ request: action.summary ?? action.label, jobId }),
+          });
+          if (res.ok) {
+            const data = await res.json() as { title?: string; versionNumber?: number | null };
+            if (data.title) setMissionTitle(sanitizeTitle(data.title));
+            // Ensure final state is set (Realtime may have already done this)
+            setMessages(prev => prev.map(m => {
+              if (!m.blueprintUpdate || m.blueprintUpdate.jobId !== jobId) return m;
+              if (m.blueprintUpdate.status === 'completed') return m;
+              const completedSteps = m.blueprintUpdate.steps.map(s => ({ ...s, status: 'done' as const }));
+              return { ...m, blueprintUpdate: { ...m.blueprintUpdate!, steps: completedSteps, status: 'completed', versionNumber: data.versionNumber } };
+            }));
+            setMessages(prev => [
+              ...prev,
+              { role: 'assistant', content: 'Mission updated! You can run it now or keep refining. To undo, say "revert to the previous version".', ts: Date.now() },
+            ]);
+          } else {
+            const err = await res.json().catch(() => ({})) as { error?: string };
+            const errMsg = err.error ?? 'Could not update mission. Please try again.';
+            setMessages(prev => prev.map(m => {
+              if (!m.blueprintUpdate || m.blueprintUpdate.jobId !== jobId) return m;
+              return { ...m, blueprintUpdate: { ...m.blueprintUpdate!, status: 'error', errorMessage: errMsg } };
+            }));
+          }
+        } finally {
+          setTimeout(() => supabase.removeChannel(bpChannel), 5 * 60 * 1000);
+        }
+
+      } else if (action.type === 'revert_version' && action.versionNumber) {
+        showToast(`⏪ Reverting to version ${action.versionNumber}…`);
+        const res = await fetch(`/api/missions/${missionId}/revert`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ request: action.summary ?? action.label }),
+          body: JSON.stringify({ versionNumber: action.versionNumber }),
         });
         if (res.ok) {
-          const data = await res.json() as { title?: string };
+          const data = await res.json() as { title?: string; versionNumber?: number };
           if (data.title) setMissionTitle(sanitizeTitle(data.title));
-          showToast('✅ Mission updated!');
+          showToast(`✅ Reverted to version ${action.versionNumber}!`);
           setMessages(prev => [
             ...prev,
-            { role: 'assistant', content: 'Done — the mission has been updated with your changes. You can run it now or keep refining.', ts: Date.now() },
+            { role: 'assistant', content: `Done — mission restored to version ${action.versionNumber}. The current state was saved as a new version so you can revert that too if needed.`, ts: Date.now() },
           ]);
         } else {
           const err = await res.json().catch(() => ({})) as { error?: string };
-          showToast(`❌ ${err.error ?? 'Could not update mission. Please try again.'}`);
+          showToast(`❌ ${err.error ?? 'Could not revert. Please try again.'}`);
         }
       }
     } catch {
@@ -1589,14 +1777,16 @@ export default function MissionChatPage() {
                     }}>
                       {/* Run monitor — live per-agent progress card */}
                       {msg.runMonitor && <RunMonitorCard monitor={msg.runMonitor} />}
+                      {/* Blueprint update — live step-by-step progress card */}
+                      {msg.blueprintUpdate && <BlueprintUpdateCard update={msg.blueprintUpdate} />}
                       {/* Tool call cards — live while streaming, persisted in completed messages */}
-                      {!msg.runMonitor && msg.isStreaming && toolStatusLines.length > 0 && (
+                      {!msg.runMonitor && !msg.blueprintUpdate && msg.isStreaming && toolStatusLines.length > 0 && (
                         <ToolCallCards cards={toolStatusLines} />
                       )}
-                      {!msg.runMonitor && !msg.isStreaming && msg.toolCards && msg.toolCards.length > 0 && (
+                      {!msg.runMonitor && !msg.blueprintUpdate && !msg.isStreaming && msg.toolCards && msg.toolCards.length > 0 && (
                         <ToolCallCards cards={msg.toolCards} />
                       )}
-                      {!msg.runMonitor && (msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content)}
+                      {!msg.runMonitor && !msg.blueprintUpdate && (msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content)}
                       {msg.isStreaming && !msg.isAgentRunning && (
                         <span style={{ display: 'inline-block', width: 2, height: 16, background: 'var(--accent)', borderRadius: 1, marginLeft: 3, animation: 'blink 0.7s step-end infinite', verticalAlign: 'text-bottom' }} />
                       )}

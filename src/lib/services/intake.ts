@@ -172,7 +172,8 @@ You must decompose the user's intent into:
    - **CRITICAL: DO NOT EMPTY THE BUCKET.** The script MUST parse the input JSON and merge its new output into it. If the previous agent generated a newsletter, keep it in the final JSON alongside your new status receipts so the final output contains ALL accumulated content.
    - **NEVER use sys.exit().** E2B sandbox treats ANY sys.exit() as a crash. Use print(json.dumps({...})) to output and let the script end naturally.
    - **PRE-INSTALLED SDK MODULES** — Use these instead of raw HTTP requests:
-     - \`from agenticfactor import social\` — Social media posting (ALWAYS use this for Twitter/Facebook/Instagram/LinkedIn):
+     - ⚠️ **COMPOSIO-FIRST RULE**: If a provider appears in the injected "COMPOSIO ACTIONS" section, you MUST use \`composio_execute()\` for ALL interactions with that provider — reads, writes, everything. Do NOT use the native modules below (agenticfactor.gmail, agenticfactor.social, etc.) for any Composio-connected provider. Native modules are ONLY for providers absent from the COMPOSIO ACTIONS section (search, files, buffer) or providers listed as native-only here. Violating this causes 401 errors at runtime.
+     - \`from agenticfactor import social\` — Social media posting (use when provider is NOT in COMPOSIO ACTIONS section):
        - \`social.post_tweet(text)\` → Post a tweet (auto-handles Twitter API v2)
        - \`social.get_tweets(query)\` → Search recent tweets
        - \`social.get_twitter_user_me()\` → Get authenticated Twitter user profile
@@ -1244,82 +1245,230 @@ Include ONLY agents whose scripts were changed. Change nothing else — not logi
 // ============================================================
 export async function editBlueprint(
   currentBlueprint: Mission,
-  instruction: string
+  instruction: string,
+  tenantId: string = '',
+  connectedProviders: string[] = [],
+  onProgress?: (step: string, label: string) => Promise<void>
 ): Promise<Mission> {
-  const llmResponse = await callLLM([
-    { role: 'system', content: 'You are an AI Architect. You will receive a JSON Blueprint of an agent pipeline and a user instruction to modify it. You MUST return ONLY the modified JSON blueprint that exactly matches the LLMOutputSchema format. Apply the modification correctly.' },
-    { role: 'user', content: `Current Blueprint:\n${JSON.stringify(currentBlueprint, null, 2)}\n\nInstruction: ${instruction}` }
-  ], { jsonMode: true, temperature: 0.2, tier: 1 });
+  const emit = onProgress ?? (async () => {});
 
-  let rawJSON;
+  // Build edit system prompt: reuse SYSTEM_PROMPT rules with edit-specific contract prepended
+  const EDIT_SYSTEM_PROMPT = `You are the AgenticFactor Blueprint Editor. You receive an existing Mission JSON blueprint and a change instruction. Apply the change and return the COMPLETE updated blueprint in LLMOutputSchema format.
+
+EDITING CONTRACT:
+- Preserve ALL existing agent id fields EXACTLY — never generate new UUIDs for existing agents
+- Preserve the mission id and createdAt fields exactly
+- Change ONLY what the instruction specifies — leave everything else unchanged
+- If adding a new agent, use a placeholder id like "new-agent-0" (gets remapped to a real UUID after)
+- Return ONLY valid JSON — no markdown, no explanation, no code fences
+
+${SYSTEM_PROMPT}`;
+
+  // Inject live Composio action schemas for connected providers
+  let composioActionsContext = '';
+  if (connectedProviders.length > 0) {
+    try {
+      const { buildComposioActionsContext } = await import('./composio-actions');
+      composioActionsContext = await buildComposioActionsContext(connectedProviders).catch(() => '');
+    } catch { /* non-fatal */ }
+  }
+
+  await emit('generating', 'Generating updated blueprint…');
+
+  const messages: Array<{ role: string; content: string }> = [
+    { role: 'system', content: EDIT_SYSTEM_PROMPT },
+  ];
+  if (composioActionsContext) {
+    messages.push({ role: 'user', content: composioActionsContext });
+  }
+  messages.push({
+    role: 'user',
+    content: `Current Blueprint:\n${JSON.stringify(currentBlueprint, null, 2)}\n\nChange Instruction: ${instruction}`,
+  });
+
+  const llmResponse = await callLLM(messages as any, {
+    jsonMode: true,
+    temperature: 0.2,
+    tier: 1,
+    ...(tenantId ? { budgetContext: { tenantId, missionId: currentBlueprint.id || 'blueprint_edit' } } : {}),
+  });
+
+  let rawJSON: Record<string, unknown>;
   let llmOutput;
   try {
     rawJSON = sanitizePlaceholders(robustJSONParse(llmResponse.content)) as Record<string, unknown>;
     llmOutput = LLMOutputSchema.parse(rawJSON);
   } catch (err: any) {
-    console.log(`[intake] Edit blueprint failed parsing, attempting heal: ${err.message}`);
+    console.log(`[intake/edit] Parse failed, attempting heal: ${err.message}`);
     const healResponse = await callLLM([
-      { role: 'system', content: 'You are a JSON recovery expert. The following output failed schema validation. Fix the JSON so it perfectly matches the requested schema. Return ONLY valid JSON.' },
+      { role: 'system', content: 'You are a JSON recovery expert. Fix the JSON so it perfectly matches the LLMOutputSchema format. Return ONLY valid JSON.' },
       { role: 'user', content: `Bad Output: ${llmResponse.content}\n\nError: ${err.message}` }
     ], { jsonMode: true, temperature: 0.1, tier: 1 });
-
     rawJSON = sanitizePlaceholders(robustJSONParse(healResponse.content)) as Record<string, unknown>;
     llmOutput = LLMOutputSchema.parse(rawJSON);
   }
 
-  // Normalize permission service names (safety net)
+  // Normalize permission service names
   if (llmOutput.permissions?.length > 0) {
     llmOutput.permissions = normalizePermissions(llmOutput.permissions as any) as any;
   }
 
-  // Preserve UUIDs from the current blueprint where possible, otherwise generate new ones
-  // Priority: match by agentIndex (most stable) → then by role name → then by id → fallback to new UUID
-  const oldToNewIdMap: Record<string, string> = {};
-  
-  const hydratedAgents = llmOutput.agents.map((newAgent, i) => {
-    // Try to find the matching existing agent
-    const existingAgent = 
-      currentBlueprint.agents.find(ea => ea.agentIndex === newAgent.agentIndex) ||  // Most stable match
-      currentBlueprint.agents.find(ea => ea.role === newAgent.role) ||               // Role name match
-      currentBlueprint.agents.find(ea => ea.id === newAgent.id);                     // Direct ID match
-    
-    const finalId = existingAgent?.id || crypto.randomUUID();
-    
-    // Track ID mappings so we can remap edges
-    if (newAgent.id && newAgent.id !== finalId) {
-      oldToNewIdMap[newAgent.id] = finalId;
+  // Auto-grant composio_oauth permissions for already-connected providers
+  if (llmOutput.permissions?.length > 0 && connectedProviders.length > 0) {
+    try {
+      const { AF_TO_COMPOSIO_APP } = await import('./composio-actions');
+      const connectedSlugs = new Set<string>();
+      for (const cp of connectedProviders) {
+        connectedSlugs.add(cp.toLowerCase());
+        const slug = AF_TO_COMPOSIO_APP[cp];
+        if (slug) connectedSlugs.add(slug.toLowerCase());
+      }
+      llmOutput.permissions = (llmOutput.permissions as any[]).map((perm: any) => {
+        if (perm.type !== 'composio_oauth') return perm;
+        const service = (perm.service ?? '').toLowerCase().trim();
+        return { ...perm, granted: connectedSlugs.has(service) };
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  // Repair missing permissions inferred from agent tool declarations
+  llmOutput.permissions = repairMissionPermissions(
+    llmOutput.agents as Array<{ role: string; tools: Array<{ name: string; type: string }> }>,
+    llmOutput.permissions as RawPermission[]
+  ) as typeof llmOutput.permissions;
+
+  // 4.6: Validate Composio action names against live list
+  if (connectedProviders.length > 0) {
+    await emit('validating_actions', 'Validating Composio action names…');
+    try {
+      const { getValidComposioActionNames } = await import('./composio-actions');
+      const validActions = await getValidComposioActionNames(connectedProviders);
+      if (validActions.size > 0) {
+        const invalidActions = new Set<string>();
+        const actionRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
+        for (const agent of llmOutput.agents) {
+          if (!agent.pythonScript) continue;
+          actionRegex.lastIndex = 0;
+          let match;
+          while ((match = actionRegex.exec(agent.pythonScript)) !== null) {
+            if (!validActions.has(match[1])) invalidActions.add(match[1]);
+          }
+        }
+        if (invalidActions.size > 0) {
+          console.warn(`[intake/edit] Invalid Composio actions: ${[...invalidActions].join(', ')} — auto-correcting`);
+          const corrResp = await callLLM([
+            {
+              role: 'system',
+              content: `Fix ONLY the invalid composio_execute() action names.
+Invalid: ${[...invalidActions].join(', ')}
+Valid: ${[...validActions].join(', ')}
+Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected script"}]}`,
+            },
+            {
+              role: 'user',
+              content: JSON.stringify(llmOutput.agents.filter(a => a.pythonScript).map(a => ({ agentIndex: a.agentIndex, pythonScript: a.pythonScript }))),
+            },
+          ], { temperature: 0, jsonMode: true, tier: 2 });
+          try {
+            const fixes = robustJSONParse(corrResp.content);
+            if (Array.isArray(fixes?.agents)) {
+              for (const fix of fixes.agents) {
+                const agent = llmOutput.agents.find(a => a.agentIndex === fix.agentIndex);
+                if (agent && fix.pythonScript) agent.pythonScript = fix.pythonScript;
+              }
+            }
+          } catch { /* non-fatal */ }
+        }
+      }
+    } catch (err) {
+      console.warn('[intake/edit] Action name validation failed (non-fatal):', err);
     }
-    // Also map the generic agent-N reference
+  }
+
+  // 4.7: Validate Composio parameter names against live schemas
+  if (connectedProviders.length > 0) {
+    await emit('validating_params', 'Validating parameter names…');
+    try {
+      const { getComposioActionSchemas } = await import('./composio-actions');
+      const actionSchemas = await getComposioActionSchemas(connectedProviders);
+      if (actionSchemas.size > 0) {
+        const usedActions = new Set<string>();
+        const usedRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
+        for (const agent of llmOutput.agents) {
+          if (!agent.pythonScript) continue;
+          usedRegex.lastIndex = 0;
+          let m;
+          while ((m = usedRegex.exec(agent.pythonScript)) !== null) usedActions.add(m[1]);
+        }
+        const schemaRef: Record<string, { required: string[]; properties: Record<string, string> }> = {};
+        for (const actionName of usedActions) {
+          const schema = actionSchemas.get(actionName);
+          if (schema) {
+            const props: Record<string, string> = {};
+            for (const [param, info] of Object.entries(schema.input_parameters?.properties ?? {})) {
+              props[param] = (info as any).type ?? 'any';
+            }
+            schemaRef[actionName] = { required: schema.input_parameters?.required ?? [], properties: props };
+          }
+        }
+        if (Object.keys(schemaRef).length > 0) {
+          const paramResp = await callLLM([
+            {
+              role: 'system',
+              content: `Fix wrong or missing composio_execute() parameter names.
+Schemas: ${JSON.stringify(schemaRef, null, 2)}
+Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected script"}]} or {"agents": []} if no changes needed.`,
+            },
+            {
+              role: 'user',
+              content: JSON.stringify(llmOutput.agents.filter(a => a.pythonScript).map(a => ({ agentIndex: a.agentIndex, pythonScript: a.pythonScript }))),
+            },
+          ], { temperature: 0, jsonMode: true, tier: 2 });
+          try {
+            const paramFixes = robustJSONParse(paramResp.content);
+            if (Array.isArray(paramFixes?.agents) && paramFixes.agents.length > 0) {
+              for (const fix of paramFixes.agents) {
+                const agent = llmOutput.agents.find(a => a.agentIndex === fix.agentIndex);
+                if (agent && fix.pythonScript) agent.pythonScript = fix.pythonScript;
+              }
+            }
+          } catch { /* non-fatal */ }
+        }
+      }
+    } catch (err) {
+      console.warn('[intake/edit] Parameter validation failed (non-fatal):', err);
+    }
+  }
+
+  // Preserve UUIDs from the current blueprint; map agent-N refs and new agents to new UUIDs
+  const oldToNewIdMap: Record<string, string> = {};
+  const hydratedAgents = llmOutput.agents.map((newAgent, i) => {
+    const existingAgent =
+      currentBlueprint.agents.find(ea => ea.agentIndex === newAgent.agentIndex) ||
+      currentBlueprint.agents.find(ea => ea.role === newAgent.role) ||
+      currentBlueprint.agents.find(ea => ea.id === newAgent.id);
+    const finalId = existingAgent?.id || crypto.randomUUID();
+    if (newAgent.id && newAgent.id !== finalId) oldToNewIdMap[newAgent.id] = finalId;
     oldToNewIdMap[`agent-${i}`] = finalId;
-    
-    return {
-      ...newAgent,
-      id: finalId,
-      agentIndex: i, // Ensure sequential indices
-    };
+    return { ...newAgent, id: finalId, agentIndex: i };
   }) as any;
 
-  // Remap orchestration edges to use the correct UUIDs
   const remappedEdges = (llmOutput.orchestration.edges || []).map(edge => ({
     ...edge,
     from: oldToNewIdMap[edge.from] || edge.from,
     to: oldToNewIdMap[edge.to] || edge.to,
   }));
 
-  // Remap entryAgent
-  const remappedEntryAgent = oldToNewIdMap[llmOutput.orchestration.entryAgent || 'agent-0'] 
-    || llmOutput.orchestration.entryAgent 
-    || hydratedAgents[0]?.id;
+  const remappedEntryAgent =
+    oldToNewIdMap[llmOutput.orchestration.entryAgent || 'agent-0'] ||
+    llmOutput.orchestration.entryAgent ||
+    hydratedAgents[0]?.id;
 
   const mission: Mission = {
     ...currentBlueprint,
     ...llmOutput,
     agents: hydratedAgents,
-    orchestration: {
-      ...llmOutput.orchestration,
-      edges: remappedEdges,
-      entryAgent: remappedEntryAgent,
-    },
+    orchestration: { ...llmOutput.orchestration, edges: remappedEdges, entryAgent: remappedEntryAgent },
   };
 
   return mission;
