@@ -7,12 +7,15 @@ interface InviteDetails {
   ownerName: string;
   memberEmail: string;
   role: string;
+  type: 'workspace' | 'mission';
+  missionTitle?: string;
 }
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin — run missions, edit blueprints, manage team",
+  collaborator: "Collaborator — run missions and chat with the AI",
   editor: "Editor — run missions and edit blueprints",
-  viewer: "Viewer — read-only access to missions and history",
+  viewer: "Viewer — read-only access to mission history",
 };
 
 function AcceptInviteContent() {
@@ -99,13 +102,16 @@ function AcceptInviteContent() {
   }
 
   if (accepted) {
+    const isWorkspace = invite?.type === 'workspace';
     return (
       <div style={containerStyle}>
         <div style={cardStyle}>
           <div style={{ fontSize: "2.5rem", marginBottom: 16 }}>🎉</div>
           <div style={{ fontWeight: 700, fontSize: "1.2rem", marginBottom: 8 }}>You're in!</div>
           <div style={{ color: "var(--text-muted)", marginBottom: 24 }}>
-            You've joined <strong>{invite?.ownerName}</strong>'s team as a <strong>{invite?.role}</strong>.
+            {isWorkspace
+              ? <>You've joined <strong>{invite?.ownerName}</strong>'s workspace as a <strong>{invite?.role}</strong>. You can now access all their missions.</>
+              : <>You now have access to <strong>"{invite?.missionTitle}"</strong> as a <strong>{invite?.role}</strong>.</>}
           </div>
           <a href="/dashboard" className="btn btn-primary" style={{ textDecoration: "none", display: "inline-block" }}>
             Go to Dashboard →
@@ -115,14 +121,20 @@ function AcceptInviteContent() {
     );
   }
 
+  const isMission = invite?.type === 'mission';
+
   return (
     <div style={containerStyle}>
       <div style={cardStyle}>
         <div style={{ fontSize: "2.5rem", marginBottom: 20 }}>🤖</div>
-        <div style={{ fontWeight: 700, fontSize: "1.25rem", marginBottom: 8 }}>Team Invite</div>
+        <div style={{ fontWeight: 700, fontSize: "1.25rem", marginBottom: 8 }}>
+          {isMission ? "Mission Access Invite" : "Team Invite"}
+        </div>
         <div style={{ color: "var(--text-muted)", marginBottom: 24, lineHeight: 1.6 }}>
-          <strong>{invite?.ownerName}</strong> has invited{" "}
-          <strong>{invite?.memberEmail}</strong> to join their AgenticFactor team.
+          <strong>{invite?.ownerName}</strong> has invited <strong>{invite?.memberEmail}</strong>{" "}
+          {isMission
+            ? <>to access the mission <strong>"{invite?.missionTitle}"</strong>.</>
+            : <>to join their AgenticFactor workspace.</>}
         </div>
 
         <div style={{ background: "var(--background)", borderRadius: 10, padding: "14px 18px",
@@ -136,6 +148,11 @@ function AcceptInviteContent() {
           <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 4 }}>
             {ROLE_LABELS[invite?.role ?? "viewer"]}
           </div>
+          {isMission && (
+            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 8, padding: "6px 10px", background: "color-mix(in srgb, var(--accent) 6%, transparent)", borderRadius: 6 }}>
+              Mission-only access — you won't see other missions in this workspace.
+            </div>
+          )}
         </div>
 
         <button className="btn btn-primary" onClick={acceptInvite} disabled={accepting}

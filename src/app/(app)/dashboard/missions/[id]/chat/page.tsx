@@ -478,6 +478,14 @@ export default function MissionChatPage() {
 
   const [pendingFile, setPendingFile] = useState<{ name: string; assetId?: string; uploading: boolean; error?: string } | null>(null);
 
+  // ── Mission share / invite panel ─────────────────────────────
+  const [shareOpen, setShareOpen] = useState(false);
+  const [missionMembers, setMissionMembers] = useState<Array<{ id: string; member_email: string; role: string; status: string }>>([]);
+  const [shareEmail, setShareEmail] = useState('');
+  const [shareRole, setShareRole] = useState<'collaborator' | 'viewer'>('collaborator');
+  const [shareInviting, setShareInviting] = useState(false);
+  const [shareResult, setShareResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const runPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -833,6 +841,49 @@ export default function MissionChatPage() {
     }
     setInlineApiKeySaving(false);
   }, [inlineApiKeyModal, inlineApiKeyValue]);
+
+  // ── Mission share helpers ─────────────────────────────────────
+  const fetchMissionMembers = useCallback(async () => {
+    if (!missionId) return;
+    const res = await fetch(`/api/missions/${missionId}/invite`, { credentials: 'include' });
+    if (res.ok) {
+      const { members } = await res.json() as { members: Array<{ id: string; member_email: string; role: string; status: string }> };
+      setMissionMembers(members ?? []);
+    }
+  }, [missionId]);
+
+  const sendMissionInvite = useCallback(async () => {
+    if (!shareEmail.trim() || !missionId) return;
+    setShareInviting(true);
+    setShareResult(null);
+    const res = await fetch(`/api/missions/${missionId}/invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ email: shareEmail.trim(), role: shareRole }),
+    });
+    if (res.ok) {
+      setShareResult({ type: 'success', message: `Invite sent to ${shareEmail.trim()}` });
+      setShareEmail('');
+      await fetchMissionMembers();
+    } else {
+      const { error } = await res.json() as { error: string };
+      setShareResult({ type: 'error', message: error || 'Failed to send invite' });
+    }
+    setShareInviting(false);
+    setTimeout(() => setShareResult(null), 6000);
+  }, [shareEmail, shareRole, missionId, fetchMissionMembers]);
+
+  const revokeMissionMember = useCallback(async (memberId: string, email: string) => {
+    if (!confirm(`Remove ${email} from this mission?`)) return;
+    await fetch(`/api/missions/${missionId}/invite?memberId=${memberId}`, {
+      method: 'DELETE', credentials: 'include',
+    });
+    await fetchMissionMembers();
+  }, [missionId, fetchMissionMembers]);
+
+  // Fetch mission members when share panel opens
+  useEffect(() => { if (shareOpen) { fetchMissionMembers(); } }, [shareOpen, fetchMissionMembers]);
 
   // ── Send message ──────────────────────────────────────────────
   const sendMessage = async (text: string) => {
@@ -1579,6 +1630,12 @@ export default function MissionChatPage() {
               }}>
                 {missionStatus}
               </span>
+              <button
+                onClick={() => setShareOpen(v => !v)}
+                className="btn btn-ghost btn-sm"
+                style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: '0.85rem' }}>👥</span> Share
+              </button>
               <button onClick={() => router.push('/dashboard')}
                 className="btn btn-ghost btn-sm"
                 style={{ fontSize: '0.78rem' }}>
@@ -1586,6 +1643,75 @@ export default function MissionChatPage() {
               </button>
             </div>
           </div>
+
+          {/* ── Share / Mission-invite panel ── */}
+          {shareOpen && (
+            <div style={{
+              borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)',
+              padding: '16px 20px', flexShrink: 0,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>
+                  Share this mission
+                  <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.78rem', marginLeft: 6 }}>
+                    — mission-only access (won't see other missions)
+                  </span>
+                </div>
+                <button onClick={() => setShareOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.1rem', lineHeight: 1 }}>×</button>
+              </div>
+
+              {/* Invite form */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                <input
+                  type="email"
+                  placeholder="colleague@company.com"
+                  value={shareEmail}
+                  onChange={e => setShareEmail(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && sendMissionInvite()}
+                  style={{ flex: 1, minWidth: 180, padding: '6px 12px', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: '0.85rem' }}
+                />
+                <select
+                  value={shareRole}
+                  onChange={e => setShareRole(e.target.value as typeof shareRole)}
+                  style={{ padding: '6px 10px', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: '0.82rem' }}>
+                  <option value="collaborator">Collaborator</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+                <button className="btn btn-primary btn-sm" onClick={sendMissionInvite} disabled={shareInviting || !shareEmail.trim()}>
+                  {shareInviting ? 'Sending…' : 'Invite'}
+                </button>
+              </div>
+              {shareResult && (
+                <div style={{ fontSize: '0.8rem', marginBottom: 8, color: shareResult.type === 'success' ? 'var(--emerald)' : '#ef4444' }}>
+                  {shareResult.type === 'success' ? '✓ ' : '✗ '}{shareResult.message}
+                </div>
+              )}
+
+              {/* Existing members */}
+              {missionMembers.length > 0 && (
+                <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {missionMembers.map(m => (
+                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.8rem' }}>
+                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.member_email}</span>
+                      <span style={{ color: 'var(--text-muted)', textTransform: 'capitalize', flexShrink: 0 }}>{m.role}</span>
+                      <span style={{ fontSize: '0.7rem', padding: '1px 6px', borderRadius: 10, flexShrink: 0,
+                        background: m.status === 'accepted' ? 'hsla(152,69%,50%,0.12)' : 'hsla(38,90%,55%,0.12)',
+                        color: m.status === 'accepted' ? 'var(--emerald)' : '#f59e0b' }}>
+                        {m.status === 'accepted' ? 'Active' : 'Pending'}
+                      </span>
+                      <button onClick={() => revokeMissionMember(m.id, m.member_email)}
+                        style={{ background: 'none', cursor: 'pointer', color: '#ef4444', fontSize: '0.75rem', padding: '2px 6px', borderRadius: 4, border: '1px solid #ef4444', flexShrink: 0 }}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)', marginTop: 8 }}>
+                For full dashboard access, use <a href="/settings/team" style={{ color: 'var(--accent)' }}>Team Settings</a> instead.
+              </div>
+            </div>
+          )}
 
           {/* Live run ticker */}
           {liveRun && !liveRunDismissed && (
