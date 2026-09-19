@@ -710,9 +710,13 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Deduct credits
+        // Deduct credits (awaited — failed deduction is logged, not silently swallowed)
         const credits = await calculateChatCreditCost(inputTokens, outputTokens, 'claude-sonnet-4-6');
-        deductCredits(tenantId, credits, 'command_chat').catch(console.error);
+        try {
+          await deductCredits(tenantId, credits, 'command_chat');
+        } catch (deductErr) {
+          console.error('[CommandChat] Credit deduction failed:', deductErr);
+        }
 
         // ── Handle create_mission: hand off to Inngest background job ──
         // generateMissionJSON can take 45-90s for complex missions.

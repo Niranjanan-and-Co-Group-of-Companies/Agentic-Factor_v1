@@ -44,17 +44,14 @@ export async function POST(request: NextRequest) {
   // ── Seat limit enforcement ─────────────────────────────────
   // Pro: 25 seats, Free/Individual: 0 (no invites), Enterprise: unlimited
   const { data: billing } = await supabase
-    .from('billing')
+    .from('tenant_billing')
     .select('plan')
     .eq('tenant_id', tenantId)
     .maybeSingle();
   const plan = (billing?.plan ?? 'free') as string;
 
   const SEAT_LIMITS: Record<string, number> = {
-    free:       0,
-    individual: 0,
-    pro:        25,
-    enterprise: 999999,
+    free: 0, individual: 0, pro: 25, pro_annual: 25, enterprise: 999999,
   };
   const seatLimit = SEAT_LIMITS[plan] ?? 0;
 

@@ -220,7 +220,7 @@ export async function checkActiveMissions(tenantId: string): Promise<BillingChec
     .from('missions')
     .select('id', { count: 'exact', head: true })
     .eq('tenant_id', tenantId)
-    .in('status', ['active', 'building', 'needs_approval']);
+    .in('status', ['active', 'building']);
 
   const activeMissions = count || 0;
 
@@ -275,90 +275,57 @@ export async function deductCredits(
   tenantId: string,
   amount: number,
   actionType: string,
-  tokenMeta?: { provider: string; model: string; inputTokens?: number; outputTokens?: number }
+  tokenMeta?: { provider: string; model: string; inputTokens?: number; outputTokens?: number; triggeredByUserId?: string }
 ): Promise<void> {
   const supabase = createServiceClient();
 
   // Auto-provision billing record if missing
   await ensureBillingRecord(tenantId);
 
-  const { data } = await supabase
-    .from('tenant_billing')
-    .select('credits_remaining, credits_topup, credits_used_this_month, monthly_credit_limit')
-    .eq('tenant_id', tenantId)
-    .single();
+  // Atomic two-bucket deduction via DB function (no read-then-write race)
+  const { data: rows, error } = await supabase.rpc('deduct_credits_atomic', {
+    p_tenant_id:         tenantId,
+    p_amount:            amount,
+    p_check_monthly_cap: true,
+  });
 
-  if (data) {
-    const creditsMonthly = data.credits_remaining || 0;
-    const creditsTopup = data.credits_topup || 0;
-    const totalAvailable = creditsMonthly + creditsTopup;
-    const usedThisMonth = data.credits_used_this_month || 0;
-    const monthlyLimit = data.monthly_credit_limit ?? null;
+  if (error) throw new Error(`Credit deduction DB error: ${error.message}`);
 
-    // Hard stop: refuse to deduct if credits are insufficient
-    if (totalAvailable < amount) {
-      throw new Error(`Insufficient credits: ${totalAvailable} remaining (${creditsMonthly} monthly + ${creditsTopup} top-up), ${amount} needed for ${actionType}`);
-    }
-
-    // Hard stop: refuse to deduct if monthly spending cap would be exceeded (top-up bypasses cap)
-    if (monthlyLimit !== null && usedThisMonth + amount > monthlyLimit && creditsTopup < amount) {
-      throw new Error(`Monthly spending cap of ${monthlyLimit} credits reached (${usedThisMonth} used). Mission paused. Raise your cap in Usage & Credits.`);
-    }
-
-    // Two-bucket deduction: consume monthly credits FIRST, then top-up
-    const deductFromMonthly = Math.min(creditsMonthly, amount);
-    const deductFromTopup = amount - deductFromMonthly;
-
-    const newMonthly = creditsMonthly - deductFromMonthly;
-    const newTopup = creditsTopup - deductFromTopup;
-    const newUsed = (data.credits_used_this_month || 0) + amount;
-
-    await supabase
-      .from('tenant_billing')
-      .update({
-        credits_remaining: newMonthly,
-        credits_topup: newTopup,
-        credits_used_this_month: newUsed,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('tenant_id', tenantId);
-
-    // Calculate real USD cost if token metadata is provided
-    let realCostUsd: number | undefined;
-    if (tokenMeta?.inputTokens || tokenMeta?.outputTokens) {
-      realCostUsd = calculateRealCostUsd(
-        tokenMeta.model,
-        tokenMeta.inputTokens || 0,
-        tokenMeta.outputTokens || 0
-      );
-    }
-
-    // Log credit usage event with real cost tracking (fire-and-forget)
-    try {
-      await supabase.from('events').insert({
-        tenant_id: tenantId,
-        event_type: 'billing.credit_used',
-        entity_type: 'billing',
-        entity_id: tenantId,
-        payload: {
-          amount,
-          actionType,
-          remainingAfter: newMonthly + newTopup,
-          // Internal cost tracking (not exposed to customer)
-          ...(tokenMeta ? {
-            provider: tokenMeta.provider,
-            model: tokenMeta.model,
-            inputTokens: tokenMeta.inputTokens,
-            outputTokens: tokenMeta.outputTokens,
-            realCostUsd,
-          } : {}),
-        },
-      });
-    } catch { /* non-critical */ }
-  } else {
-    // No billing record found — block the action
-    throw new Error('No billing record found. Cannot deduct credits.');
+  const result = Array.isArray(rows) ? rows[0] : rows;
+  if (!result?.success) {
+    throw new Error(result?.failure_reason ?? 'Insufficient credits');
   }
+
+  // Calculate real USD cost if token metadata is provided
+  let realCostUsd: number | undefined;
+  if (tokenMeta?.inputTokens || tokenMeta?.outputTokens) {
+    realCostUsd = calculateRealCostUsd(
+      tokenMeta.model,
+      tokenMeta.inputTokens || 0,
+      tokenMeta.outputTokens || 0,
+    );
+  }
+
+  // Log credit usage event with attribution (non-critical, fire-and-forget)
+  supabase.from('events').insert({
+    tenant_id: tenantId,
+    event_type: 'billing.credit_used',
+    entity_type: 'billing',
+    entity_id: tenantId,
+    triggered_by_user_id: tokenMeta?.triggeredByUserId ?? null,
+    payload: {
+      amount,
+      actionType,
+      remainingAfter: (result.new_monthly ?? 0) + (result.new_topup ?? 0),
+      ...(tokenMeta ? {
+        provider: tokenMeta.provider,
+        model: tokenMeta.model,
+        inputTokens: tokenMeta.inputTokens,
+        outputTokens: tokenMeta.outputTokens,
+        realCostUsd,
+      } : {}),
+    },
+  }).then(() => {}, () => {});
 }
 
 // ── Credit pricing constants ─────────────────────────────────────────────────

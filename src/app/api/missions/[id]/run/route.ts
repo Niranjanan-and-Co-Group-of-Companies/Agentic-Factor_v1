@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { inngest } from '@/lib/inngest/client';
 import { buildTeam } from '@/lib/services/orchestrator';
+import { checkCredits, CREDIT_COSTS } from '@/lib/middleware/billing';
 
 // Longer timeout — buildTeam includes an LLM dry-run that can take 30–60s
 export const maxDuration = 300;
@@ -51,6 +52,15 @@ export async function POST(
           message: `Mission is already in "${missionRow.status}" state. Use Force Restart to re-run it.`,
         },
         { status: 409 }
+      );
+    }
+
+    // Credit pre-check at the API boundary — before any expensive work
+    const creditCheck = await checkCredits(tenantId, CREDIT_COSTS.llm_call_pro);
+    if (!creditCheck.allowed) {
+      return NextResponse.json(
+        { error: 'insufficient_credits', message: creditCheck.reason },
+        { status: 402 }
       );
     }
 

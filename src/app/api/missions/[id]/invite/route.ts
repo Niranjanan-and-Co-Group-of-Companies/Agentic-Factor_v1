@@ -5,7 +5,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 export const maxDuration = 15;
 
 const SEAT_LIMITS: Record<string, number> = {
-  free: 0, individual: 0, pro: 25, enterprise: 999999,
+  free: 0, individual: 0, individual_annual: 0, pro: 25, pro_annual: 25, enterprise: 999999,
 };
 
 // GET /api/missions/[id]/invite — list mission members
@@ -54,7 +54,7 @@ export async function POST(
 
   // ── Plan + seat limit check ────────────────────────────────
   const { data: billing } = await supabase
-    .from('billing')
+    .from('tenant_billing')
     .select('plan')
     .eq('tenant_id', tenantId)
     .maybeSingle();

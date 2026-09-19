@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       const updatedMission = await editBlueprint(parsedBlueprint as Mission, instruction);
       
       // Deduct 1 credit for the LLM generation
-      await deductCredits(tenantId, CREDIT_COSTS.llm_call_pro, 'blueprint_edit').catch(() => {});
+      try { await deductCredits(tenantId, CREDIT_COSTS.llm_call_pro, 'blueprint_edit'); } catch { /* non-fatal for blueprint edit */ }
       
       return NextResponse.json({
         success: true,
@@ -191,6 +191,11 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Legacy: Single-step create (backward-compatible) ──
+    const { checkCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
+    const legacyCreditCheck = await checkCredits(tenantId, CREDIT_COSTS.llm_call_pro);
+    if (!legacyCreditCheck.allowed) {
+      return NextResponse.json({ error: legacyCreditCheck.reason }, { status: 402 });
+    }
     const { intent } = GenerateBlueprintRequest.parse(body);
     const { mission } = await generateMissionJSON(intent, tenantId);
     if (!mission) {

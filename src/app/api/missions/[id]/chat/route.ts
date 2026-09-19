@@ -277,9 +277,14 @@ export async function POST(
           const cleanText = stripAllActionTags(textContent);
 
           const credits = await calculateChatCreditCost(inputTokens, outputTokens, model);
-          deductCredits(tenantId, credits, 'chat_message', {
-            provider: 'anthropic', model, inputTokens, outputTokens,
-          }).catch(console.error);
+          try {
+            await deductCredits(tenantId, credits, 'chat_message', {
+              provider: 'anthropic', model, inputTokens, outputTokens,
+            });
+          } catch (deductErr) {
+            console.error('[Chat] Credit deduction failed:', deductErr);
+            // Non-fatal for already-streamed response, but log for monitoring
+          }
 
           const chatId = sessionId ?? (await ensureSession(supabase, missionId, tenantId, recentMessages));
           const userMsg = recentMessages[recentMessages.length - 1];
@@ -315,10 +320,13 @@ export async function POST(
             return { type: 'tool_use', id: b.id!, name: b.name!, input };
           });
 
-        // Deduct planning call credits (non-fatal)
-        calculateChatCreditCost(inputTokens, outputTokens, model)
-          .then(cost => deductCredits(tenantId, cost, 'chat_planning', { provider: 'anthropic', model, inputTokens, outputTokens }))
-          .catch(() => {});
+        // Deduct planning call credits
+        try {
+          const planningCost = await calculateChatCreditCost(inputTokens, outputTokens, model);
+          await deductCredits(tenantId, planningCost, 'chat_planning', { provider: 'anthropic', model, inputTokens, outputTokens });
+        } catch (deductErr) {
+          console.error('[Chat] Planning credit deduction failed:', deductErr);
+        }
 
         // Fire Inngest — this is where all tool execution happens
         await inngest.send({

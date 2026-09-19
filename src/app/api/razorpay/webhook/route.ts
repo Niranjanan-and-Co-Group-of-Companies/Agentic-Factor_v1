@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyWebhookSignature, fetchOrder } from '@/lib/services/razorpay';
+import { verifyWebhookSignature, fetchOrder, getSubscription } from '@/lib/services/razorpay';
 import { createServiceClient } from '@/lib/supabase/server';
 import { sendEmail } from '@/lib/services/notifications';
 
 // ============================================================
 // POST /api/razorpay/webhook
 // Handles Razorpay webhook events for subscription lifecycle.
-// Credit-based billing model.
+// All handlers are idempotent — safe to receive duplicate events.
 // ============================================================
 
-// Credit-based plan configurations
+// Single source of truth for plan configs (mirrors billing.ts PLAN_DEFAULTS)
 const PLAN_CONFIGS: Record<string, {
   credits: number; maxActiveMissions: number; modelTier: string;
   maxStorageMb: number; governance: string; annual?: boolean; basePlan?: string;
@@ -24,13 +24,30 @@ const PLAN_CONFIGS: Record<string, {
 
 function resolveLocalPlanName(razorpayPlanId: string): string {
   const envMap: Record<string, string> = {
-    [process.env.RAZORPAY_PLAN_INDIVIDUAL || '']:        'individual',
-    [process.env.RAZORPAY_PLAN_INDIVIDUAL_ANNUAL || '']:  'individual_annual',
-    [process.env.RAZORPAY_PLAN_PRO || '']:               'pro',
-    [process.env.RAZORPAY_PLAN_PRO_ANNUAL || '']:        'pro_annual',
-    [process.env.RAZORPAY_PLAN_ENTERPRISE || '']:        'enterprise',
+    [process.env.RAZORPAY_PLAN_INDIVIDUAL        || '']: 'individual',
+    [process.env.RAZORPAY_PLAN_INDIVIDUAL_ANNUAL || '']: 'individual_annual',
+    [process.env.RAZORPAY_PLAN_PRO               || '']: 'pro',
+    [process.env.RAZORPAY_PLAN_PRO_ANNUAL        || '']: 'pro_annual',
+    [process.env.RAZORPAY_PLAN_ENTERPRISE        || '']: 'enterprise',
   };
   return envMap[razorpayPlanId] || 'free';
+}
+
+// Downgrade a tenant to free plan (used by halted, completed, cancelled)
+async function downgradeToFree(tenantId: string, status: string, supabase: ReturnType<typeof createServiceClient>) {
+  const freeConfig = PLAN_CONFIGS['free'];
+  await supabase.from('tenant_billing').update({
+    plan: 'free',
+    billing_status: status,
+    credits_remaining: 0,
+    credits_total: 0,
+    max_active_missions: freeConfig.maxActiveMissions,
+    model_tier: freeConfig.modelTier,
+    max_storage_mb: freeConfig.maxStorageMb,
+    governance: freeConfig.governance,
+    is_trial: false,
+    updated_at: new Date().toISOString(),
+  }).eq('tenant_id', tenantId);
 }
 
 export async function POST(request: NextRequest) {
@@ -53,233 +70,288 @@ export async function POST(request: NextRequest) {
 
     switch (eventType) {
 
-      // ── Subscription activated (first payment successful) ──
+      // ── Subscription activated (first payment successful) ──────
       case 'subscription.activated': {
         const subscription = payload.subscription?.entity;
         if (!subscription) break;
 
         const tenantId = subscription.notes?.tenant_id;
+        if (!tenantId) break;
+
         const planName = resolveLocalPlanName(subscription.plan_id);
         const config = PLAN_CONFIGS[planName] || PLAN_CONFIGS['free'];
         const isAnnual = config.annual === true;
-        const seatCount = parseInt(subscription.notes?.seat_count || '1', 10);
+        // Prefer live quantity from Razorpay over stale notes
+        const seatCount = Math.max(1, subscription.quantity ?? parseInt(subscription.notes?.seat_count || '1', 10));
         const creditsToGive = config.credits * (isAnnual ? 12 : 1) * seatCount;
+        const periodEnd = subscription.current_end
+          ? new Date(subscription.current_end * 1000).toISOString()
+          : null;
 
-        if (tenantId) {
-          // Get existing billing record — covers resubscribe (frozen top-up credits)
-          // and the edge case where the user paid before ever opening the app
-          // (no billing row yet), in which case .update() would silently do nothing.
-          const { data: existingBilling } = await supabase
-            .from('tenant_billing')
-            .select('credits_topup')
-            .eq('tenant_id', tenantId)
-            .single();
-          const frozenTopup = existingBilling?.credits_topup ?? 0;
+        // Upsert billing record (handles both new customers and resubscribes)
+        const { data: existing } = await supabase
+          .from('tenant_billing')
+          .select('credits_topup')
+          .eq('tenant_id', tenantId)
+          .maybeSingle();
+        const frozenTopup = existing?.credits_topup ?? 0;
 
-          // Create a bare free-tier record so the update below has a row to land on
-          if (!existingBilling) {
-            await supabase.from('tenant_billing').insert({
-              tenant_id: tenantId,
-              plan: 'free',
-              billing_status: 'trialing',
-              credits_remaining: 0,
-              credits_total: 0,
-              credits_topup: 0,
-              credits_used_this_month: 0,
-              max_active_missions: 1,
-              model_tier: 'flash',
-              max_storage_mb: 100,
-              governance: 'none',
-              is_trial: false,
-            });
-          }
+        await supabase.from('tenant_billing').upsert({
+          tenant_id: tenantId,
+          plan: planName,
+          billing_status: 'active',
+          razorpay_subscription_id: subscription.id,
+          razorpay_customer_id: subscription.customer_id || null,
+          razorpay_plan_id: subscription.plan_id,
+          credits_remaining: creditsToGive,
+          credits_total: creditsToGive,
+          credits_topup: frozenTopup, // preserve any existing top-up credits
+          credits_used_this_month: 0,
+          max_active_missions: config.maxActiveMissions,
+          model_tier: config.modelTier,
+          max_storage_mb: config.maxStorageMb,
+          governance: config.governance,
+          is_trial: false,
+          billing_period_start: new Date().toISOString(),
+          billing_period_end: periodEnd,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'tenant_id' });
 
-          await supabase
-            .from('tenant_billing')
-            .update({
-              plan: planName,
-              billing_status: 'active',
-              razorpay_subscription_id: subscription.id,
-              razorpay_customer_id: subscription.customer_id || null,
-              razorpay_plan_id: subscription.plan_id,
-              // Credit-based fields — annual plans get 12 months upfront
-              credits_remaining: creditsToGive,
-              credits_total: creditsToGive,
-              credits_used_this_month: 0,
-              // Preserve existing top-up credits (returned on resubscribe)
-              // credits_topup is NOT touched — frozen credits come back automatically
-              max_active_missions: config.maxActiveMissions,
-              model_tier: config.modelTier,
-              max_storage_mb: config.maxStorageMb,
-              governance: config.governance,
-              is_trial: false,
-              billing_period_start: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq('tenant_id', tenantId);
-
-          const email = subscription.notes?.email;
-          if (email) {
-            const topupMsg = frozenTopup > 0 ? `\n- 🔓 ${frozenTopup} frozen top-up credits restored!` : '';
-            await sendEmail({
-              to: email,
-              subject: `🎉 Welcome to Agentic Factor ${planName.charAt(0).toUpperCase() + planName.slice(1)}!`,
-              body: `Your ${planName} plan is now active.\n\nYou now have:\n- ${config.credits.toLocaleString()} monthly credits\n- ${config.maxActiveMissions} active missions\n- ${config.modelTier === 'all' ? 'All AI Models' : config.modelTier === 'mixed' ? 'Flash + Pro Models' : 'Flash Models'}${topupMsg}\n\nStart building: https://agenticfactor.io/dashboard`,
-            });
-          }
-
-          console.log(`[Razorpay Webhook] Tenant ${tenantId} upgraded to ${planName}`);
+        const email = subscription.notes?.email;
+        if (email) {
+          const topupMsg = frozenTopup > 0 ? `\n- 🔓 ${frozenTopup} frozen top-up credits restored!` : '';
+          const modelLabel = config.modelTier === 'all' ? 'All AI Models' : config.modelTier === 'mixed' ? 'Flash + Pro Models' : 'Flash Models';
+          await sendEmail({
+            to: email,
+            subject: `🎉 Welcome to Agentic Factor ${planName.replace('_', ' ')}!`,
+            body: `Your ${planName} plan is now active.\n\nYou now have:\n- ${creditsToGive.toLocaleString()} credits${isAnnual ? ' (12 months upfront)' : '/month'}\n- ${config.maxActiveMissions} active missions\n- ${modelLabel}${topupMsg}\n\nStart building: https://agenticfactor.io/dashboard`,
+          });
         }
+        console.log(`[Razorpay Webhook] Tenant ${tenantId} activated on ${planName}`);
         break;
       }
 
-      // ── Subscription charged (recurring payment — reset credits) ──
+      // ── Subscription charged (monthly/annual renewal — reset credits) ──
       case 'subscription.charged': {
         const subscription = payload.subscription?.entity;
         const payment = payload.payment?.entity;
         if (!subscription) break;
 
         const tenantId = subscription.notes?.tenant_id;
-        if (tenantId) {
-          // Get current plan to know credit amount
-          const { data: billing } = await supabase
-            .from('tenant_billing')
-            .select('plan')
-            .eq('tenant_id', tenantId)
-            .single();
+        if (!tenantId) break;
 
-          const planName = billing?.plan || 'individual';
-          const config = PLAN_CONFIGS[planName] || PLAN_CONFIGS['individual'];
-          const renewalSeats = parseInt(subscription.notes?.seat_count || '1', 10);
-          const renewalCredits = config.credits * (config.annual ? 12 : 1) * renewalSeats;
+        // Fetch live subscription from Razorpay to get accurate seat count and period
+        let liveSub: any = subscription;
+        try { liveSub = await getSubscription(subscription.id); } catch { /* fallback to webhook payload */ }
 
-          // Reset credits for new billing cycle
-          await supabase
-            .from('tenant_billing')
-            .update({
-              billing_status: 'active',
-              credits_remaining: renewalCredits,
-              credits_used_this_month: 0,
-              billing_period_start: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq('tenant_id', tenantId);
+        const { data: billing } = await supabase
+          .from('tenant_billing')
+          .select('plan')
+          .eq('tenant_id', tenantId)
+          .single();
 
-          await supabase.from('events').insert({
-            tenant_id: tenantId,
-            event_type: 'billing.payment_success',
-            entity_type: 'billing',
-            entity_id: subscription.id,
-            payload: { amount: payment?.amount, currency: payment?.currency, method: payment?.method, creditsRefilled: renewalCredits },
+        const planName = billing?.plan || 'individual';
+        const config = PLAN_CONFIGS[planName] || PLAN_CONFIGS['individual'];
+        // Use live quantity from Razorpay API — authoritative seat count
+        const renewalSeats = Math.max(1, liveSub.quantity ?? parseInt(subscription.notes?.seat_count || '1', 10));
+        const renewalCredits = config.credits * (config.annual ? 12 : 1) * renewalSeats;
+        const periodEnd = liveSub.current_end
+          ? new Date(liveSub.current_end * 1000).toISOString()
+          : null;
+
+        await supabase.from('tenant_billing').update({
+          billing_status: 'active',
+          credits_remaining: renewalCredits,
+          credits_total: renewalCredits,
+          credits_used_this_month: 0,
+          billing_period_start: new Date().toISOString(),
+          billing_period_end: periodEnd,
+          updated_at: new Date().toISOString(),
+        }).eq('tenant_id', tenantId);
+
+        await supabase.from('events').insert({
+          tenant_id: tenantId,
+          event_type: 'billing.payment_success',
+          entity_type: 'billing',
+          entity_id: subscription.id,
+          payload: { amount: payment?.amount, currency: payment?.currency, method: payment?.method, creditsRefilled: renewalCredits, seats: renewalSeats },
+        });
+
+        // Send renewal confirmation email
+        const email = subscription.notes?.email;
+        if (email) {
+          await sendEmail({
+            to: email,
+            subject: '✅ Agentic Factor — Subscription Renewed',
+            body: `Your subscription has been renewed successfully.\n\n🪙 ${renewalCredits.toLocaleString()} credits added for the new billing period.\n\nView your usage: https://agenticfactor.io/settings/billing`,
           });
-
-          console.log(`[Razorpay Webhook] Credits reset to ${config.credits} for tenant ${tenantId}`);
         }
+        console.log(`[Razorpay Webhook] Credits reset to ${renewalCredits} for tenant ${tenantId}`);
         break;
       }
 
-      // ── Subscription cancelled ──
+      // ── Subscription cancelled ─────────────────────────────────
       case 'subscription.cancelled': {
         const subscription = payload.subscription?.entity;
         if (!subscription) break;
 
         const tenantId = subscription.notes?.tenant_id;
-        const freeConfig = PLAN_CONFIGS['free'];
+        if (!tenantId) break;
 
-        if (tenantId) {
-          // Guard against upgrade race: if the tenant has already switched to a
-          // new subscription, this cancel event is for the OLD plan. Skip the
-          // downgrade so the new plan's subscription.activated webhook wins.
-          const { data: currentBilling } = await supabase
-            .from('tenant_billing')
-            .select('razorpay_subscription_id')
-            .eq('tenant_id', tenantId)
-            .single();
+        // Guard: skip if tenant already upgraded to a different subscription
+        const { data: currentBilling } = await supabase
+          .from('tenant_billing')
+          .select('razorpay_subscription_id, credits_topup')
+          .eq('tenant_id', tenantId)
+          .single();
 
-          if (
-            currentBilling?.razorpay_subscription_id &&
-            currentBilling.razorpay_subscription_id !== subscription.id
-          ) {
-            console.log(`[Razorpay Webhook] Skipping cancel for old sub ${subscription.id} — tenant already upgraded to ${currentBilling.razorpay_subscription_id}`);
-            break;
-          }
-          await supabase
-            .from('tenant_billing')
-            .update({
-              plan: 'free',
-              billing_status: 'cancelled',
-              credits_remaining: 0, // Monthly credits removed
-              credits_total: 0,
-              // credits_topup is NOT touched — frozen, preserved for resubscribe
-              max_active_missions: freeConfig.maxActiveMissions,
-              model_tier: freeConfig.modelTier,
-              max_storage_mb: freeConfig.maxStorageMb,
-              governance: freeConfig.governance,
-              is_trial: false,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('tenant_id', tenantId);
-
-          // Get frozen top-up balance for the email
-          const { data: billingAfter } = await supabase
-            .from('tenant_billing')
-            .select('credits_topup')
-            .eq('tenant_id', tenantId)
-            .single();
-          const frozenCredits = billingAfter?.credits_topup ?? 0;
-
-          const email = subscription.notes?.email;
-          if (email) {
-            const frozenMsg = frozenCredits > 0
-              ? `\n\n🔒 You have ${frozenCredits} frozen top-up credits. These will be restored when you resubscribe.`
-              : '';
-            await sendEmail({
-              to: email,
-              subject: '⚠️ Agentic Factor Subscription Cancelled',
-              body: `Your subscription has been cancelled.\n\nYour monthly credits have been removed.${frozenMsg}\n\nResubscribe to get fresh credits: https://agenticfactor.io/pricing`,
-            });
-          }
-
-          console.log(`[Razorpay Webhook] Tenant ${tenantId} cancelled`);
+        if (
+          currentBilling?.razorpay_subscription_id &&
+          currentBilling.razorpay_subscription_id !== subscription.id
+        ) {
+          console.log(`[Razorpay Webhook] Skipping cancel for old sub ${subscription.id} — tenant already on ${currentBilling.razorpay_subscription_id}`);
+          break;
         }
+
+        await downgradeToFree(tenantId, 'cancelled', supabase);
+        const frozenCredits = currentBilling?.credits_topup ?? 0;
+
+        const email = subscription.notes?.email;
+        if (email) {
+          const frozenMsg = frozenCredits > 0
+            ? `\n\n🔒 Your ${frozenCredits} top-up credits are frozen and will be restored when you resubscribe.`
+            : '';
+          await sendEmail({
+            to: email,
+            subject: '⚠️ Agentic Factor Subscription Cancelled',
+            body: `Your subscription has been cancelled and you've been moved to the free plan.${frozenMsg}\n\nResubscribe: https://agenticfactor.io/pricing`,
+          });
+        }
+        console.log(`[Razorpay Webhook] Tenant ${tenantId} cancelled → free`);
         break;
       }
 
-      // ── Payment failed ──
+      // ── Subscription halted (Razorpay suspended after repeated failures) ──
+      case 'subscription.halted': {
+        const subscription = payload.subscription?.entity;
+        if (!subscription) break;
+
+        const tenantId = subscription.notes?.tenant_id;
+        if (!tenantId) break;
+
+        await supabase.from('tenant_billing').update({
+          billing_status: 'halted',
+          updated_at: new Date().toISOString(),
+        }).eq('tenant_id', tenantId);
+
+        const email = subscription.notes?.email;
+        if (email) {
+          await sendEmail({
+            to: email,
+            subject: '🚨 Agentic Factor — Subscription Halted',
+            body: `Your subscription has been halted due to repeated payment failures. Your plan is still active but new missions may be blocked.\n\nPlease update your payment method immediately: https://agenticfactor.io/settings/billing\n\nIf payment is not resolved, your account will be downgraded to free.`,
+          });
+        }
+        console.log(`[Razorpay Webhook] Tenant ${tenantId} subscription halted`);
+        break;
+      }
+
+      // ── Subscription completed (reached total_count — extremely rare) ──
+      case 'subscription.completed': {
+        const subscription = payload.subscription?.entity;
+        if (!subscription) break;
+
+        const tenantId = subscription.notes?.tenant_id;
+        if (!tenantId) break;
+
+        await downgradeToFree(tenantId, 'completed', supabase);
+
+        const email = subscription.notes?.email;
+        if (email) {
+          await sendEmail({
+            to: email,
+            subject: '📋 Agentic Factor — Subscription Completed',
+            body: `Your subscription period has ended. You've been moved to the free plan.\n\nRenew your subscription: https://agenticfactor.io/pricing`,
+          });
+        }
+        console.log(`[Razorpay Webhook] Tenant ${tenantId} subscription completed → free`);
+        break;
+      }
+
+      // ── Subscription resumed (after halted, payment resolved) ──
+      case 'subscription.resumed': {
+        const subscription = payload.subscription?.entity;
+        if (!subscription) break;
+
+        const tenantId = subscription.notes?.tenant_id;
+        if (!tenantId) break;
+
+        // Restore active status; credits are restored on next subscription.charged event
+        await supabase.from('tenant_billing').update({
+          billing_status: 'active',
+          updated_at: new Date().toISOString(),
+        }).eq('tenant_id', tenantId);
+
+        const email = subscription.notes?.email;
+        if (email) {
+          await sendEmail({
+            to: email,
+            subject: '✅ Agentic Factor — Subscription Resumed',
+            body: `Your subscription has been resumed successfully. All features are restored.\n\nGo to dashboard: https://agenticfactor.io/dashboard`,
+          });
+        }
+        console.log(`[Razorpay Webhook] Tenant ${tenantId} subscription resumed`);
+        break;
+      }
+
+      // ── Subscription pending (created but payment not yet collected) ──
+      case 'subscription.pending': {
+        const subscription = payload.subscription?.entity;
+        if (!subscription) break;
+
+        const tenantId = subscription.notes?.tenant_id;
+        if (!tenantId) break;
+
+        await supabase.from('tenant_billing').update({
+          billing_status: 'pending',
+          updated_at: new Date().toISOString(),
+        }).eq('tenant_id', tenantId).neq('billing_status', 'active');
+        // Only set pending if not already active (avoid overwriting a successful activation)
+
+        console.log(`[Razorpay Webhook] Tenant ${tenantId} subscription pending`);
+        break;
+      }
+
+      // ── Payment failed ─────────────────────────────────────────
       case 'payment.failed': {
         const payment = payload.payment?.entity;
         if (!payment) break;
 
         const tenantId = payment.notes?.tenant_id;
-        if (tenantId) {
-          await supabase
-            .from('tenant_billing')
-            .update({
-              billing_status: 'past_due',
-              updated_at: new Date().toISOString(),
-            })
-            .eq('tenant_id', tenantId);
+        if (!tenantId) break;
 
-          const email = payment.notes?.email || payment.email;
-          if (email) {
-            await sendEmail({
-              to: email,
-              subject: '❌ Agentic Factor Payment Failed',
-              body: `Your payment of ₹${(payment.amount / 100).toFixed(0)} failed.\n\nReason: ${payment.error_description || 'Unknown'}\n\nPlease update your payment method: https://agenticfactor.io/pricing`,
-            });
-          }
+        await supabase.from('tenant_billing').update({
+          billing_status: 'past_due',
+          updated_at: new Date().toISOString(),
+        }).eq('tenant_id', tenantId);
+
+        const email = payment.notes?.email || payment.email;
+        if (email) {
+          await sendEmail({
+            to: email,
+            subject: '❌ Agentic Factor Payment Failed',
+            body: `Your payment of ₹${(payment.amount / 100).toFixed(0)} failed.\n\nReason: ${payment.error_description || 'Unknown'}\n\nPlease update your payment method: https://agenticfactor.io/settings/billing`,
+          });
         }
         break;
       }
 
+      // ── Top-up payment captured (one-time credit purchase) ─────
       default:
-        // ── Handle payment.captured for top-up purchases ──
         if (eventType === 'payment.captured') {
           const payment = payload.payment?.entity;
           if (!payment) break;
 
-          // Razorpay does NOT copy order notes to payment objects.
-          // Must fetch the order by order_id to get the notes we set at order creation.
           let notes: Record<string, string> = {};
           if (payment.order_id) {
             try {
@@ -290,7 +362,6 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Only process top-up payments (not subscription payments)
           if (notes.type !== 'topup' || !notes.tenant_id || !notes.pack_credits) break;
 
           const tenantId = notes.tenant_id;
@@ -298,48 +369,35 @@ export async function POST(request: NextRequest) {
           const packId = notes.pack_id || 'unknown';
 
           if (packCredits > 0) {
-            // Add credits to top-up bucket
-            const { data: currentBilling } = await supabase
-              .from('tenant_billing')
-              .select('credits_topup')
-              .eq('tenant_id', tenantId)
-              .single();
+            // Idempotent grant via DB function — skips if payment_id already processed
+            const { data: grantResult } = await supabase.rpc('grant_topup_idempotent', {
+              p_tenant_id:  tenantId,
+              p_payment_id: payment.id,
+              p_credits:    packCredits,
+            });
 
-            const currentTopup = currentBilling?.credits_topup ?? 0;
+            if (grantResult === false) {
+              console.log(`[Razorpay Webhook] Top-up ${payment.id} already processed — skipping duplicate`);
+              break;
+            }
 
-            await supabase
-              .from('tenant_billing')
-              .update({
-                credits_topup: currentTopup + packCredits,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('tenant_id', tenantId);
-
-            // Log the event
+            // Log the event (grant_topup_idempotent already checked for this, so this insert is safe)
             await supabase.from('events').insert({
               tenant_id: tenantId,
               event_type: 'billing.topup_purchased',
               entity_type: 'billing',
               entity_id: payment.id,
-              payload: {
-                packId,
-                credits: packCredits,
-                amount: payment.amount,
-                currency: payment.currency,
-                newTopupBalance: currentTopup + packCredits,
-              },
+              payload: { packId, credits: packCredits, amount: payment.amount, currency: payment.currency },
             });
 
-            // Send confirmation email
             const email = notes.email;
             if (email) {
               await sendEmail({
                 to: email,
                 subject: `✅ ${packCredits} Credits Added — Agentic Factor`,
-                body: `Your top-up purchase was successful!\n\n🪙 ${packCredits} credits have been added to your account.\n\nThese top-up credits never expire and will be preserved even if you cancel your subscription.\n\nView your balance: https://agenticfactor.io/pricing`,
+                body: `Your top-up purchase was successful!\n\n🪙 ${packCredits} credits have been added to your account.\n\nThese credits never expire and are preserved even if you cancel your subscription.\n\nView your balance: https://agenticfactor.io/settings/billing`,
               });
             }
-
             console.log(`[Razorpay Webhook] Top-up: +${packCredits} credits for tenant ${tenantId}`);
           }
         } else {

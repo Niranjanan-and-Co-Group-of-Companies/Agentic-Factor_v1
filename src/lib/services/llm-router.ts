@@ -146,19 +146,8 @@ function setCachedModel(provider: string, tier: number, model: string): void {
 }
 
 
-// ── Credit cost mapping based on actual model used ──
-// 4X markup on our real LLM costs — matches CREDIT_COSTS constants in billing.ts.
-// Check flash first so gpt-4o-mini matches before gpt-4o.
-export function getModelCreditCost(model: string): number {
-  const flashModels   = ['claude-haiku', 'gemini-2.0-flash', 'gpt-4o-mini'];
-  const premiumModels = ['claude-opus',  'gemini-2.5-pro'];
-  const proModels     = ['claude-sonnet', 'gemini-2.5-flash', 'gpt-4o'];
-
-  if (flashModels.some(m => model.includes(m)))   return 4;   // was 1
-  if (premiumModels.some(m => model.includes(m))) return 20;  // was 5
-  if (proModels.some(m => model.includes(m)))     return 12;  // was 3
-  return 4; // default to flash tier
-}
+// Re-export from billing.ts — single source of truth for model credit costs
+export { getModelCreditCost } from '@/lib/middleware/billing';
 
 /**
  * Call the best available LLM provider with self-healing fallback.
