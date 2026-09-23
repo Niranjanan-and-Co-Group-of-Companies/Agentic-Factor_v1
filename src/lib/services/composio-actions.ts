@@ -44,6 +44,8 @@ export const AF_TO_COMPOSIO_APP: Record<string, string> = {
   shopify: 'shopify',
   stripe: 'stripe',
   zendesk: 'zendesk',
+  box: 'box',
+  square: 'squareapp',
 };
 
 // v3.1 tools API response shape

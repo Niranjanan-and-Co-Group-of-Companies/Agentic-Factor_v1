@@ -162,34 +162,48 @@ export default function PricingPage() {
       const res = await fetch("/api/razorpay/create-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ planId, quantity: planId === "pro" ? seatCount : 1, billingPeriod }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as { subscriptionId?: string; keyId?: string; message?: string; error?: string };
 
       if (!res.ok) {
-        setToast(data.message || data.error);
+        setToast(data.message || data.error || "Failed to start checkout.");
         setLoading(null);
         return;
       }
 
-      if (data.shortUrl) {
-        window.open(data.shortUrl, "_blank");
-      } else if (data.subscriptionId && data.keyId) {
-        const options = {
-          key: data.keyId,
-          subscription_id: data.subscriptionId,
-          name: "Agentic Factor",
-          description: `${planId.charAt(0).toUpperCase() + planId.slice(1)} Plan`,
-          handler: function () {
-            setToast("🎉 Payment successful! Credits will be activated shortly.");
-            setTimeout(() => window.location.reload(), 3000);
-          },
-          theme: { color: "#6366f1" },
-        };
-        const rzp = new (window as any).Razorpay(options);
-        rzp.open();
+      if (!data.subscriptionId || !data.keyId) {
+        setToast("Could not initialise payment. Please try again.");
+        setLoading(null);
+        return;
       }
+
+      // Always use the embedded popup — never redirect to shortUrl.
+      // The popup's handler callback fires instantly on payment success,
+      // giving the app a signal to refresh before the webhook even arrives.
+      const planLabel = planId.charAt(0).toUpperCase() + planId.slice(1).replace('_', ' ');
+      const rzp = new (window as any).Razorpay({
+        key: data.keyId,
+        subscription_id: data.subscriptionId,
+        name: "Agentic Factor",
+        description: `${planLabel} Plan — ${billingPeriod === 'annual' ? 'Annual' : 'Monthly'}`,
+        image: "https://agenticfactor.io/favicon.ico",
+        handler: function () {
+          setToast("🎉 Payment successful! Your plan will activate in a few seconds…");
+          // Give the webhook ~4s to land before reloading so the updated plan shows immediately
+          setTimeout(() => window.location.reload(), 4000);
+        },
+        modal: {
+          ondismiss: function () {
+            setLoading(null);
+          },
+          confirm_close: true,
+        },
+        theme: { color: "#6366f1" },
+      });
+      rzp.open();
     } catch {
       setToast("Payment failed. Please try again.");
     } finally {
@@ -206,7 +220,7 @@ export default function PricingPage() {
           Credit-Based Pricing
         </h1>
         <p className="page-subtitle" style={{ maxWidth: 640, margin: "0 auto", lineHeight: 1.7 }}>
-          Every agent action costs credits. Start with 30 free credits and upgrade when you need more power.
+          Credits are consumed based on actual usage — proportional to the tokens your agents process and the work they do. Start free, upgrade when you're ready.
         </p>
         {isLoggedIn && (
           <>
@@ -224,23 +238,12 @@ export default function PricingPage() {
         )}
       </div>
 
-      {/* Credit cost explainer */}
+      {/* Usage-based credit explainer */}
       <div className="card" style={{ maxWidth: 800, margin: "0 auto var(--space-xl)", padding: "var(--space-lg)", background: "hsla(231,97%,68%,0.05)", borderColor: "hsla(231,97%,68%,0.2)" }}>
-        <h3 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: "var(--space-md)" }}>💡 How Credits Work</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "var(--space-md)" }}>
-          {[
-            { action: "Flash LLM Call", cost: "4 credits", icon: "⚡" },
-            { action: "Pro LLM Call", cost: "12 credits", icon: "🧠" },
-            { action: "Premium LLM Call", cost: "20 credits", icon: "💎" },
-            { action: "Code Execution", cost: "8 credits", icon: "🖥️" },
-          ].map((item, i) => (
-            <div key={i} style={{ textAlign: "center", padding: "var(--space-sm)", background: "var(--bg-card)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
-              <div style={{ fontSize: "1.3rem", marginBottom: 4 }}>{item.icon}</div>
-              <div style={{ fontSize: "0.78rem", fontWeight: 600 }}>{item.action}</div>
-              <div style={{ fontSize: "0.72rem", color: "var(--accent)" }}>{item.cost}</div>
-            </div>
-          ))}
-        </div>
+        <h3 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}>💡 How Credits Work</h3>
+        <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.7, margin: 0 }}>
+          Credits are deducted proportionally based on what your agents actually consume — the complexity of the task, the models chosen, and the volume of work processed. Lightweight tasks use fewer credits; deeper, multi-step missions with large context use more. You only ever pay for what runs, nothing more.
+        </p>
       </div>
 
       {/* Billing period toggle */}

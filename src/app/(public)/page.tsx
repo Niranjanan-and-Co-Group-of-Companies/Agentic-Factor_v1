@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
 
 const FEATURES = [
   { icon: "🤖", title: "AI Agent Teams", desc: "Autonomous multi-agent systems that decompose and execute complex goals" },
-  { icon: "🧠", title: "Powered by Claude", desc: "Claude Sonnet 4 for best code generation, with Gemini & GPT fallback" },
+  { icon: "🧠", title: "Powered by Claude", desc: "Claude Sonnet 4.6 for best code generation, with Gemini & GPT fallback" },
   { icon: "🔌", title: "850+ Integrations", desc: "Google, Slack, GitHub, Notion, HubSpot, Salesforce and 844 more — OAuth or API key, no code required" },
   { icon: "📚", title: "RAG Memory", desc: "Vector-powered knowledge base with PDF/DOCX ingestion" },
   { icon: "⚡", title: "Secure Sandbox Execution", desc: "Every agent runs in an isolated, ephemeral cloud environment — no cross-tenant access, no residual data" },
