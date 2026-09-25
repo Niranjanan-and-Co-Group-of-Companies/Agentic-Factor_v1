@@ -150,7 +150,11 @@ export async function POST(request: NextRequest) {
           .eq('tenant_id', tenantId)
           .single();
 
-        const planName = billing?.plan || 'individual';
+        // Resolve plan from the subscription's own plan_id — avoids the race condition
+        // where subscription.charged fires concurrently with subscription.activated and
+        // reads 'free' from DB before activated has written the upgraded plan name.
+        const resolvedPlan = resolveLocalPlanName(liveSub.plan_id || subscription.plan_id);
+        const planName = (resolvedPlan !== 'free' ? resolvedPlan : null) ?? billing?.plan ?? 'individual';
         const config = PLAN_CONFIGS[planName] || PLAN_CONFIGS['individual'];
         // Use live quantity from Razorpay API — authoritative seat count
         const renewalSeats = Math.max(1, liveSub.quantity ?? parseInt(subscription.notes?.seat_count || '1', 10));
