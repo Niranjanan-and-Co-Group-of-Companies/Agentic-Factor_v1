@@ -68,14 +68,15 @@ export async function POST(request: NextRequest) {
     const result = await createSubscription(tenantId, resolvedPlanId, email, quantity || 1);
 
     // Store the subscription ID (status will be updated by webhook on payment)
+    // UPSERT so accounts without a tenant_billing row don't silently lose this
     await supabase
       .from('tenant_billing')
-      .update({
+      .upsert({
+        tenant_id: tenantId,
         razorpay_subscription_id: result.subscriptionId,
         razorpay_plan_id: result.razorpayPlanId,
         updated_at: new Date().toISOString(),
-      })
-      .eq('tenant_id', tenantId);
+      }, { onConflict: 'tenant_id' });
 
     return NextResponse.json({
       success: true,

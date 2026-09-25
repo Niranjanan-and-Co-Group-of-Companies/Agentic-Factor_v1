@@ -213,21 +213,51 @@ export async function POST(request: NextRequest) {
           break;
         }
 
-        await downgradeToFree(tenantId, 'cancelled', supabase);
         const frozenCredits = currentBilling?.credits_topup ?? 0;
 
-        const email = subscription.notes?.email;
-        if (email) {
-          const frozenMsg = frozenCredits > 0
-            ? `\n\n🔒 Your ${frozenCredits} top-up credits are frozen and will be restored when you resubscribe.`
-            : '';
-          await sendEmail({
-            to: email,
-            subject: '⚠️ Agentic Factor Subscription Cancelled',
-            body: `Your subscription has been cancelled and you've been moved to the free plan.${frozenMsg}\n\nResubscribe: https://agenticfactor.io/pricing`,
-          });
+        // If the billing period hasn't ended yet, set cancellation_pending so
+        // the tenant keeps access until period end (e.g. UPI autopay deletion).
+        // Only downgrade immediately when the period has actually expired.
+        const periodEnd = subscription.current_end
+          ? new Date(subscription.current_end * 1000)
+          : null;
+        const periodStillActive = periodEnd && periodEnd > new Date();
+
+        if (periodStillActive) {
+          await supabase.from('tenant_billing').update({
+            billing_status: 'cancellation_pending',
+            billing_period_end: periodEnd!.toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq('tenant_id', tenantId);
+
+          const email = subscription.notes?.email;
+          if (email) {
+            const frozenMsg = frozenCredits > 0
+              ? `\n\n🔒 Your ${frozenCredits} top-up credits will be frozen at period end and restored when you resubscribe.`
+              : '';
+            await sendEmail({
+              to: email,
+              subject: '⚠️ Agentic Factor Subscription Cancelled',
+              body: `Your subscription has been cancelled. You'll retain full access until ${periodEnd!.toLocaleDateString('en-IN')}.${frozenMsg}\n\nResubscribe: https://agenticfactor.io/pricing`,
+            });
+          }
+          console.log(`[Razorpay Webhook] Tenant ${tenantId} cancellation_pending until ${periodEnd!.toISOString()}`);
+        } else {
+          await downgradeToFree(tenantId, 'cancelled', supabase);
+
+          const email = subscription.notes?.email;
+          if (email) {
+            const frozenMsg = frozenCredits > 0
+              ? `\n\n🔒 Your ${frozenCredits} top-up credits are frozen and will be restored when you resubscribe.`
+              : '';
+            await sendEmail({
+              to: email,
+              subject: '⚠️ Agentic Factor Subscription Cancelled',
+              body: `Your subscription has been cancelled and you've been moved to the free plan.${frozenMsg}\n\nResubscribe: https://agenticfactor.io/pricing`,
+            });
+          }
+          console.log(`[Razorpay Webhook] Tenant ${tenantId} cancelled → free`);
         }
-        console.log(`[Razorpay Webhook] Tenant ${tenantId} cancelled → free`);
         break;
       }
 

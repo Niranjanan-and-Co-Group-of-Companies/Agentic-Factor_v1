@@ -50,6 +50,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // ── Allow Razorpay webhook (secured by HMAC signature, not Supabase auth) ──
+  if (pathname === '/api/razorpay/webhook') {
+    return NextResponse.next();
+  }
+
   // ── Allow admin panel routes (secured by their own bcrypt+OTP auth, not Supabase) ──
   if (pathname.startsWith('/api/mgmt-x7k9/') || pathname.startsWith('/mgmt-x7k9')) {
     return NextResponse.next();
