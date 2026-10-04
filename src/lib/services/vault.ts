@@ -6,6 +6,74 @@ import { createServiceClient } from '../supabase/server';
 // Stores encrypted values in the permissions table.
 // ============================================================
 
+async function deriveAesKey(tenantId: string): Promise<CryptoKey> {
+  const encoder = new TextEncoder();
+  const masterSecret = process.env.JWT_SECRET;
+  if (!masterSecret) throw new Error('JWT_SECRET env var is not set — cannot encrypt vault keys');
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', encoder.encode(masterSecret), 'PBKDF2', false, ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: encoder.encode(`tenant:${tenantId}`), iterations: 100_000, hash: 'SHA-256' },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+/**
+ * Encrypt a plaintext token for storage in tenant_permissions.encrypted_token.
+ * Returns base64-encoded "IV(12 bytes) + ciphertext".
+ */
+export async function encryptToken(tenantId: string, plaintext: string): Promise<string> {
+  const aesKey = await deriveAesKey(tenantId);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoder = new TextEncoder();
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, encoder.encode(plaintext));
+  const combined = new Uint8Array(12 + ciphertext.byteLength);
+  combined.set(iv);
+  combined.set(new Uint8Array(ciphertext), 12);
+  return Buffer.from(combined).toString('base64');
+}
+
+/**
+ * Decrypt a base64 "IV+ciphertext" produced by encryptToken.
+ */
+export async function decryptToken(tenantId: string, stored: string): Promise<string> {
+  const aesKey = await deriveAesKey(tenantId);
+  const combined = Buffer.from(stored, 'base64');
+  const iv = combined.subarray(0, 12);
+  const ciphertext = combined.subarray(12);
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext);
+  return new TextDecoder().decode(plaintext);
+}
+
+/**
+ * Read the decrypted token for a given tenant+provider from tenant_permissions.
+ * Prefers encrypted_token; falls back to access_token for pre-encryption rows.
+ * Returns null if no record found or token is the Composio marker.
+ */
+export async function readDecryptedToken(
+  tenantId: string,
+  provider: string
+): Promise<string | null> {
+  const supabase = createServiceClient();
+  const { data } = await supabase
+    .from('tenant_permissions')
+    .select('access_token, encrypted_token')
+    .eq('tenant_id', tenantId)
+    .eq('provider', provider)
+    .maybeSingle();
+  if (!data) return null;
+  if (data.encrypted_token) {
+    try { return await decryptToken(tenantId, data.encrypted_token); } catch { /* fall through */ }
+  }
+  const raw = data.access_token;
+  if (!raw || raw === 'composio_managed') return null;
+  return raw;
+}
+
 /**
  * Encrypt a secret value using Web Crypto API (AES-256-GCM).
  * In production, derive per-tenant keys from a master key via HKDF.

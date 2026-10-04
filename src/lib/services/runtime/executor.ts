@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { executeAgent } from './agent-loop';
 import { transitionMissionStatus, transitionAgentStatus } from '../orchestrator';
 import { runPreflightCheck } from '../preflight-validator';
+import { initCircuitFromDB } from '@/lib/middleware/circuit-breaker';
 
 function isEmptyOutput(output: string): boolean {
   if (!output || output.trim() === '') return true;
@@ -103,6 +104,9 @@ export async function executeMission(
   const runId = options.runId ?? crypto.randomUUID();
   const trigger = options.trigger ?? 'manual';
   const startedAt = Date.now();
+
+  // Seed circuit breaker from DB so OPEN state survives cold starts on serverless
+  await initCircuitFromDB(tenantId);
 
   // Non-fatal helper — Supabase update builder doesn't expose .catch() on its type
   const updateRun = async (updates: Record<string, unknown>) => {

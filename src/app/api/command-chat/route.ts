@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { calculateChatCreditCost, checkCredits, deductCredits } from '@/lib/middleware/billing';
 import { detectApiKey, redactKey, providerLabel } from '@/lib/services/apikey-detector';
 import { verifyApiKey } from '@/lib/services/apikey-verifier';
+import { encryptToken } from '@/lib/services/vault';
 import { retrieveRelevantChunks, listUploadedDocuments } from '@/lib/services/rag-retrieval';
 
 export const maxDuration = 300;
@@ -590,11 +591,13 @@ export async function POST(request: NextRequest) {
     let actionPayload: Record<string, unknown>;
 
     if (verifyResult.verified) {
+      const encryptedKey = await encryptToken(tenantId, detectedKey.key).catch(() => null);
       await supabase.from('tenant_permissions').upsert(
         {
           tenant_id: tenantId,
           provider: detectedKey.provider,
-          access_token: detectedKey.key,
+          access_token: encryptedKey ? '[encrypted]' : detectedKey.key,
+          encrypted_token: encryptedKey,
           refresh_token: null,
           expires_at: null,
           scopes: ['apikey'],

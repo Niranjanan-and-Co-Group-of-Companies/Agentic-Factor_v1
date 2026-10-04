@@ -387,28 +387,15 @@ export function getModelCreditCost(model: string): number {
  */
 export async function addCredits(tenantId: string, amount: number, reason: string): Promise<void> {
   const supabase = createServiceClient();
-  const { data } = await supabase
-    .from('tenant_billing')
-    .select('credits_remaining, credits_used_this_month')
-    .eq('tenant_id', tenantId)
-    .single();
-  if (!data) return;
-  await supabase
-    .from('tenant_billing')
-    .update({
-      credits_remaining: (data.credits_remaining || 0) + amount,
-      credits_used_this_month: Math.max(0, (data.credits_used_this_month || 0) - amount),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('tenant_id', tenantId);
-  // Log refund event (non-fatal fire-and-forget)
-  supabase.from('events').insert({
-    tenant_id: tenantId,
-    event_type: 'billing.credit_refunded',
-    entity_type: 'billing',
-    entity_id: tenantId,
-    payload: { amount, reason },
-  }).then(() => {}, () => {});
+  // Atomic refund via DB function — avoids read-then-write race under concurrent execution
+  const { error } = await supabase.rpc('add_credits_atomic_refund', {
+    p_tenant_id: tenantId,
+    p_amount: amount,
+    p_reason: reason,
+  });
+  if (error) {
+    console.error(`[Billing] addCredits RPC failed for tenant ${tenantId}:`, error.message);
+  }
 }
 
 /**

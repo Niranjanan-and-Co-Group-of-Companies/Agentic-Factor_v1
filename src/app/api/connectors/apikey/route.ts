@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
+import { encryptToken } from '@/lib/services/vault';
 
 export const maxDuration = 15;
 
@@ -78,10 +79,12 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServiceClient();
 
+    const encryptedToken = await encryptToken(tenantId, accessToken).catch(() => null);
     const upsertPayload = {
       tenant_id: tenantId,
       provider,
-      access_token: accessToken,
+      access_token: encryptedToken ? '[encrypted]' : accessToken,
+      encrypted_token: encryptedToken,
       refresh_token: null,
       expires_at: null,
       scopes: ['apikey'],

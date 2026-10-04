@@ -45,7 +45,14 @@ const DEFAULT_CONFIG: CircuitBreakerConfig = {
   creditsPerDollar: 1000,        // 1 dollar = 1000 base credits
 };
 
-// In-memory state (per-tenant and per-mission)
+// ── Hybrid state: in-memory cache + Supabase persistence ──────
+// In-memory is the fast path (sub-ms checks on every LLM call).
+// Supabase is the source of truth — seeded into memory at mission
+// start via initCircuitFromDB(), and persisted by recordUsage().
+// On a cold start with no DB seed, the breaker starts CLOSED and
+// accumulates correctly — only the token history from prior
+// instances is missing, which is acceptable for a circuit breaker
+// (conservative: it may allow slightly more tokens before tripping).
 const tenantCircuits = new Map<string, TenantCircuit>();
 const missionTokens = new Map<string, MissionTokens>();
 
@@ -69,6 +76,59 @@ function getMissionTokens(missionId: string): MissionTokens {
     missionTokens.set(missionId, { totalTokens: 0 });
   }
   return missionTokens.get(missionId)!;
+}
+
+/**
+ * Seed in-memory state from Supabase at the start of each mission execution.
+ * Call once per mission run (in executor.ts before the agent loop starts).
+ * This ensures cross-instance state is respected — an OPEN circuit from
+ * a previous serverless instance will be restored correctly.
+ */
+export async function initCircuitFromDB(tenantId: string): Promise<void> {
+  try {
+    const supabase = createServiceClient();
+    const { data } = await supabase
+      .from('circuit_breaker_state')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (!data) return;
+    const now = Date.now();
+    const circuit = getTenantCircuit(tenantId);
+    // Restore windows — discard stale data (> 1 min for minute window, > 24h for day window)
+    if (now - data.minute_window_start < 60_000) {
+      circuit.tokensThisMinute = data.tokens_this_minute;
+      circuit.minuteWindowStart = data.minute_window_start;
+    }
+    if (now - data.day_window_start < 86_400_000) {
+      circuit.totalTokensToday = data.tokens_today;
+      circuit.dayWindowStart = data.day_window_start;
+    }
+    circuit.state = data.state as CircuitState;
+    circuit.consecutiveFailures = data.consecutive_failures;
+    circuit.trippedAt = data.tripped_at;
+  } catch (err) {
+    console.warn('[CircuitBreaker] DB seed failed — starting fresh:', err);
+  }
+}
+
+async function persistCircuitToDB(tenantId: string, circuit: TenantCircuit): Promise<void> {
+  try {
+    const supabase = createServiceClient();
+    await supabase.from('circuit_breaker_state').upsert({
+      tenant_id: tenantId,
+      state: circuit.state,
+      tokens_this_minute: circuit.tokensThisMinute,
+      minute_window_start: circuit.minuteWindowStart,
+      tokens_today: circuit.totalTokensToday,
+      day_window_start: circuit.dayWindowStart,
+      consecutive_failures: circuit.consecutiveFailures,
+      tripped_at: circuit.trippedAt,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'tenant_id' });
+  } catch (err) {
+    console.warn('[CircuitBreaker] DB persist failed:', err);
+  }
 }
 
 // ============================================================
@@ -176,7 +236,10 @@ export async function recordUsage(
   circuit.consecutiveFailures = 0;
   mission.totalTokens += tokensUsed;
 
-  // Persist to events table for audit
+  // Persist state to Supabase (fire-and-forget — in-memory is authoritative within this instance)
+  persistCircuitToDB(tenantId, circuit).catch(() => {});
+
+  // Audit log
   try {
     const supabase = createServiceClient();
     await supabase.from('events').insert({

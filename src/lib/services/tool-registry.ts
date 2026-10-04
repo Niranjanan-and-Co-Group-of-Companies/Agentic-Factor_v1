@@ -11,6 +11,7 @@
 
 import { createServiceClient } from '@/lib/supabase/server';
 import { AF_TO_COMPOSIO_APP } from './composio-actions';
+import { readDecryptedToken } from './vault';
 
 const COMPOSIO_API_BASE = 'https://backend.composio.dev';
 const LOGO_CDN = 'https://logos.composio.dev/api';
@@ -471,15 +472,8 @@ async function executeTavilySearch(
   // Prefer Tavily key from tenant_permissions, fall back to env
   let apiKey = process.env.TAVILY_API_KEY ?? '';
   try {
-    const { data } = await supabase
-      .from('tenant_permissions')
-      .select('access_token')
-      .eq('tenant_id', tenantId)
-      .eq('provider', 'tavily')
-      .maybeSingle();
-    if (data?.access_token && data.access_token !== 'composio_managed') {
-      apiKey = data.access_token;
-    }
+    const tenantKey = await readDecryptedToken(tenantId, 'tavily');
+    if (tenantKey) apiKey = tenantKey;
   } catch { /* use env key */ }
 
   if (!apiKey) return { content: 'Tavily search key not configured.', summary: 'Not configured' };

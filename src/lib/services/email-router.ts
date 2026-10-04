@@ -14,6 +14,7 @@
 import { getValidTokens } from './oauth-refresher';
 import { sendEmail } from './notifications';
 import { createServiceClient } from '../supabase/server';
+import { readDecryptedToken } from './vault';
 
 export interface OutreachEmailOptions {
   tenantId: string;
@@ -97,16 +98,9 @@ async function sendViaSendGrid(
   body: string,
   fromOverride?: string
 ): Promise<EmailRouterResult> {
-  // SendGrid API key is stored as access_token in tenant_permissions
-  const supabase = createServiceClient();
-  const { data: row } = await supabase
-    .from('tenant_permissions')
-    .select('access_token')
-    .eq('tenant_id', tenantId)
-    .eq('provider', 'sendgrid')
-    .single();
-
-  if (!row?.access_token) return { success: false, provider: 'sendgrid', error: 'SendGrid not connected' };
+  // SendGrid API key is stored (encrypted) in tenant_permissions
+  const token = await readDecryptedToken(tenantId, 'sendgrid');
+  if (!token) return { success: false, provider: 'sendgrid', error: 'SendGrid not connected' };
 
   const fromAddress = fromOverride || process.env.SMTP2GO_SENDER || 'noreply@agenticfactor.io';
 
@@ -114,7 +108,7 @@ async function sendViaSendGrid(
     const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${row.access_token}`,
+        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
