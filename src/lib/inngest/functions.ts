@@ -132,7 +132,9 @@ export const executeMissionBackground = inngest.createFunction(
     const agents = mission.agents;
     const agentMap = new Map<string, any>(agents.map((a: any) => [a.id, a]));
 
-    const startedAt = Date.now();
+    // Inngest re-runs this body on every step; anything outside step.run executes again on
+    // each replay, so the start time and run-status writes must be memoized as steps.
+    const startedAt = await step.run('record-start-time', async () => Date.now());
     let currentAgentId: string | null = orchestration.entryAgent;
     // Seed the first agent's context with webhook payload and/or previous-run memory
     let currentContext = initialContext ?? '';
@@ -223,7 +225,9 @@ export const executeMissionBackground = inngest.createFunction(
 
           context = result.output;
           agentsDone++;
-          await updateRun({ agents_done: agentsDone, agents_failed: agentsFailed, status: 'running' });
+          const doneSoFar = agentsDone;
+          await step.run(`selective-progress-${agentToRun.id}`, () =>
+            updateRun({ agents_done: doneSoFar, agents_failed: agentsFailed, status: 'running' }));
         }
       }
 
@@ -335,7 +339,9 @@ export const executeMissionBackground = inngest.createFunction(
         else agentsDone++;
 
         // Update mission_runs progress so chat monitors and the top bar refresh
-        await updateRun({ agents_done: agentsDone, agents_failed: agentsFailed, status: 'running' });
+        const doneSoFar = agentsDone, failedSoFar = agentsFailed;
+        await step.run(`progress-after-${agentId}`, () =>
+          updateRun({ agents_done: doneSoFar, agents_failed: failedSoFar, status: 'running' }));
 
         const output = agentResult.output;
 
