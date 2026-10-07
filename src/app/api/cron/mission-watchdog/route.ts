@@ -46,11 +46,23 @@ export async function GET(request: NextRequest) {
   }
 
   const now = Date.now();
-  const stuckMissions = (activeMissions || []).filter((mission) => {
+  const overdue = (activeMissions || []).filter((mission) => {
     const timeoutSeconds = mission.mission_json?.orchestration?.timeoutSeconds || DEFAULT_MAX_RUNTIME_SECONDS;
     const idleMs = now - new Date(mission.updated_at).getTime();
     return idleMs > timeoutSeconds * 1000;
   });
+
+  // Missions are persisted as 'active' before their first run, so only a mission with an
+  // in-flight run can actually be stuck — an idle, never-started mission is not a crash.
+  const { data: inFlightRuns } = overdue.length
+    ? await supabase
+        .from('mission_runs')
+        .select('mission_id')
+        .in('mission_id', overdue.map(m => m.id))
+        .in('status', ['queued', 'running'])
+    : { data: [] as Array<{ mission_id: string }> };
+  const runningIds = new Set((inFlightRuns ?? []).map(r => r.mission_id));
+  const stuckMissions = overdue.filter(m => runningIds.has(m.id));
 
   if (stuckMissions.length === 0) {
     return NextResponse.json({ checked: true, stuck: 0 });
@@ -91,6 +103,13 @@ export async function GET(request: NextRequest) {
         .eq('mission_id', mission.id)
         .eq('tenant_id', mission.tenant_id)
         .in('status', ['running', 'spawning', 'paused']);
+
+      await supabase
+        .from('mission_runs')
+        .update({ status: 'failed', completed_at: new Date().toISOString() })
+        .eq('mission_id', mission.id)
+        .eq('tenant_id', mission.tenant_id)
+        .in('status', ['queued', 'running']);
 
       // Any approval still waiting on a human is moot now — the mission
       // that would have resumed from it is dead.
