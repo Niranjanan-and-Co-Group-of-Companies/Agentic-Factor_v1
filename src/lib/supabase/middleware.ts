@@ -31,8 +31,25 @@ export async function extractTenantContext(
     }
   }
 
-  // ── Method 2: Signed JWT Bearer token (for API key / programmatic access) ──
+  // ── Method 2: Supabase Bearer JWT (programmatic / API access) ──
   const authHeader = request.headers.get('Authorization');
+  if (authHeader?.startsWith('Bearer ') && supabaseUrl && supabaseKey) {
+    const token = authHeader.slice(7);
+    try {
+      const supabase = createServerClient(supabaseUrl, supabaseKey, {
+        cookies: { getAll() { return []; }, setAll() {} },
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
+      const { data: { user }, error } = await supabase.auth.getUser(token);
+      if (user && !error) {
+        return { tenantId: user.id, userId: user.id };
+      }
+    } catch {
+      // Fall through to JWT_SECRET method
+    }
+  }
+
+  // ── Method 3: Signed JWT Bearer token (legacy / internal service tokens) ──
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
     const jwtSecret = process.env.JWT_SECRET;
@@ -49,6 +66,7 @@ export async function extractTenantContext(
       }
     }
   }
+
 
   return NextResponse.json(
     { error: 'Authentication required.', code: 'AUTH_REQUIRED' },
