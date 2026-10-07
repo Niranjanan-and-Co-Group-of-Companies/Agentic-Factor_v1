@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
-import { createServiceClient } from '@/lib/supabase/server';
+import { readDecryptedToken } from '@/lib/services/vault';
 
 export const maxDuration = 60;
 
@@ -22,16 +22,8 @@ export async function POST(request: NextRequest) {
     // Resolve API key — tenant's own key preferred, then platform key
     let apiKey = process.env.OPENAI_API_KEY ?? '';
     try {
-      const supabase = createServiceClient();
-      const { data } = await supabase
-        .from('tenant_permissions')
-        .select('access_token')
-        .eq('tenant_id', tenantId)
-        .eq('provider', 'openai')
-        .maybeSingle();
-      if (data?.access_token && data.access_token !== 'composio_managed') {
-        apiKey = data.access_token as string;
-      }
+      const tenantKey = await readDecryptedToken(tenantId, 'openai');
+      if (tenantKey) apiKey = tenantKey;
     } catch { /* use platform key */ }
 
     if (!apiKey) {

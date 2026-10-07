@@ -1,5 +1,6 @@
 import { ToolExecutionContext, registerTool } from './index';
 import { createServiceClient } from '@/lib/supabase/server';
+import { plaintextToken } from '@/lib/services/vault';
 
 const TYPEFORM_BASE = 'https://api.typeform.com';
 
@@ -7,11 +8,11 @@ async function getApiKey(tenantId: string): Promise<string | null> {
   const supabase = createServiceClient();
   const { data } = await supabase
     .from('tenant_permissions')
-    .select('access_token')
+    .select('access_token, encrypted_token')
     .eq('tenant_id', tenantId)
     .eq('provider', 'typeform')
     .single();
-  return data?.access_token ?? null;
+  return plaintextToken(tenantId, data);
 }
 
 function noKeyError() {

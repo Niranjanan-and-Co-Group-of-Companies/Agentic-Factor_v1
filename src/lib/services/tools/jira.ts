@@ -1,20 +1,22 @@
 import { ToolExecutionContext, registerTool } from './index';
 import { createServiceClient } from '@/lib/supabase/server';
+import { plaintextToken } from '@/lib/services/vault';
 
 async function getCredentials(tenantId: string): Promise<{ token: string; cloudId: string } | null> {
   const supabase = createServiceClient();
   const { data } = await supabase
     .from('tenant_permissions')
-    .select('access_token, metadata')
+    .select('access_token, encrypted_token, metadata')
     .eq('tenant_id', tenantId)
     .eq('provider', 'atlassian')
     .single();
-  if (!data?.access_token) return null;
+  const storedToken = await plaintextToken(tenantId, data);
+  if (!data || !storedToken) return null;
   const meta = data.metadata as Record<string, string> | null;
   let cloudId = meta?.jira_cloud_id ?? '';
   if (!cloudId) {
     const res = await fetch('https://api.atlassian.com/oauth/token/accessible-resources', {
-      headers: { Authorization: `Bearer ${data.access_token}`, Accept: 'application/json' },
+      headers: { Authorization: `Bearer ${storedToken}`, Accept: 'application/json' },
     });
     if (res.ok) {
       const resources = await res.json() as Array<{ id: string; name: string; scopes: string[] }>;
@@ -26,7 +28,7 @@ async function getCredentials(tenantId: string): Promise<{ token: string; cloudI
       }
     }
   }
-  return cloudId ? { token: data.access_token, cloudId } : null;
+  return cloudId ? { token: storedToken, cloudId } : null;
 }
 
 function noCredError() {

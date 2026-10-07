@@ -1,5 +1,6 @@
 import { ToolExecutionContext, registerTool } from './index';
 import { createServiceClient } from '@/lib/supabase/server';
+import { plaintextToken } from '@/lib/services/vault';
 
 // Zoho CRM uses OAuth. access_token stored directly in tenant_permissions.
 // Instance domain can vary (e.g., crm.zoho.com vs crm.zoho.in) — stored as "TOKEN|DOMAIN"
@@ -7,12 +8,13 @@ async function getCredentials(tenantId: string): Promise<{ token: string; domain
   const supabase = createServiceClient();
   const { data } = await supabase
     .from('tenant_permissions')
-    .select('access_token')
+    .select('access_token, encrypted_token')
     .eq('tenant_id', tenantId)
     .eq('provider', 'zoho')
     .single();
-  if (!data?.access_token) return null;
-  const [token, domain] = data.access_token.split('|');
+  const storedToken = await plaintextToken(tenantId, data);
+  if (!storedToken) return null;
+  const [token, domain] = storedToken.split('|');
   return { token, domain: domain || 'crm.zoho.com' };
 }
 

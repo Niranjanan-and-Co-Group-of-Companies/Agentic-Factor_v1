@@ -1,4 +1,5 @@
 import { createServiceClient } from '../supabase/server';
+import { plaintextToken } from './vault';
 
 export interface TokenContext {
   provider: string;
@@ -106,7 +107,7 @@ export async function getValidTokens(tenantId: string, provider: string): Promis
 
   const { data: row } = await supabase
     .from('tenant_permissions')
-    .select('access_token, refresh_token, expires_at')
+    .select('access_token, encrypted_token, refresh_token, expires_at')
     .eq('tenant_id', tenantId)
     .eq('provider', provider)
     .single();
@@ -115,7 +116,9 @@ export async function getValidTokens(tenantId: string, provider: string): Promis
     return null;
   }
 
-  const { access_token, refresh_token, expires_at } = row;
+  const { refresh_token, expires_at } = row;
+  const access_token = await plaintextToken(tenantId, row);
+  if (!access_token) return null;
 
   // If there's no expiration or it's still good for at least 5 minutes, return it
   if (!expires_at || new Date(expires_at).getTime() > Date.now() + 5 * 60 * 1000) {

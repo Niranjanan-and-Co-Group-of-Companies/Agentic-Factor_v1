@@ -1,5 +1,6 @@
 import { ToolExecutionContext, registerTool } from './index';
 import { createServiceClient } from '@/lib/supabase/server';
+import { plaintextToken } from '@/lib/services/vault';
 
 // Universal custom connector tool — lets agents call ANY API the customer
 // has configured via the "Add Custom API" flow on the Connectors page.
@@ -22,12 +23,13 @@ async function getCustomConnector(tenantId: string, name: string): Promise<Custo
 
   const { data } = await supabase
     .from('tenant_permissions')
-    .select('access_token, metadata')
+    .select('access_token, encrypted_token, metadata')
     .eq('tenant_id', tenantId)
     .eq('provider', provider)
     .single();
 
-  return data as CustomConnectorRecord | null;
+  if (!data) return null;
+  return { ...data, access_token: (await plaintextToken(tenantId, data)) ?? '' } as CustomConnectorRecord;
 }
 
 function buildAuthHeader(record: CustomConnectorRecord): Record<string, string> {

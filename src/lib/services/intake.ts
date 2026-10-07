@@ -3,6 +3,7 @@ import { LLMOutputSchema, MissionSchema, type Mission, type LLMOutput } from '..
 import { createServiceClient } from '../supabase/server';
 import { callLLM, generateEmbedding } from './llm-router';
 import { robustJSONParse, safeJSONParse } from '../utils/json-parser';
+import { readDecryptedToken } from './vault';
 
 // ============================================================
 // Permission Normalizer — maps free-form service names to exact provider keys
@@ -664,16 +665,8 @@ export async function generateMissionJSON(
 
   async function getBufferContext(): Promise<string> {
     try {
-      const supabase = createServiceClient();
-      const { data: row } = await supabase
-        .from('tenant_permissions')
-        .select('access_token')
-        .eq('tenant_id', tenantId)
-        .eq('provider', 'buffer')
-        .maybeSingle();
-      if (!row?.access_token) return '';
-
-      const token = row.access_token as string;
+      const token = await readDecryptedToken(tenantId, 'buffer');
+      if (!token) return '';
 
       // Step 1: get org IDs
       const accountRes = await fetch('https://api.buffer.com', {

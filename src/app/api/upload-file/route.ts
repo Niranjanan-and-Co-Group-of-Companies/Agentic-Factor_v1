@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 import { extractFileContent } from '@/lib/services/file-extractor';
+import { readDecryptedToken } from '@/lib/services/vault';
 
 export const maxDuration = 60;
 
@@ -60,20 +61,14 @@ export async function POST(request: NextRequest) {
     // ── 2. Resolve tenant AI keys for smart vision ──────────────────────────
     // Images are described by the best available vision model:
     // tenant's OpenAI (GPT-4o) → tenant's Gemini → platform Claude Haiku
-    const { data: aiPerms } = await supabase
-      .from('tenant_permissions')
-      .select('provider, access_token')
-      .eq('tenant_id', tenantId)
-      .in('provider', ['openai', 'gemini']);
-
-    const openaiPerm = aiPerms?.find(p => p.provider === 'openai');
-    const geminiPerm = aiPerms?.find(p => p.provider === 'gemini');
+    const [openaiKey, geminiKey] = await Promise.all([
+      readDecryptedToken(tenantId, 'openai'),
+      readDecryptedToken(tenantId, 'gemini'),
+    ]);
 
     const visionConfig = {
-      openaiKey: openaiPerm?.access_token && openaiPerm.access_token !== 'composio_managed'
-        ? (openaiPerm.access_token as string) : undefined,
-      geminiKey: geminiPerm?.access_token && geminiPerm.access_token !== 'composio_managed'
-        ? (geminiPerm.access_token as string) : undefined,
+      openaiKey: openaiKey ?? undefined,
+      geminiKey: geminiKey ?? undefined,
     };
 
     // ── 3. Extract text content ─────────────────────────────────────────────

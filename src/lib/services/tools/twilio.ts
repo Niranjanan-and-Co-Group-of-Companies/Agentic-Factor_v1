@@ -1,17 +1,19 @@
 import { ToolExecutionContext, registerTool } from './index';
 import { createServiceClient } from '@/lib/supabase/server';
+import { plaintextToken } from '@/lib/services/vault';
 
 // Credentials stored as "ACCOUNT_SID|AUTH_TOKEN" in access_token
 async function getCredentials(tenantId: string): Promise<{ accountSid: string; authToken: string } | null> {
   const supabase = createServiceClient();
   const { data } = await supabase
     .from('tenant_permissions')
-    .select('access_token')
+    .select('access_token, encrypted_token')
     .eq('tenant_id', tenantId)
     .eq('provider', 'twilio')
     .single();
-  if (!data?.access_token) return null;
-  const [accountSid, authToken] = data.access_token.split('|');
+  const storedToken = await plaintextToken(tenantId, data);
+  if (!storedToken) return null;
+  const [accountSid, authToken] = storedToken.split('|');
   if (!accountSid || !authToken) return null;
   return { accountSid, authToken };
 }

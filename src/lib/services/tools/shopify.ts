@@ -1,5 +1,6 @@
 import { ToolExecutionContext, registerTool } from './index';
 import { createServiceClient } from '@/lib/supabase/server';
+import { plaintextToken } from '@/lib/services/vault';
 
 const API_VERSION = '2024-01';
 
@@ -7,13 +8,14 @@ async function getCredentials(tenantId: string): Promise<{ token: string; shop: 
   const supabase = createServiceClient();
   const { data } = await supabase
     .from('tenant_permissions')
-    .select('access_token')
+    .select('access_token, encrypted_token')
     .eq('tenant_id', tenantId)
     .eq('provider', 'shopify')
     .single();
-  if (!data?.access_token) return null;
+  const storedToken = await plaintextToken(tenantId, data);
+  if (!storedToken) return null;
   try {
-    const parsed = JSON.parse(data.access_token) as { apiKey: string; shop: string };
+    const parsed = JSON.parse(storedToken) as { apiKey: string; shop: string };
     return { token: parsed.apiKey, shop: parsed.shop };
   } catch { return null; }
 }

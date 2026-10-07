@@ -50,6 +50,22 @@ export async function decryptToken(tenantId: string, stored: string): Promise<st
 }
 
 /**
+ * Plaintext credential for a tenant_permissions row: decrypts encrypted_token when present,
+ * otherwise returns access_token unchanged (including the 'composio_managed' marker).
+ */
+export async function plaintextToken(
+  tenantId: string,
+  row: { access_token?: string | null; encrypted_token?: string | null } | null | undefined
+): Promise<string | null> {
+  if (!row) return null;
+  if (row.encrypted_token) {
+    try { return await decryptToken(tenantId, row.encrypted_token); } catch { /* fall through */ }
+  }
+  const raw = row.access_token;
+  return raw && raw !== '[encrypted]' ? raw : null;
+}
+
+/**
  * Read the decrypted token for a given tenant+provider from tenant_permissions.
  * Prefers encrypted_token; falls back to access_token for pre-encryption rows.
  * Returns null if no record found or token is the Composio marker.

@@ -1,5 +1,6 @@
 import { ToolExecutionContext, registerTool } from './index';
 import { createServiceClient } from '@/lib/supabase/server';
+import { plaintextToken } from '@/lib/services/vault';
 
 const CALENDLY_BASE = 'https://api.calendly.com';
 
@@ -7,11 +8,11 @@ async function getApiKey(tenantId: string): Promise<string | null> {
   const supabase = createServiceClient();
   const { data } = await supabase
     .from('tenant_permissions')
-    .select('access_token')
+    .select('access_token, encrypted_token')
     .eq('tenant_id', tenantId)
     .eq('provider', 'calendly')
     .single();
-  return data?.access_token ?? null;
+  return plaintextToken(tenantId, data);
 }
 
 function noKeyError() {

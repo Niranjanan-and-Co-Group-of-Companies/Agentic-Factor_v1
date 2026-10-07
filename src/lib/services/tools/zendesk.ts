@@ -1,17 +1,19 @@
 import { ToolExecutionContext, registerTool } from './index';
 import { createServiceClient } from '@/lib/supabase/server';
+import { plaintextToken } from '@/lib/services/vault';
 
 async function getCredentials(tenantId: string): Promise<{ email: string; token: string; subdomain: string } | null> {
   const supabase = createServiceClient();
   const { data } = await supabase
     .from('tenant_permissions')
-    .select('access_token')
+    .select('access_token, encrypted_token')
     .eq('tenant_id', tenantId)
     .eq('provider', 'zendesk')
     .single();
-  if (!data?.access_token) return null;
+  const storedToken = await plaintextToken(tenantId, data);
+  if (!storedToken) return null;
   try {
-    const parsed = JSON.parse(data.access_token) as { email: string; token: string; subdomain: string };
+    const parsed = JSON.parse(storedToken) as { email: string; token: string; subdomain: string };
     return parsed;
   } catch { return null; }
 }

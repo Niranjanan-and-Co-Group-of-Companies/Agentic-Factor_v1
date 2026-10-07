@@ -1,5 +1,6 @@
 import { ToolExecutionContext, registerTool } from './index';
 import { createServiceClient } from '@/lib/supabase/server';
+import { plaintextToken } from '@/lib/services/vault';
 
 async function findEmailTool({ tenantId, args }: ToolExecutionContext) {
   const domain = args.domain as string | undefined;
@@ -14,20 +15,19 @@ async function findEmailTool({ tenantId, args }: ToolExecutionContext) {
   const supabase = createServiceClient();
   const { data: row } = await supabase
     .from('tenant_permissions')
-    .select('access_token')
+    .select('access_token, encrypted_token')
     .eq('tenant_id', tenantId)
     .eq('provider', 'hunter')
     .single();
 
-  if (!row?.access_token) {
+  const apiKey = await plaintextToken(tenantId, row);
+  if (!apiKey) {
     return {
       error: 'Hunter.io API key not connected. Please add your Hunter.io API key in the Connectors page.',
       connector_required: true,
       provider: 'hunter',
     };
   }
-
-  const apiKey = row.access_token;
 
   try {
     // Email Finder: best when we have a first or last name

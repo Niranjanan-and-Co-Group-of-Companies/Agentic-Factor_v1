@@ -4,7 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { calculateChatCreditCost, checkCredits, deductCredits } from '@/lib/middleware/billing';
 import { detectApiKey, redactKey, providerLabel } from '@/lib/services/apikey-detector';
 import { verifyApiKey } from '@/lib/services/apikey-verifier';
-import { encryptToken } from '@/lib/services/vault';
+import { encryptToken, readDecryptedToken } from '@/lib/services/vault';
 import { retrieveRelevantChunks, listUploadedDocuments } from '@/lib/services/rag-retrieval';
 
 export const maxDuration = 300;
@@ -352,8 +352,8 @@ async function executeCCTool(
 
     let apiKey = process.env.TAVILY_API_KEY ?? '';
     try {
-      const { data } = await supabase.from('tenant_permissions').select('access_token').eq('tenant_id', tenantId).eq('provider', 'tavily').maybeSingle();
-      if (data?.access_token && data.access_token !== 'composio_managed') apiKey = data.access_token;
+      const tenantKey = await readDecryptedToken(tenantId, 'tavily');
+      if (tenantKey) apiKey = tenantKey;
     } catch { /* use env key */ }
 
     if (!apiKey) return { content: 'Web search not configured.', summary: 'Not configured' };

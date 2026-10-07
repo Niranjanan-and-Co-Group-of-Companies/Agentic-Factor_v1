@@ -1,20 +1,22 @@
 import { ToolExecutionContext, registerTool } from './index';
 import { createServiceClient } from '@/lib/supabase/server';
+import { plaintextToken } from '@/lib/services/vault';
 
 async function getCredentials(tenantId: string): Promise<{ token: string; dc: string } | null> {
   const supabase = createServiceClient();
   const { data } = await supabase
     .from('tenant_permissions')
-    .select('access_token, metadata')
+    .select('access_token, encrypted_token, metadata')
     .eq('tenant_id', tenantId)
     .eq('provider', 'mailchimp')
     .single();
-  if (!data?.access_token) return null;
+  const storedToken = await plaintextToken(tenantId, data);
+  if (!data || !storedToken) return null;
   const meta = data.metadata as Record<string, string> | null;
   let dc = meta?.datacenter ?? '';
   if (!dc) {
     const res = await fetch('https://login.mailchimp.com/oauth2/metadata', {
-      headers: { Authorization: `OAuth ${data.access_token}` },
+      headers: { Authorization: `OAuth ${storedToken}` },
     });
     if (res.ok) {
       const info = await res.json() as { dc: string };
@@ -23,7 +25,7 @@ async function getCredentials(tenantId: string): Promise<{ token: string; dc: st
         .eq('tenant_id', tenantId).eq('provider', 'mailchimp');
     }
   }
-  return { token: data.access_token, dc: dc || 'us1' };
+  return { token: storedToken, dc: dc || 'us1' };
 }
 
 function noCredError() {
