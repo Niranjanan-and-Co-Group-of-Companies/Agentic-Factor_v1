@@ -908,7 +908,7 @@ INSTRUCTIONS:
 6. For Twitter threads: post each tweet individually using \`social.post_tweet(text=tweet)\` in a loop — Twitter has no native thread API.
 7. If the SDK doesn't have a specific wrapper, use \`api.call(provider, method, endpoint)\` for any connector.
 8. OAuth tokens are also available as environment variables if needed: ${envKeys || 'None'}
-9. **CRITICAL STRICT RULE**: NEVER output simulated, mocked, or placeholder data. You MUST execute real API requests using the SDK.
+9. **CRITICAL STRICT RULE**: NEVER output simulated, mocked, or placeholder data. You MUST execute real API requests using the SDK. (The platform itself may run your script once as a safety preview in which write calls — send, post, create — return {"status": "ok", "dry_run": True} instead of executing; read optional response fields with .get() and never treat a dry_run response as an error.)
 10. Enclose your Python code inside a triple-backtick block with 'python' as the language identifier.
 11. **DO NOT CATCH FATAL ERRORS**: Let the script crash naturally on errors.
 12. **READING INPUT**: Previous agent data is in \`_input_data\` (parsed JSON dict) and \`_input\` (raw string).
@@ -1430,7 +1430,9 @@ ${isFinalAgent && expectedOutputFormat ? `
 
 EXPECTED FINAL OUTPUT FORMAT:
 ${expectedOutputFormat}` : ''}
-
+${hasWriteOps ? `
+PREVIEW RUN: this output comes from a safety dry run. Write actions (sending email or messages, posting, creating pages, records or files) were deliberately simulated and will only execute after human approval. Results marked dry_run or deferred, and empty IDs/URLs/"sent" flags for those writes, are EXPECTED — never fail the output for that. Judge whether the content prepared for those actions (recipients, subject, body, page or record content) is correct and complete for the task.
+` : ''}
 FAIL if:
 - The output doesn't address what the agent was supposed to do at all
 - The output contradicts or ignores the input it was given

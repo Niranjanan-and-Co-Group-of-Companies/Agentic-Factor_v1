@@ -117,6 +117,20 @@ def _is_composio_read(action_name: str) -> bool:
     parts = action_name.upper().split('_')
     return len(parts) >= 2 and parts[1] in _READ_VERBS
 
+class _DeferredResult(dict):
+    """Stand-in response for a write deferred by the preview pass. Any field lookup returns
+    another empty stand-in, so code that reads ids/urls from the response keeps running."""
+    def __missing__(self, key):
+        return _DeferredResult()
+    def __bool__(self):
+        return True
+    def __str__(self):
+        return dict.__repr__(self) if len(self) else ""
+    def get(self, key, default=None):
+        if key in self:
+            return dict.__getitem__(self, key)
+        return _DeferredResult() if default is None else default
+
 def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:
     """Execute a Composio action for the current tenant entity.
     Use instead of api.call() for any provider connected via Composio OAuth.
@@ -127,7 +141,7 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
     dry_run = os.environ.get("AF_DRY_RUN", "0") == "1"
     if dry_run and not _is_composio_read(action_name):
         sys.stderr.write(f"[DRY_RUN] Skipped composio_execute({action_name}) — write op deferred\\n")
-        return dry_run_result or {"status": "ok", "dry_run": True, "action": action_name}
+        return _DeferredResult(dry_run_result or {"status": "ok", "dry_run": True, "action": action_name})
 
     entity_id = os.environ.get("COMPOSIO_ENTITY_ID", "")
     api_key = os.environ.get("COMPOSIO_API_KEY", "")

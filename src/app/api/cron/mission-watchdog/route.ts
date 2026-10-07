@@ -57,12 +57,30 @@ export async function GET(request: NextRequest) {
   const { data: inFlightRuns } = overdue.length
     ? await supabase
         .from('mission_runs')
-        .select('mission_id')
+        .select('id, mission_id')
         .in('mission_id', overdue.map(m => m.id))
         .in('status', ['queued', 'running'])
-    : { data: [] as Array<{ mission_id: string }> };
-  const runningIds = new Set((inFlightRuns ?? []).map(r => r.mission_id));
-  const stuckMissions = overdue.filter(m => runningIds.has(m.id));
+    : { data: [] as Array<{ id: string; mission_id: string }> };
+
+  // missions.updated_at isn't touched while agents work, so measure idleness from the
+  // run's latest event (agent started / attempt failed / completed) as well.
+  const stuckMissions: typeof overdue = [];
+  for (const mission of overdue) {
+    const runIds = (inFlightRuns ?? []).filter(r => r.mission_id === mission.id).map(r => r.id);
+    if (runIds.length === 0) continue;
+    const { data: latest } = await supabase
+      .from('events')
+      .select('created_at')
+      .in('run_id', runIds)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const timeoutSeconds = mission.mission_json?.orchestration?.timeoutSeconds || DEFAULT_MAX_RUNTIME_SECONDS;
+    const lastActivity = Math.max(
+      new Date(mission.updated_at).getTime(),
+      latest?.[0] ? new Date(latest[0].created_at).getTime() : 0,
+    );
+    if (now - lastActivity > timeoutSeconds * 1000) stuckMissions.push(mission);
+  }
 
   if (stuckMissions.length === 0) {
     return NextResponse.json({ checked: true, stuck: 0 });
@@ -78,7 +96,7 @@ export async function GET(request: NextRequest) {
       const report = {
         failedAt: 'Watchdog',
         errorType: 'timeout',
-        error: `Mission exceeded its maximum runtime of ${Math.round(timeoutSeconds / 60)} minutes. The execution environment may have crashed or been interrupted.`,
+        error: `Mission made no progress for ${Math.round(timeoutSeconds / 60)} minutes. The execution environment may have crashed or been interrupted.`,
         actionStep: 'Click "Resume from Failed Agent" to retry from where it stopped, or "Fresh Start" to re-run all agents.',
         detectedAt: new Date().toISOString(),
         lastUpdated: mission.updated_at,
