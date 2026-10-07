@@ -98,12 +98,24 @@ export async function processApprovalDecision(
       if (historyErr) console.warn('[approvals] approval_history insert skipped:', historyErr.message);
     }
 
-    // If approved, signal the orchestrator to continue the agent
+    // If approved, continue the paused run. This must go through Inngest: an un-awaited
+    // promise is frozen as soon as this serverless request returns, so the resume never ran.
+    // Reusing the paused runId lets completed agents return their cached output.
     if (decision === 'approved' && actualMissionId) {
       console.log(`[approvals] Action ${actionId} approved for mission ${actualMissionId}. Resuming execution...`);
-      const { executeMission } = await import('@/lib/services/runtime/executor');
-      executeMission(actualMissionId, tenantId).catch(err => {
-        console.error(`[approvals] Failed to resume mission ${actualMissionId}:`, err);
+      const { data: pausedRun } = await supabase
+        .from('mission_runs')
+        .select('id')
+        .eq('mission_id', actualMissionId)
+        .eq('tenant_id', tenantId)
+        .eq('status', 'paused')
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const { inngest } = await import('@/lib/inngest/client');
+      await inngest.send({
+        name: 'mission.execute',
+        data: { missionId: actualMissionId, tenantId, mode: 'resume', ...(pausedRun ? { runId: pausedRun.id } : {}) },
       });
     }
 

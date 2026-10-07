@@ -85,6 +85,12 @@ export const executeMissionBackground = inngest.createFunction(
       }, { onConflict: 'id', ignoreDuplicates: true });
       if (runErr) console.warn('[Inngest] Failed to upsert mission_runs row (non-fatal):', runErr.message);
 
+      // A re-run of a failed/completed mission otherwise keeps showing its old status while it works.
+      await supabase.from('missions')
+        .update({ status: 'active', updated_at: new Date().toISOString() })
+        .eq('id', missionId)
+        .eq('tenant_id', tenantId);
+
       // ── Build initial context for the first agent ──
 
       // 1. Webhook payload: the POST body becomes the first agent's input so
