@@ -296,11 +296,52 @@ function classifyGenericCalls(code: string): ActionRisk[] {
   return risks;
 }
 
+// Mirrors _is_composio_read in the sandbox SDK so this gate and the dry-run agree on what a read is.
+const COMPOSIO_READ_VERBS = new Set([
+  'GET', 'LIST', 'SEARCH', 'FIND', 'FETCH', 'READ', 'CHECK', 'VIEW', 'QUERY',
+  'RETRIEVE', 'SHOW', 'DESCRIBE', 'LOOKUP', 'COUNT',
+]);
+const COMPOSIO_IRREVERSIBLE_TOKENS = new Set([
+  'SEND', 'SENDS', 'POST', 'PUBLISH', 'REPLY', 'FORWARD', 'DELETE', 'REMOVE', 'TRASH',
+  'INVITE', 'SHARE', 'BROADCAST', 'TWEET', 'RETWEET', 'COMMENT', 'MERGE',
+  'CHARGE', 'REFUND', 'PAY', 'TRANSFER', 'CANCEL',
+]);
+// Apps where a write is almost always visible to someone else.
+const COMPOSIO_COMMS_PREFIXES = new Set([
+  'GMAIL', 'OUTLOOK', 'SLACK', 'MICROSOFTTEAMS', 'DISCORD', 'WHATSAPP', 'TELEGRAM', 'SENDGRID',
+  'LINKEDIN', 'TWITTER', 'FACEBOOK', 'INSTAGRAM', 'YOUTUBE', 'REDDIT',
+]);
+const COMPOSIO_PRIVATE_TOKENS = new Set(['DRAFT', 'LABEL', 'LABELS', 'MARK', 'STAR']);
+
+function classifyComposioCalls(code: string): ActionRisk[] {
+  const totalCalls = (code.match(/composio_execute\s*\(/g) ?? []).length;
+  if (totalCalls === 0) return [];
+  const risks: ActionRisk[] = [];
+  const literal = /composio_execute\s*\(\s*["']([A-Za-z][A-Za-z0-9_]+)["']/g;
+  let m: RegExpExecArray | null;
+  let literalCalls = 0;
+  while ((m = literal.exec(code)) !== null) {
+    literalCalls++;
+    const parts = m[1].toUpperCase().split('_');
+    if (parts.length >= 2 && COMPOSIO_READ_VERBS.has(parts[1])) { risks.push('read'); continue; }
+    const prefix = parts[0];
+    const irreversible =
+      parts.some(p => COMPOSIO_IRREVERSIBLE_TOKENS.has(p)) ||
+      prefix === 'GOOGLECALENDAR' || // event writes email the attendees
+      (COMPOSIO_COMMS_PREFIXES.has(prefix) && !parts.some(p => COMPOSIO_PRIVATE_TOKENS.has(p)));
+    risks.push(irreversible ? 'write_irreversible' : 'write_reversible');
+  }
+  // composio_execute(action_var, ...) can't be classified statically — require review.
+  if (totalCalls > literalCalls) risks.push('write_reversible');
+  return risks;
+}
+
 export function classifyAgentActions(code: string): { hasWriteOps: boolean; writeRisk: ActionRisk } {
   const matchedRisks: ActionRisk[] = ACTION_PATTERNS
     .filter(({ pattern }) => code.includes(pattern))
     .map(({ risk }) => risk);
   matchedRisks.push(...classifyGenericCalls(code));
+  matchedRisks.push(...classifyComposioCalls(code));
 
   const writeRisk: ActionRisk = matchedRisks.includes('write_irreversible')
     ? 'write_irreversible'
@@ -1559,6 +1600,14 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
       }
       lastError = translateAgentError(error.message, agent.role);
       console.error(`[Agent ${agent.id}] E2B execution failed on attempt ${attempts}: ${lastError}`);
+      supabase.from('events').insert({
+        tenant_id: tenantId,
+        event_type: 'agent.attempt_failed',
+        entity_type: 'agent',
+        entity_id: agent.id,
+        run_id: runId ?? null,
+        payload: { missionId, role: agent.role, attempt: attempts, maxAttempts, error: lastError.slice(0, 1000) },
+      }).then(() => {}, () => {});
     }
   }
 

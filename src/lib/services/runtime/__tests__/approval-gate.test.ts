@@ -204,6 +204,43 @@ describe('classifyAgentActions — generic api.call() classification', () => {
   });
 });
 
+// ── Composio-managed providers (how every OAuth connector is called) ────────
+
+describe('classifyAgentActions — composio_execute', () => {
+  const cx = (slug: string) => `result = composio_execute("${slug}", {"x": 1})`;
+
+  it.each([
+    'GMAIL_SEND_EMAIL', 'GMAIL_REPLY_TO_THREAD', 'SLACK_CHAT_POST_MESSAGE',
+    'SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL', 'LINKEDIN_CREATE_LINKED_IN_POST',
+    'GOOGLECALENDAR_CREATE_EVENT', 'AIRTABLE_DELETE_RECORD', 'GITHUB_MERGE_A_PULL_REQUEST',
+    'YOUTUBE_UPLOAD_VIDEO',
+  ])('%s needs approval as irreversible', (slug) => {
+    expectRisk(cx(slug), 'write_irreversible');
+  });
+
+  it.each([
+    'GOOGLESHEETS_CREATE_GOOGLE_SHEET1', 'GOOGLESHEETS_VALUES_UPDATE', 'GOOGLEDOCS_CREATE_DOCUMENT',
+    'NOTION_CREATE_NOTION_PAGE', 'HUBSPOT_CREATE_CONTACT', 'GITHUB_CREATE_AN_ISSUE',
+    'GMAIL_CREATE_EMAIL_DRAFT',
+  ])('%s needs approval as reversible', (slug) => {
+    expectRisk(cx(slug), 'write_reversible');
+  });
+
+  it.each(['GITHUB_LIST_PULL_REQUESTS', 'GMAIL_FETCH_EMAILS', 'HUBSPOT_SEARCH_DEALS', 'GOOGLEDOCS_GET_DOCUMENT_BY_ID'])(
+    '%s is read-only', (slug) => {
+      expectRisk(cx(slug), 'read');
+      expectWriteOps(cx(slug), false);
+    });
+
+  it('a read followed by a send is irreversible', () => {
+    expectRisk(`${cx('GMAIL_FETCH_EMAILS')}\n${cx('GMAIL_SEND_EMAIL')}`, 'write_irreversible');
+  });
+
+  it('an action name held in a variable requires review', () => {
+    expectWriteOps(`action = "GMAIL_" + verb\ncomposio_execute(action, params)`, true);
+  });
+});
+
 // ── Dry-run safety invariant ────────────────────────────────────────────────
 // Documents the contract: when AF_DRY_RUN=1, write ops must NOT execute.
 // This test verifies the detection side (classifyAgentActions correctly
