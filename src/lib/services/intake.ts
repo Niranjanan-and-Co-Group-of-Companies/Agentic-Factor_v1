@@ -562,7 +562,22 @@ const API_KEY_PROVIDERS = new Set([
   'openai', 'gemini', 'elevenlabs', 'runwayml', 'heygen',
 ]);
 
-function repairMissionPermissions(
+// Composio stores each Google app as its own toolkit, so legacy provider keys must be
+// translated to a real Composio slug before being used as a composio_oauth service.
+const LEGACY_TO_COMPOSIO: Record<string, string> = { linkedin_oidc: 'linkedin', teams: 'microsoftteams' };
+
+function composioSlugFor(canonical: string, toolLower: string): string {
+  if (canonical === 'google') {
+    if (toolLower.includes('sheet')) return 'googlesheets';
+    if (toolLower.includes('drive')) return 'googledrive';
+    if (toolLower.includes('doc')) return 'googledocs';
+    if (toolLower.includes('calendar')) return 'googlecalendar';
+    return 'gmail';
+  }
+  return LEGACY_TO_COMPOSIO[canonical] ?? canonical;
+}
+
+export function repairMissionPermissions(
   agents: Array<{ role: string; tools: Array<{ name: string; type: string }> }>,
   permissions: RawPermission[]
 ): RawPermission[] {
@@ -583,18 +598,20 @@ function repairMissionPermissions(
       if (!rawProvider) continue;
 
       const canonical = normalizeServiceName(rawProvider);
-      if (!canonical || declared.has(canonical)) continue;
+      if (!canonical) continue;
 
       const authType = API_KEY_PROVIDERS.has(canonical) ? 'api_key' : 'composio_oauth';
-      declared.add(canonical);
+      const service = authType === 'composio_oauth' ? composioSlugFor(canonical, toolLower) : canonical;
+      if (declared.has(service)) continue;
+      declared.add(service);
       repaired.push({
         type: authType,
-        service: canonical,
+        service,
         scope: `${agent.role} — ${tool.name}`,
         confidentialityLevel: 'confidential',
         granted: false,
       });
-      console.log(`[intake/repair] Added missing permission: ${canonical} (tool "${tool.name}" in agent "${agent.role}")`);
+      console.log(`[intake/repair] Added missing permission: ${service} (tool "${tool.name}" in agent "${agent.role}")`);
     }
   }
 

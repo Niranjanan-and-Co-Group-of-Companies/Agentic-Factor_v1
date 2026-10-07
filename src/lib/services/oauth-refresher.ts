@@ -367,6 +367,9 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
   // googlesheets, googledrive, etc. are SEPARATE Composio connections — do NOT alias them
   // to 'google', as that connection cannot execute GOOGLESHEETS_* or GOOGLEDRIVE_* actions.
   const COMPOSIO_SLUG_ALIASES: Record<string, string[]> = {
+    // 'google' is not a Composio toolkit; older blueprints declared it alongside the real
+    // per-app slug (e.g. googlesheets), which is verified on its own entry.
+    google:         ['google', 'gmail', 'googlesheets', 'googledrive', 'googledocs', 'googlecalendar'],
     gmail:          ['google', 'gmail'],
     linkedin:       ['linkedin_oidc', 'linkedin'],
     jira:           ['atlassian', 'jira'],
