@@ -170,6 +170,41 @@ export async function getValidComposioActionNames(afProviders: string[]): Promis
 }
 
 /**
+ * Action hint for repairing a failed script. Full catalogs (GitHub alone has hundreds of
+ * actions) made each repair call cost ~300 credits, so only the actions the script called and
+ * their closest name matches get descriptions; every other action is listed by slug only.
+ */
+export async function buildComposioFixContext(usedSlugs: string[], detailedLimit = 40): Promise<string> {
+  const apiKey = process.env.COMPOSIO_API_KEY;
+  if (!apiKey || usedSlugs.length === 0) return '';
+
+  const used = new Set(usedSlugs.map(s => s.toUpperCase()));
+  const usedTokens = new Set([...used].flatMap(s => s.split('_').slice(1)));
+  const appNames = [...new Set([...used].map(s => {
+    const prefix = s.split('_')[0].toLowerCase();
+    return AF_TO_COMPOSIO_APP[prefix] ?? prefix;
+  }))];
+
+  const results = await Promise.allSettled(appNames.map(app => fetchAllActionsForApp(app, apiKey)));
+  const actions = results.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
+  if (actions.length === 0) return '';
+
+  const ranked = actions
+    .map(a => {
+      const slug = a.slug.toUpperCase();
+      const overlap = slug.split('_').slice(1).filter(t => usedTokens.has(t)).length;
+      return { a, score: used.has(slug) ? 1000 : overlap };
+    })
+    .sort((x, y) => y.score - x.score);
+  const detailed = ranked.filter(x => x.score > 0).slice(0, detailedLimit).map(x => x.a);
+  const detailedSlugs = new Set(detailed.map(a => a.slug));
+  const others = actions.filter(a => !detailedSlugs.has(a.slug)).map(a => a.slug);
+
+  return `COMPOSIO ACTIONS — the only valid names. Closest matches to what the script called (slug — description [req: required_params]):
+${detailed.map(formatActionCompact).join('')}${others.length ? `Other valid action names: ${others.join(', ')}\n` : ''}`;
+}
+
+/**
  * Fetch all Composio action schemas for the tenant's connected providers and
  * format them as a concise system-prompt section.
  *

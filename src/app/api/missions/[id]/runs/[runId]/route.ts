@@ -86,8 +86,13 @@ export async function GET(
     .gte('created_at', startedAt)
     .lte('created_at', completedAt);
 
+  // Billing events are tenant-wide; attribute only those charged to this mission's agents
+  // (actionType is "<kind>:<agent role>") so concurrent missions don't inflate this run.
+  const roles = (agents ?? []).map(a => a.role).filter(Boolean) as string[];
   const creditsUsed = (creditEvents ?? []).reduce((sum, e) => {
-    return sum + ((e.payload as Record<string, number>).amount ?? 0);
+    const p = e.payload as { amount?: number; actionType?: string };
+    const forThisMission = roles.some(r => (p.actionType ?? '').endsWith(`:${r}`));
+    return forThisMission ? sum + (p.amount ?? 0) : sum;
   }, 0);
 
   return NextResponse.json({

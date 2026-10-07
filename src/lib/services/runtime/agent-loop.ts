@@ -702,18 +702,17 @@ export async function executeAgent(
       // breaks Composio-managed providers entirely (no token exists for them).
       if (lastError && lastPythonCode.includes('composio_execute(')) {
         try {
-          // Extract which provider prefixes are used (GMAIL_* → gmail, TRELLO_* → trello, etc.)
           const actionRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
-          const usedPrefixes = new Set<string>();
+          const usedSlugs = new Set<string>();
           let am;
           while ((am = actionRegex.exec(lastPythonCode)) !== null) {
-            usedPrefixes.add(am[1].split('_')[0].toLowerCase());
+            usedSlugs.add(am[1]);
           }
 
           let composioHint = '';
-          if (usedPrefixes.size > 0) {
-            const { buildComposioActionsContext } = await import('../composio-actions');
-            composioHint = await buildComposioActionsContext([...usedPrefixes]).catch(() => '');
+          if (usedSlugs.size > 0) {
+            const { buildComposioFixContext } = await import('../composio-actions');
+            composioHint = await buildComposioFixContext([...usedSlugs]).catch(() => '');
           }
 
           const composioFixPrompt = `You are an expert Python developer fixing a script that uses composio_execute().
