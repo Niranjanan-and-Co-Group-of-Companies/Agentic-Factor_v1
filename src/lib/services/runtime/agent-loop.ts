@@ -104,7 +104,16 @@ function sanitizePythonCode(code: string): string {
   return fixedLines.join('\n');
 }
 
+// The retry fixer is prompted with this text, so the original error must survive translation —
+// a friendly summary alone ("Cannot reach the external API") leaves it nothing to fix.
 function translateAgentError(error: string, agentRole: string): string {
+  const friendly = friendlyAgentError(error, agentRole);
+  return friendly === error || friendly.includes('Original:')
+    ? friendly
+    : `${friendly}\nOriginal error: ${error.slice(0, 800)}`;
+}
+
+function friendlyAgentError(error: string, agentRole: string): string {
   // LinkedIn-specific 403 — most common cause of failed social missions
   if (
     (error.toLowerCase().includes('linkedin') || error.includes('ugcPosts') || error.includes('linkedin.com')) &&
@@ -1564,6 +1573,12 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
             reversible: writeRisk !== 'write_irreversible',
             // This payload is the Phase 1 PREVIEW — nothing real has happened yet.
             payload: { output: finalOutputJSON, pythonCode, writeRisk, runNumber: isTrainingMode ? trainingRunNumber : undefined },
+            // What the reviewer sees on /approvals: the write actions about to run and the prepared content.
+            payload_redacted: {
+              actions: [...new Set([...pythonCode.matchAll(/composio_execute\s*\(\s*["']([A-Z0-9_]+)["']/g)].map(m => m[1]))]
+                .filter(slug => classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps),
+              preview: typeof finalOutputJSON === 'string' ? finalOutputJSON.slice(0, 3000) : JSON.stringify(finalOutputJSON).slice(0, 3000),
+            },
             status: 'pending'
           });
 

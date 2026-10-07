@@ -238,6 +238,25 @@ export default function ApprovalsPage() {
                 </div>
               </div>
 
+              {/* What will actually run, and the content prepared in the preview pass */}
+              {(() => {
+                const actions = Array.isArray(action.payload_redacted?.actions) ? action.payload_redacted.actions as string[] : [];
+                const preview = typeof action.payload_redacted?.preview === "string" ? action.payload_redacted.preview as string : "";
+                if (actions.length === 0 && !preview) return null;
+                return (
+                  <details style={{ marginBottom: "var(--space-md)" }}>
+                    <summary style={{ cursor: "pointer", fontSize: "0.82rem", fontWeight: 600 }}>
+                      🔍 What it will do{actions.length > 0 ? ` — ${actions.join(", ")}` : ""}
+                    </summary>
+                    {preview && (
+                      <pre style={{ fontSize: "0.75rem", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 320, overflow: "auto", padding: "var(--space-sm) var(--space-md)", background: "var(--bg-glass)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", marginTop: "var(--space-sm)" }}>
+                        {preview}
+                      </pre>
+                    )}
+                  </details>
+                );
+              })()}
+
               {/* Explanation (expandable) */}
               {action.explanation && (
                 <button className="btn btn-ghost btn-sm" style={{ marginBottom: "var(--space-md)" }}
