@@ -3,6 +3,7 @@ import { inngest } from './client';
 import { createServiceClient } from '@/lib/supabase/server';
 import { executeAgent } from '@/lib/services/runtime/agent-loop';
 import { transitionMissionStatus } from '@/lib/services/orchestrator';
+import { withArchitectQuestion } from '@/lib/utils/architect-question';
 
 // ═══════════════════════════════════════════════════════════
 // Inngest Function: Execute Mission in Background
@@ -629,6 +630,15 @@ export const generateBlueprintBackground = inngest.createFunction(
       if (discoveryResult.type === 'discovery') {
         await step.run('save-discovery', async () => {
           await updateJobStatus('discovery', { question: discoveryResult.question });
+          // Keep the question in the saved Command Center message too, so it survives a reload.
+          const { data: msg } = await supabase.from('mission_chat_messages')
+            .select('id, content').eq('tenant_id', tenantId).eq('action_payload->>jobId', jobId).maybeSingle();
+          if (msg) {
+            await supabase.from('mission_chat_messages').update({
+              content: withArchitectQuestion(msg.content ?? '', discoveryResult.question),
+              action_payload: { type: 'blueprint_question', question: discoveryResult.question },
+            }).eq('id', msg.id);
+          }
         });
         return { success: true, jobId, type: 'discovery' };
       }

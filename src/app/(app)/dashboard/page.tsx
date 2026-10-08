@@ -6,6 +6,7 @@ import { createBrowserClient } from '@supabase/ssr';
 import OnboardingTour from '@/components/OnboardingTour';
 import MissionsSidebar from '@/components/MissionsSidebar';
 import { renderMarkdown } from '@/lib/utils/render-markdown';
+import { withArchitectQuestion } from '@/lib/utils/architect-question';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -372,6 +373,7 @@ function CommandCenterPageInner() {
           missionId?: string; missionTitle?: string;
           agents?: AgentCard[]; orchestrationPattern?: string;
           requiredConnectors?: RequiredConnector[]; error?: string;
+          question?: string;
         };
 
         if (data.step) setBlueprintSteps(prev => ({ ...prev, [jobId]: data.step! }));
@@ -390,6 +392,18 @@ function CommandCenterPageInner() {
             }};
             return updated;
           });
+        } else if (data.status === 'discovery' && data.question) {
+          // The architect needs one answer first: show the question in the message so the reply goes back with it.
+          const question = data.question;
+          clearInterval(poll); blueprintPollsRef.current.delete(jobId);
+          setMessages(prev => {
+            const updated = [...prev];
+            const idx = updated.findIndex(m => m.action_payload?.type === 'building_blueprint' && m.action_payload.jobId === jobId);
+            if (idx === -1) return prev;
+            updated[idx] = { ...updated[idx], content: withArchitectQuestion(updated[idx].content, question), action_payload: { type: 'blueprint_question', question } };
+            return updated;
+          });
+          inputRef.current?.focus();
         } else if (data.status === 'failed') {
           clearInterval(poll); blueprintPollsRef.current.delete(jobId);
           setMessages(prev => {
@@ -1008,6 +1022,12 @@ function CommandCenterPageInner() {
     if (action.type === 'show_usage') return (
       <div style={card}>
         <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => router.push('/dashboard/usage')}>View Usage & Credits →</button>
+      </div>
+    );
+
+    if (action.type === 'blueprint_question') return (
+      <div style={card}>
+        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>💬 Reply below and the mission will be built with your answer.</div>
       </div>
     );
 
