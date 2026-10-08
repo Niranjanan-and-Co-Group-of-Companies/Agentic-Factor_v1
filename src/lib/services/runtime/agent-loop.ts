@@ -514,10 +514,13 @@ ${pythonCode}`.replace(/\x00/g, '');
 export function reportedFailure(output: unknown): string | null {
   if (!output || typeof output !== 'object' || Array.isArray(output)) return null;
   const o = output as Record<string, unknown>;
-  const status = typeof o.status === 'string' ? o.status.trim().toLowerCase() : '';
-  if (status !== 'failed' && status !== 'error') return null;
+  const isFailure = (v: unknown) => typeof v === 'string' && ['failed', 'error'].includes(v.trim().toLowerCase());
+  // A step-level status counts too: a Doc created but its email failing reported
+  // {"status": "created", "email_status": "failed"} and the run showed as completed.
+  const failedKey = ['status', ...Object.keys(o).filter(k => k !== 'status' && k.endsWith('_status'))].find(k => isFailure(o[k]));
+  if (!failedKey) return null;
   const detail = o.error ?? o.message ?? o.reason;
-  return typeof detail === 'string' ? detail.slice(0, 800) : JSON.stringify(detail ?? `status: ${status}`).slice(0, 800);
+  return typeof detail === 'string' ? detail.slice(0, 800) : JSON.stringify(detail ?? `${failedKey}: ${o[failedKey]}`).slice(0, 800);
 }
 
 // Short label of which external service an action targets — used by the
@@ -731,6 +734,34 @@ export async function executeAgent(
     console.warn(`[Agent ${agent.id}] ask_ai unavailable for this run:`, (tokenErr as Error).message);
   }
 
+  // Everything a script needs to reach the tenant's services. One builder for both the normal attempt
+  // and the approved-resume path: the resume copy had drifted and lacked COMPOSIO_ENTITY_ID, so every
+  // human-approved Composio write (emails, Slack posts) failed with "COMPOSIO_ENTITY_ID is not set".
+  const buildSandboxEnvs = (): Record<string, string> => {
+    const envs: Record<string, string> = {};
+    // Base64 keeps INPUT_CONTEXT safe from E2B's env injection (quotes, backslashes, etc.)
+    if (inputContext) envs['INPUT_CONTEXT_B64'] = Buffer.from(inputContext, 'utf-8').toString('base64');
+    for (const token of tokens) {
+      const providerKey = token.provider.toUpperCase();
+      envs[`${providerKey}_ACCESS_TOKEN`] = token.access_token;
+      // Locally stored API keys (not Composio-managed placeholders) also go in as _API_KEY,
+      // so Python modules like creative.py find them under either name.
+      if (token.access_token !== 'composio_managed') envs[`${providerKey}_API_KEY`] = token.access_token;
+    }
+    if (process.env.TAVILY_API_KEY) envs['TAVILY_API_KEY'] = process.env.TAVILY_API_KEY;
+    if (process.env.SERPAPI_KEY) envs['SERPAPI_KEY'] = process.env.SERPAPI_KEY;
+    if (process.env.SENDGRID_API_KEY) envs['SENDGRID_API_KEY'] = process.env.SENDGRID_API_KEY;
+    if (process.env.TWITTER_BEARER_TOKEN) envs['TWITTER_BEARER_TOKEN'] = process.env.TWITTER_BEARER_TOKEN;
+    if (process.env.FACEBOOK_APP_ID) envs['FACEBOOK_APP_ID'] = process.env.FACEBOOK_APP_ID;
+    // Composio — entity_id is the tenantId, enables composio_execute() in the Python SDK
+    if (process.env.COMPOSIO_API_KEY) envs['COMPOSIO_API_KEY'] = process.env.COMPOSIO_API_KEY;
+    envs['COMPOSIO_ENTITY_ID'] = tenantId;
+    // Custom connector metadata (base_url, auth_type, auth_header) from the executor
+    if (extraEnvs) Object.assign(envs, extraEnvs);
+    Object.assign(envs, sandboxLLMEnv);
+    return envs;
+  };
+
   // Build environment variables from tokens
   const envVars = tokens.reduce((acc, t) => {
     acc[`${t.provider.toUpperCase()}_ACCESS_TOKEN`] = t.access_token;
@@ -792,20 +823,7 @@ export async function executeAgent(
         // the first time, instead of returning a result that was never seen
         // before approval.
         console.log(`[Agent ${agent.id}] Approved — executing the real action for the first time now.`);
-        const resumeEnvs: Record<string, string> = {};
-        if (inputContext) {
-          resumeEnvs['INPUT_CONTEXT_B64'] = Buffer.from(inputContext, 'utf-8').toString('base64');
-        }
-        for (const token of tokens) {
-          resumeEnvs[`${token.provider.toUpperCase()}_ACCESS_TOKEN`] = token.access_token;
-        }
-        if (process.env.TAVILY_API_KEY) resumeEnvs['TAVILY_API_KEY'] = process.env.TAVILY_API_KEY;
-        if (process.env.SERPAPI_KEY) resumeEnvs['SERPAPI_KEY'] = process.env.SERPAPI_KEY;
-        if (process.env.SENDGRID_API_KEY) resumeEnvs['SENDGRID_API_KEY'] = process.env.SENDGRID_API_KEY;
-        if (process.env.TWITTER_BEARER_TOKEN) resumeEnvs['TWITTER_BEARER_TOKEN'] = process.env.TWITTER_BEARER_TOKEN;
-        if (process.env.FACEBOOK_APP_ID) resumeEnvs['FACEBOOK_APP_ID'] = process.env.FACEBOOK_APP_ID;
-        if (extraEnvs) Object.assign(resumeEnvs, extraEnvs);
-        Object.assign(resumeEnvs, sandboxLLMEnv);
+        const resumeEnvs = buildSandboxEnvs();
 
         // Claim the approval atomically: an approval that lands while the run is still retrying its
         // step can reach two invocations, and only one of them may perform the real action.
@@ -1333,35 +1351,7 @@ CRITICAL FIX RULES (follow these EXACTLY):
       console.log(`[Agent ${agent.id}] Sandbox attempt ${attempts} — ${hasWriteOps ? 'write-ops: dry-run → real-run (2 sandboxes)' : 'read-only: direct single-run (1 sandbox)'}...`);
 
       // Build environment variables for the sandbox
-      const sandboxEnvs: Record<string, string> = {};
-      if (inputContext) {
-        // Base64-encode INPUT_CONTEXT to avoid E2B's os.environ injection breaking
-        // on special characters (single quotes, backslashes, etc.)
-        // Base64 only produces A-Za-z0-9+/= which are always safe
-        const b64 = Buffer.from(inputContext, 'utf-8').toString('base64');
-        sandboxEnvs['INPUT_CONTEXT_B64'] = b64;
-      }
-      for (const token of tokens) {
-        const providerKey = token.provider.toUpperCase();
-        sandboxEnvs[`${providerKey}_ACCESS_TOKEN`] = token.access_token;
-        // For locally-stored API keys (not Composio-managed placeholders), also inject
-        // as _API_KEY so Python modules like creative.py can find them with either name.
-        if (token.access_token !== 'composio_managed') {
-          sandboxEnvs[`${providerKey}_API_KEY`] = token.access_token;
-        }
-      }
-      // Inject API keys for search and other services
-      if (process.env.TAVILY_API_KEY) sandboxEnvs['TAVILY_API_KEY'] = process.env.TAVILY_API_KEY;
-      if (process.env.SERPAPI_KEY) sandboxEnvs['SERPAPI_KEY'] = process.env.SERPAPI_KEY;
-      if (process.env.SENDGRID_API_KEY) sandboxEnvs['SENDGRID_API_KEY'] = process.env.SENDGRID_API_KEY;
-      if (process.env.TWITTER_BEARER_TOKEN) sandboxEnvs['TWITTER_BEARER_TOKEN'] = process.env.TWITTER_BEARER_TOKEN;
-      if (process.env.FACEBOOK_APP_ID) sandboxEnvs['FACEBOOK_APP_ID'] = process.env.FACEBOOK_APP_ID;
-      // Composio — entity_id is the tenantId, enables composio_execute() in Python SDK
-      if (process.env.COMPOSIO_API_KEY) sandboxEnvs['COMPOSIO_API_KEY'] = process.env.COMPOSIO_API_KEY;
-      sandboxEnvs['COMPOSIO_ENTITY_ID'] = tenantId;
-      // Inject custom connector metadata (base_url, auth_type, auth_header) from executor
-      if (extraEnvs) Object.assign(sandboxEnvs, extraEnvs);
-      Object.assign(sandboxEnvs, sandboxLLMEnv);
+      const sandboxEnvs = buildSandboxEnvs();
 
       // Only apply dry-run guard for write-op agents — read-only agents run directly
       if (hasWriteOps) {
