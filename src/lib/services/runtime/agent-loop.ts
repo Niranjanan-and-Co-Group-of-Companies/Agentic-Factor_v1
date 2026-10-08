@@ -599,11 +599,18 @@ export async function executeAgent(
   let isTrainingMode = false;
   let trainingRunNumber = 0;
   let tenantPlan = 'free';
+  // Composio actions the mission plan declares (permission scopes) — what the customer approved.
+  const declaredActions = new Set<string>();
   try {
     const [{ data: missionRow }, { data: billingRow }] = await Promise.all([
       supabase.from('missions').select('mission_json, training_enabled, training_runs_completed').eq('id', missionId).single(),
       supabase.from('tenant_billing').select('plan').eq('tenant_id', tenantId).single(),
     ]);
+    for (const perm of (missionRow?.mission_json?.permissions ?? []) as Array<{ scope?: string }>) {
+      for (const slug of String(perm.scope ?? '').split(',')) {
+        if (/^[A-Z][A-Z0-9_]{3,}$/.test(slug.trim())) declaredActions.add(slug.trim());
+      }
+    }
     if (missionRow?.mission_json?.title) missionTitle = missionRow.mission_json.title;
     isTrainingMode = missionRow?.training_enabled === true;
     trainingRunNumber = (missionRow?.training_runs_completed ?? 0) + 1;
@@ -1087,11 +1094,19 @@ CRITICAL FIX RULES (follow these EXACTLY):
     // A fixer that can't find a valid read action has substituted a write (e.g. a "fetch open deals"
     // agent switched to HUBSPOT_CREATE_CRM_OBJECT_FROM_NL); once a mission graduates, a reversible
     // write like that can run without review, so a read-only agent must never drift into writing.
+    // Writes the customer's plan declares (e.g. after "also save it to a Doc") stay allowed.
     const scriptWrites = classifyAgentActions(pythonCode).hasWriteOps;
+    const undeclaredWrites = [...new Set([...pythonCode.matchAll(/composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]+)["']/g)].map(m => m[1]))]
+      .filter(slug => classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps && !declaredActions.has(slug));
+    const dynamicComposioCalls =
+      (pythonCode.match(/composio_execute\s*\(/g) ?? []).length >
+      (pythonCode.match(/composio_execute\s*\(\s*["'][A-Z][A-Z0-9_]+["']/g) ?? []).length;
+    const nonComposioWrites = dynamicComposioCalls ||
+      classifyAgentActions(pythonCode.replace(/composio_execute\s*\([^)]*\)/g, '')).hasWriteOps;
     if (firstScriptReadOnly === null) {
       firstScriptReadOnly = !scriptWrites;
-    } else if (firstScriptReadOnly && scriptWrites) {
-      lastError = 'Rejected fix: this agent only reads data, but the corrected script calls an action that creates, updates, sends or deletes. Use read actions only (GET/LIST/SEARCH/FETCH/...); if none fits, print {"status": "error", ...} explaining what is missing.';
+    } else if (firstScriptReadOnly && scriptWrites && (undeclaredWrites.length > 0 || nonComposioWrites)) {
+      lastError = `Rejected fix: this agent only reads data, but the corrected script writes${undeclaredWrites.length ? ` via ${undeclaredWrites.join(', ')}` : ''}, which the mission plan does not include. Use read actions only (GET/LIST/SEARCH/FETCH/...); if none fits, print {"status": "error", ...} explaining what is missing.`;
       console.warn(`[Agent ${agent.id}] ${lastError}`);
       supabase.from('events').insert({
         tenant_id: tenantId, event_type: 'agent.attempt_failed', entity_type: 'agent', entity_id: agent.id,
