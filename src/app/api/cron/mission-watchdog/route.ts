@@ -82,8 +82,13 @@ export async function GET(request: NextRequest) {
     if (now - lastActivity > timeoutSeconds * 1000) stuckMissions.push(mission);
   }
 
+  // Orphaned runs: a run left 'queued'/'running' under a mission that is no longer active (it was
+  // marked completed/failed while the run row was never closed). The pass above only looks at active
+  // missions, so these stayed open forever — and an open run blocks every new run of that mission.
+  const closedOrphans = await closeOrphanedRuns(supabase, now);
+
   if (stuckMissions.length === 0) {
-    return NextResponse.json({ checked: true, stuck: 0 });
+    return NextResponse.json({ checked: true, stuck: 0, orphanedRunsClosed: closedOrphans });
   }
 
   console.log(`[Watchdog] Found ${stuckMissions.length} stuck mission(s)`);
@@ -154,5 +159,38 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ checked: true, stuck: stuckMissions.length, results });
+  return NextResponse.json({ checked: true, stuck: stuckMissions.length, results, orphanedRunsClosed: closedOrphans });
+}
+
+async function closeOrphanedRuns(supabase: ReturnType<typeof createServiceClient>, now: number): Promise<number> {
+  const cutoff = new Date(now - DEFAULT_MAX_RUNTIME_SECONDS * 1000).toISOString();
+  // mission_runs has no foreign key to missions, so no embedded join: look the statuses up separately.
+  const { data: openRuns } = await supabase
+    .from('mission_runs')
+    .select('id, mission_id, tenant_id, agents_done, agents_total')
+    .in('status', ['queued', 'running'])
+    .lt('started_at', cutoff)
+    .limit(100);
+  if (!openRuns?.length) return 0;
+  const { data: missions } = await supabase
+    .from('missions').select('id, status').in('id', [...new Set(openRuns.map(r => r.mission_id))]);
+  const activeIds = new Set((missions ?? []).filter(m => m.status === 'active').map(m => m.id));
+
+  let closed = 0;
+  for (const run of openRuns.filter(r => !activeIds.has(r.mission_id))) {
+    const { data: latest } = await supabase
+      .from('events').select('created_at').eq('run_id', run.id).order('created_at', { ascending: false }).limit(1);
+    const lastActivity = latest?.[0]?.created_at ?? null;
+    if (lastActivity && now - new Date(lastActivity).getTime() < DEFAULT_MAX_RUNTIME_SECONDS * 1000) continue;
+    const finished = (run.agents_total ?? 0) > 0 && (run.agents_done ?? 0) >= (run.agents_total ?? 0);
+    const { error } = await supabase
+      .from('mission_runs')
+      .update({ status: finished ? 'completed' : 'failed', completed_at: lastActivity ?? new Date(now).toISOString() })
+      .eq('id', run.id)
+      .eq('tenant_id', run.tenant_id)
+      .in('status', ['queued', 'running']);
+    if (!error) closed++;
+  }
+  if (closed) console.log(`[Watchdog] Closed ${closed} orphaned run(s) under inactive missions`);
+  return closed;
 }
