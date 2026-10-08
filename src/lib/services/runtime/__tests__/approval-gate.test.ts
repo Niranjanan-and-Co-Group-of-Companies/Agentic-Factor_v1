@@ -325,3 +325,18 @@ describe('approvalPreview', () => {
     expect(approvalPreview('not json')).toBe('not json');
   });
 });
+
+describe('approvalPreview for messages', () => {
+  it('leads with the recipient and subject of an email', () => {
+    const out = JSON.stringify({ content: 'Template text from the previous agent', recipient: 'niranjan+test@gmail.com', subject: 'Template ready', message_id: 'dry-run-preview' });
+    expect(approvalPreview(out)).toBe('To: niranjan+test@gmail.com\nSubject: Template ready\n\nTemplate text from the previous agent');
+  });
+
+  it('prefers the message body over passed-through content', () => {
+    expect(approvalPreview({ to: 'a@b.co', body: 'Hi team', content: 'doc' })).toBe('To: a@b.co\n\nHi team');
+  });
+
+  it('shows the Slack channel', () => {
+    expect(approvalPreview({ channel: '#growth', message: 'Weekly digest' })).toBe('Channel: #growth\n\nWeekly digest');
+  });
+});

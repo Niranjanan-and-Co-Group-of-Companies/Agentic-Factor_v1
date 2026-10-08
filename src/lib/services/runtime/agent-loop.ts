@@ -532,8 +532,21 @@ export function approvalPreview(output: unknown): string {
   if (typeof output === 'string') {
     try { parsed = JSON.parse(output); } catch { return output.slice(0, 12_000); }
   }
-  const text = parsed && typeof parsed === 'object' ? (parsed.content ?? parsed.content_preview) : undefined;
-  if (typeof text === 'string' && text.trim()) return text.slice(0, 12_000);
+  const pick = (...keys: string[]): string | undefined => {
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    const v = keys.map(k => parsed[k]).find(x => typeof x === 'string' && x.trim());
+    return v as string | undefined;
+  };
+  // For a message, who it goes to and its subject matter most — an email send showed only the
+  // document text passed along from the previous agent, not the recipient.
+  const header = [
+    pick('recipient', 'recipient_email', 'to', 'to_email', 'email_to') && `To: ${pick('recipient', 'recipient_email', 'to', 'to_email', 'email_to')}`,
+    pick('channel', 'channel_name') && `Channel: ${pick('channel', 'channel_name')}`,
+    pick('subject', 'email_subject') && `Subject: ${pick('subject', 'email_subject')}`,
+  ].filter(Boolean).join('\n');
+  const text = pick('body', 'email_body', 'message', 'message_text', 'content', 'content_preview');
+  if (header) return `${header}\n\n${text ?? ''}`.trim().slice(0, 12_000);
+  if (text) return text.slice(0, 12_000);
   return (typeof output === 'string' ? output : JSON.stringify(output, null, 2)).slice(0, 6_000);
 }
 
