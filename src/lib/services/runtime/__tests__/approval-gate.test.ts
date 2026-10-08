@@ -226,11 +226,22 @@ describe('classifyAgentActions — composio_execute', () => {
     expectRisk(cx(slug), 'write_reversible');
   });
 
-  it.each(['GITHUB_LIST_PULL_REQUESTS', 'GMAIL_FETCH_EMAILS', 'HUBSPOT_SEARCH_DEALS', 'GOOGLEDOCS_GET_DOCUMENT_BY_ID'])(
+  it.each([
+    'GITHUB_LIST_PULL_REQUESTS', 'GMAIL_FETCH_EMAILS', 'HUBSPOT_SEARCH_DEALS', 'GOOGLEDOCS_GET_DOCUMENT_BY_ID',
+    // read verb not in second position
+    'GOOGLECALENDAR_EVENTS_LIST', 'GITHUB_REPOS_GET_CONTENT', 'GOOGLESHEETS_BATCH_GET', 'NOTION_QUERY_DATABASE',
+  ])(
     '%s is read-only', (slug) => {
       expectRisk(cx(slug), 'read');
       expectWriteOps(cx(slug), false);
     });
+
+  it('a read verb anywhere does not make a write action a read', () => {
+    expectRisk(cx('GOOGLESHEETS_SPREADSHEETS_VALUES_APPEND'), 'write_reversible');
+    expectWriteOps(cx('GITHUB_GET_OR_CREATE_LABEL'), true);
+    expectWriteOps(cx('HUBSPOT_ARCHIVE_DEALS'), true);
+    expectWriteOps(cx('SLACK_CONVERSATIONS_OPEN'), true); // no recognised verb → treated as a write
+  });
 
   it('a read followed by a send is irreversible', () => {
     expectRisk(`${cx('GMAIL_FETCH_EMAILS')}\n${cx('GMAIL_SEND_EMAIL')}`, 'write_irreversible');

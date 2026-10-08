@@ -110,12 +110,22 @@ PROVIDER_BASE_URLS = {
 
 _READ_VERBS = frozenset({
     'GET', 'LIST', 'SEARCH', 'FIND', 'FETCH', 'READ', 'CHECK', 'VIEW', 'QUERY',
-    'RETRIEVE', 'SHOW', 'DESCRIBE', 'LOOKUP', 'COUNT',
+    'RETRIEVE', 'SHOW', 'DESCRIBE', 'LOOKUP', 'COUNT', 'DOWNLOAD', 'EXPORT',
+})
+_WRITE_VERBS = frozenset({
+    'CREATE', 'UPDATE', 'DELETE', 'REMOVE', 'SEND', 'SENDS', 'POST', 'PUT', 'PATCH', 'ADD', 'INSERT',
+    'APPEND', 'UPLOAD', 'MOVE', 'COPY', 'RENAME', 'SET', 'MERGE', 'PUBLISH', 'REPLY', 'FORWARD', 'TRASH',
+    'ARCHIVE', 'UNARCHIVE', 'INVITE', 'SHARE', 'STAR', 'UNSTAR', 'MARK', 'LABEL', 'MODIFY', 'EDIT',
+    'REPLACE', 'CLEAR', 'EXECUTE', 'RUN', 'TRIGGER', 'CANCEL', 'CLOSE', 'LOCK', 'UNLOCK', 'ASSIGN',
+    'UNASSIGN', 'ENABLE', 'DISABLE', 'APPROVE', 'DISMISS', 'SUBMIT', 'SCHEDULE', 'UPSERT', 'WRITE',
+    'IMPORT', 'DUPLICATE', 'TRANSFER', 'PAY', 'CHARGE', 'REFUND', 'FOLLOW', 'UNFOLLOW', 'BLOCK', 'UNBLOCK',
+    'MUTE', 'UNMUTE', 'PIN', 'UNPIN', 'REACT', 'COMMENT', 'TWEET', 'RETWEET', 'LIKE', 'UNLIKE', 'ACCEPT',
+    'DECLINE', 'JOIN', 'LEAVE', 'KICK', 'BAN', 'RESTORE', 'RESET', 'REVOKE', 'GRANT', 'SYNC',
 })
 
 def _is_composio_read(action_name: str) -> bool:
-    parts = action_name.upper().split('_')
-    return len(parts) >= 2 and parts[1] in _READ_VERBS
+    words = action_name.upper().split('_')[1:]
+    return any(w in _READ_VERBS for w in words) and not any(w in _WRITE_VERBS for w in words)
 
 _DEFERRED_ERROR_KEYS = frozenset({'error', 'errors', 'error_message', 'errormessage'})
 

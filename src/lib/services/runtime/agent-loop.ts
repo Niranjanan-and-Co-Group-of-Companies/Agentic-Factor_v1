@@ -320,11 +320,28 @@ function classifyGenericCalls(code: string): ActionRisk[] {
   return risks;
 }
 
-// Mirrors _is_composio_read in the sandbox SDK so this gate and the dry-run agree on what a read is.
+// Mirrors _is_composio_read in the sandbox SDK so this gate and the dry-run agree on what a read is:
+// some word after the app prefix is a read verb and none is a write verb. (Checking only the second
+// word misread slugs like GOOGLECALENDAR_EVENTS_LIST as irreversible writes.)
 const COMPOSIO_READ_VERBS = new Set([
   'GET', 'LIST', 'SEARCH', 'FIND', 'FETCH', 'READ', 'CHECK', 'VIEW', 'QUERY',
-  'RETRIEVE', 'SHOW', 'DESCRIBE', 'LOOKUP', 'COUNT',
+  'RETRIEVE', 'SHOW', 'DESCRIBE', 'LOOKUP', 'COUNT', 'DOWNLOAD', 'EXPORT',
 ]);
+const COMPOSIO_WRITE_VERBS = new Set([
+  'CREATE', 'UPDATE', 'DELETE', 'REMOVE', 'SEND', 'SENDS', 'POST', 'PUT', 'PATCH', 'ADD', 'INSERT',
+  'APPEND', 'UPLOAD', 'MOVE', 'COPY', 'RENAME', 'SET', 'MERGE', 'PUBLISH', 'REPLY', 'FORWARD', 'TRASH',
+  'ARCHIVE', 'UNARCHIVE', 'INVITE', 'SHARE', 'STAR', 'UNSTAR', 'MARK', 'LABEL', 'MODIFY', 'EDIT',
+  'REPLACE', 'CLEAR', 'EXECUTE', 'RUN', 'TRIGGER', 'CANCEL', 'CLOSE', 'LOCK', 'UNLOCK', 'ASSIGN',
+  'UNASSIGN', 'ENABLE', 'DISABLE', 'APPROVE', 'DISMISS', 'SUBMIT', 'SCHEDULE', 'UPSERT', 'WRITE',
+  'IMPORT', 'DUPLICATE', 'TRANSFER', 'PAY', 'CHARGE', 'REFUND', 'FOLLOW', 'UNFOLLOW', 'BLOCK', 'UNBLOCK',
+  'MUTE', 'UNMUTE', 'PIN', 'UNPIN', 'REACT', 'COMMENT', 'TWEET', 'RETWEET', 'LIKE', 'UNLIKE', 'ACCEPT',
+  'DECLINE', 'JOIN', 'LEAVE', 'KICK', 'BAN', 'RESTORE', 'RESET', 'REVOKE', 'GRANT', 'SYNC',
+]);
+
+export function isComposioRead(slug: string): boolean {
+  const words = slug.toUpperCase().split('_').slice(1);
+  return words.some(w => COMPOSIO_READ_VERBS.has(w)) && !words.some(w => COMPOSIO_WRITE_VERBS.has(w));
+}
 const COMPOSIO_IRREVERSIBLE_TOKENS = new Set([
   'SEND', 'SENDS', 'POST', 'PUBLISH', 'REPLY', 'FORWARD', 'DELETE', 'REMOVE', 'TRASH',
   'INVITE', 'SHARE', 'BROADCAST', 'TWEET', 'RETWEET', 'COMMENT', 'MERGE',
@@ -347,7 +364,7 @@ function classifyComposioCalls(code: string): ActionRisk[] {
   while ((m = literal.exec(code)) !== null) {
     literalCalls++;
     const parts = m[1].toUpperCase().split('_');
-    if (parts.length >= 2 && COMPOSIO_READ_VERBS.has(parts[1])) { risks.push('read'); continue; }
+    if (isComposioRead(m[1])) { risks.push('read'); continue; }
     const prefix = parts[0];
     const irreversible =
       parts.some(p => COMPOSIO_IRREVERSIBLE_TOKENS.has(p)) ||
