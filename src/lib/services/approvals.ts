@@ -101,8 +101,13 @@ export async function processApprovalDecision(
     // If approved, continue the paused run. This must go through Inngest: an un-awaited
     // promise is frozen as soon as this serverless request returns, so the resume never ran.
     // Reusing the paused runId lets completed agents return their cached output.
+    //
+    // Never start a new run here. The run is only marked 'paused' after its agent step stops
+    // retrying, so an approval can arrive while it still shows 'running'. Starting a fresh run
+    // then executed everything twice. In that case the run itself picks up the decision: the
+    // retrying step sees the approval, or the pause step resumes it (same event id, so Inngest
+    // delivers only one resume).
     if (decision === 'approved' && actualMissionId) {
-      console.log(`[approvals] Action ${actionId} approved for mission ${actualMissionId}. Resuming execution...`);
       const { data: pausedRun } = await supabase
         .from('mission_runs')
         .select('id')
@@ -112,11 +117,17 @@ export async function processApprovalDecision(
         .order('started_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-      const { inngest } = await import('@/lib/inngest/client');
-      await inngest.send({
-        name: 'mission.execute',
-        data: { missionId: actualMissionId, tenantId, mode: 'resume', ...(pausedRun ? { runId: pausedRun.id } : {}) },
-      });
+      if (pausedRun) {
+        console.log(`[approvals] Action ${actionId} approved — resuming run ${pausedRun.id}.`);
+        const { inngest } = await import('@/lib/inngest/client');
+        await inngest.send({
+          id: `resume-${actionId}`,
+          name: 'mission.execute',
+          data: { missionId: actualMissionId, tenantId, mode: 'resume', runId: pausedRun.id },
+        });
+      } else {
+        console.log(`[approvals] Action ${actionId} approved — its run is still active and will pick up the decision.`);
+      }
     }
 
     // A rejection used to leave the run 'paused' forever — invisible to the customer, and with

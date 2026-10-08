@@ -730,7 +730,28 @@ export async function executeAgent(
         if (extraEnvs) Object.assign(resumeEnvs, extraEnvs);
         Object.assign(resumeEnvs, sandboxLLMEnv);
 
+        // Claim the approval atomically: an approval that lands while the run is still retrying its
+        // step can reach two invocations, and only one of them may perform the real action.
+        const { data: claimed } = await supabase
+          .from('proposed_actions')
+          .update({ payload: { ...existingAction.payload, executedAt: new Date().toISOString() } })
+          .eq('id', existingAction.id)
+          .eq('status', 'approved')
+          .is('payload->>executedAt', null)
+          .select('id');
+        if (!claimed?.length) {
+          const { data: current } = await supabase.from('proposed_actions').select('payload').eq('id', existingAction.id).single();
+          if (current?.payload?.realOutput !== undefined) {
+            console.log(`[Agent ${agent.id}] Approved action already executed — reusing its result.`);
+            return { output: current.payload.realOutput, finalCode: approvedCode };
+          }
+          throw new Error(`The approved action for "${agent.role}" is already being executed by another run — not running it twice.`);
+        }
+
         const realOutput = await runRealSideEffects(approvedCode, resumeEnvs, existingAction.payload.output, agent.id, tenantId);
+        await supabase.from('proposed_actions')
+          .update({ payload: { ...existingAction.payload, executedAt: new Date().toISOString(), realOutput } })
+          .eq('id', existingAction.id);
         return { output: realOutput, finalCode: approvedCode };
       }
 

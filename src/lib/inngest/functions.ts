@@ -488,6 +488,33 @@ export const executeMissionBackground = inngest.createFunction(
       if (error.message === 'PausedForApproval') {
         await step.run('pause-for-approval', async () => {
           await updateRun({ status: 'paused', agents_done: agentsDone, agents_failed: agentsFailed });
+
+          // The reviewer may have decided while the agent step was still retrying, when the run
+          // didn't look paused yet and the approval handler left it alone. Act on that decision now.
+          const supabase = createServiceClient();
+          const { data: latest } = await supabase
+            .from('proposed_actions')
+            .select('id, status, payload')
+            .eq('tenant_id', tenantId)
+            .eq('mission_id', missionId)
+            .order('submitted_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (latest?.status === 'approved' && !latest.payload?.executedAt) {
+            await inngest.send({
+              id: `resume-${latest.id}`,
+              name: 'mission.execute',
+              data: { missionId, tenantId, mode: 'resume', runId },
+            });
+            return;
+          }
+          if (latest?.status === 'rejected') {
+            const now = new Date().toISOString();
+            await updateRun({ status: 'failed', completed_at: now, summary: 'Stopped: the reviewer rejected a proposed action.' });
+            await supabase.from('missions').update({ status: 'failed', updated_at: now }).eq('id', missionId).eq('tenant_id', tenantId);
+            return;
+          }
+
           try {
             const { notifyMissionStatus } = await import('@/lib/services/notifications');
             await notifyMissionStatus(tenantId, mission.title, missionId, 'needs_approval');
