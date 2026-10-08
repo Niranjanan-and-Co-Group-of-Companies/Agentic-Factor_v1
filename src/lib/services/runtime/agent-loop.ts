@@ -522,6 +522,21 @@ export function reportedFailure(output: unknown): string | null {
 
 // Short label of which external service an action targets — used by the
 // /approvals page to pick a display icon/description for the review queue.
+/**
+ * What the approver reads on /approvals: the text the agent is about to write when its output reports
+ * it (content / content_preview), otherwise the output itself. A 3000-character cut of the raw JSON hid
+ * most of a long document — a FAQ's payment answers never reached the reviewer.
+ */
+export function approvalPreview(output: unknown): string {
+  let parsed: any = output;
+  if (typeof output === 'string') {
+    try { parsed = JSON.parse(output); } catch { return output.slice(0, 12_000); }
+  }
+  const text = parsed && typeof parsed === 'object' ? (parsed.content ?? parsed.content_preview) : undefined;
+  if (typeof text === 'string' && text.trim()) return text.slice(0, 12_000);
+  return (typeof output === 'string' ? output : JSON.stringify(output, null, 2)).slice(0, 6_000);
+}
+
 const COMPOSIO_TARGETS: Record<string, string> = {
   GMAIL: 'gmail', GOOGLESHEETS: 'sheets', GOOGLEDOCS: 'docs', GOOGLECALENDAR: 'calendar', GOOGLEDRIVE: 'drive',
   SLACK: 'slack', GITHUB: 'github', NOTION: 'notion', LINKEDIN: 'linkedin', TWITTER: 'twitter',
@@ -1091,7 +1106,7 @@ INSTRUCTIONS:
 12. **READING INPUT**: Previous agent data is in \`_input_data\` (parsed JSON dict) and \`_input\` (raw string).
 13. If you need to ask the user something, use \`ask_user()\`. The script will pause and resume when user responds.
 13b. **TEXT AT RUNTIME**: To summarise, write, translate, classify or analyse data the script fetched (emails, reports, briefs, posts, READMEs), call \`ask_ai(prompt, system="", max_tokens=1500, json_mode=False)\` from \`agenticfactor._core\` — it returns the AI's text. NEVER hard-code long documents into the script; keep scripts short and generate long text with ask_ai at runtime (max 4000 output tokens per call — split long documents into sections). Each call takes 10-20s and the whole script must finish in ${SCRIPT_TIMEOUT_MS / 1000}s: for several independent pieces (one per template, section or item) use \`ask_ai_batch(prompts, system="", max_tokens=1500)\` from \`agenticfactor._core\`, which runs them in parallel and returns the texts in order — never call ask_ai in a loop.
-13c. **OUTPUT WHAT YOU WRITE**: if the agent writes a document, email, message or post, include the text it wrote in the printed JSON next to the IDs/URLs (\`"content": text\`, or \`"content_preview": text[:3000]\` for long documents). The reviewer and the approval screen judge that text — output with only metadata (id, url, title, status) fails review.
+13c. **OUTPUT WHAT YOU WRITE**: if the agent writes a document, email, message or post, include the text it wrote in the printed JSON next to the IDs/URLs (\`"content": text\`, or \`"content_preview": text[:10000]\` for very long documents). The reviewer and the approval screen judge that text — output with only metadata (id, url, title, status) fails review.
 14. **MULTI-LINE STRINGS**: For multi-line text, use triple double-quotes (""" only, NEVER triple single-quotes '''). NEVER put raw HTML inside triple-quoted strings — it breaks Python syntax. Instead, build HTML using a list of strings joined together: lines = []; lines.append('<tr>'); html = '\n'.join(lines).
 15. **JSON IN STRINGS**: When building JSON manually, use json.dumps() instead of hand-crafting JSON strings with f-strings.
 16. **HTML CONTENT**: NEVER embed raw HTML directly in triple-quoted strings. ALWAYS build HTML by concatenating regular strings or using a list: parts = []; parts.append(f'<tr><td>{name}</td></tr>'); html = ''.join(parts). This prevents quote conflicts.
@@ -1807,7 +1822,7 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
             payload_redacted: {
               actions: [...new Set([...pythonCode.matchAll(/composio_execute\s*\(\s*["']([A-Z0-9_]+)["']/g)].map(m => m[1]))]
                 .filter(slug => classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps),
-              preview: typeof finalOutputJSON === 'string' ? finalOutputJSON.slice(0, 3000) : JSON.stringify(finalOutputJSON).slice(0, 3000),
+              preview: approvalPreview(finalOutputJSON),
             },
             status: 'pending'
           });

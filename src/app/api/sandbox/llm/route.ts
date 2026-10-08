@@ -94,7 +94,8 @@ export async function POST(request: NextRequest) {
     const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
     const result = await callLLM(
       [
-        { role: 'system' as const, content: `Today's date is ${today}.${system ? `\n\n${system}` : ''}` },
+        // Customer-facing text must not carry made-up facts (a FAQ invented "support@novabrand.in").
+        { role: 'system' as const, content: `Today's date is ${today}. Never invent contact details, URLs, prices or statistics that are not given to you — write a clear placeholder in [brackets] instead.${system ? `\n\n${system}` : ''}` },
         { role: 'user' as const, content: prompt },
       ],
       { tier: 2, jsonMode, maxTokens, temperature: 0.4 },

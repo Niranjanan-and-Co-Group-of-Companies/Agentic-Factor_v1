@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { classifyAgentActions, inferActionTarget, type ActionRisk } from '../agent-loop';
+import { approvalPreview, classifyAgentActions, inferActionTarget, type ActionRisk } from '../agent-loop';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -306,5 +306,22 @@ describe('approval gate contract', () => {
       const result = classifyAgentActions(code);
       expect(result.hasWriteOps, `Wrongly gated: ${code.trim()}`).toBe(false);
     }
+  });
+});
+
+describe('approvalPreview', () => {
+  it('shows the written text, not the JSON wrapper', () => {
+    const out = JSON.stringify({ doc_id: 'dry-run-preview', content_preview: 'Q: Can I pay COD?\nA: Only under ₹2,000.' });
+    expect(approvalPreview(out)).toBe('Q: Can I pay COD?\nA: Only under ₹2,000.');
+    expect(approvalPreview({ content: 'Hello team' })).toBe('Hello team');
+  });
+
+  it('keeps long documents far beyond the old 3000-character cut', () => {
+    expect(approvalPreview(JSON.stringify({ content: 'x'.repeat(9000) }))).toHaveLength(9000);
+  });
+
+  it('falls back to the output when no text is reported', () => {
+    expect(approvalPreview('{"rows": 5}')).toBe('{"rows": 5}');
+    expect(approvalPreview('not json')).toBe('not json');
   });
 });
