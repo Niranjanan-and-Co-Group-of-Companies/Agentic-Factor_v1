@@ -37,12 +37,14 @@ export async function PATCH(
 
     // State transition validation
     const allowedTransitions: Record<string, string[]> = {
-      pause: ['active', 'building'],
+      // A scheduled mission usually sits 'completed'/'failed' between runs; pausing it stops the schedule.
+      pause: ['active', 'building', 'completed', 'failed'],
       resume: ['paused', 'deadlocked'],
       cancel: ['active', 'building', 'paused', 'draft', 'pending_permissions', 'pending_validation', 'pending_approval', 'deadlocked'],
-      // Missions are created 'active', so a brand-new mission must be schedulable too.
+      // Missions are created 'active', and a scheduled mission is left 'completed'/'failed' by its
+      // last run, so schedules must be settable and removable from any of these states.
       schedule: ['completed', 'paused', 'draft', 'failed', 'active'],
-      unschedule: ['paused'],
+      unschedule: ['completed', 'paused', 'draft', 'failed', 'active'],
     };
 
     if (!allowedTransitions[action]) {
@@ -136,13 +138,24 @@ export async function PATCH(
       });
     }
 
-    await transitionMissionStatus(missionId, tenantId, newStatus as any);
+    // The schedule lives in its mission.wait event; adding or removing it must not change the
+    // mission's own status (e.g. pausing a mission mid-run, or showing "Paused" while scheduled).
+    const changesStatus = action !== 'schedule' && action !== 'unschedule';
+    if (changesStatus) await transitionMissionStatus(missionId, tenantId, newStatus as any);
 
-    return NextResponse.json({ 
-      success: true, 
-      action, 
-      previousStatus: currentStatus, 
-      newStatus,
+    // The scheduler is gated by schedule_paused, not mission status, so pause/resume must flip it.
+    if (action === 'pause' || action === 'resume') {
+      await supabase.from('missions')
+        .update({ schedule_paused: action === 'pause' })
+        .eq('id', missionId)
+        .eq('tenant_id', tenantId);
+    }
+
+    return NextResponse.json({
+      success: true,
+      action,
+      previousStatus: currentStatus,
+      newStatus: changesStatus ? newStatus : currentStatus,
       message: `Mission ${action}d successfully.` 
     });
 
