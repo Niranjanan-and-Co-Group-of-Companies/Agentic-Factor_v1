@@ -151,7 +151,8 @@ function friendlyAgentError(error: string, agentRole: string): string {
   if (
     error.toLowerCase().includes('econnrefused') ||
     error.toLowerCase().includes('econnreset') ||
-    (error.toLowerCase().includes('fetch') && error.toLowerCase().includes('failed'))
+    error.toLowerCase().includes('fetch failed') ||
+    error.toLowerCase().includes('failed to fetch')
   ) {
     return (
       `Network error in agent "${agentRole}": Cannot reach the external API. ` +

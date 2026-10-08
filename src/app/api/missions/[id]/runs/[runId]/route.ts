@@ -51,15 +51,15 @@ export async function GET(
   // Fetch agent-level events (entity_type = agent)
   const { data: agents } = await supabase
     .from('agents')
-    .select('id, name, role, agent_index')
+    .select('id, role, agent_index')
     .eq('mission_id', missionId)
     .eq('tenant_id', tenantId)
     .order('agent_index', { ascending: true });
 
-  // Build per-agent output summary from events
+  // Build per-agent output summary from events (agents have no separate name column; role is the name)
   const agentOutputs: Record<string, { name: string; role: string; events: unknown[]; output?: string }> = {};
   for (const agent of agents ?? []) {
-    agentOutputs[agent.id] = { name: agent.name, role: agent.role, events: [] };
+    agentOutputs[agent.id] = { name: agent.role, role: agent.role, events: [] };
   }
 
   const runEvents = (events ?? []).map(e => ({
@@ -69,11 +69,18 @@ export async function GET(
     timestamp: e.created_at,
   }));
 
-  // Extract agent outputs from events
-  for (const e of events ?? []) {
+  // agent.completed events are keyed by agent (entity_id) and tagged with run_id, not the mission
+  const { data: agentEvents } = await supabase
+    .from('events')
+    .select('entity_id, payload')
+    .eq('tenant_id', tenantId)
+    .eq('run_id', runId)
+    .eq('event_type', 'agent.completed');
+  for (const e of agentEvents ?? []) {
     const payload = e.payload as Record<string, unknown>;
-    if (e.event_type === 'agent.completed' && payload?.agentId && agentOutputs[payload.agentId as string]) {
-      agentOutputs[payload.agentId as string].output = payload.output as string ?? payload.summary as string;
+    if (agentOutputs[e.entity_id]) {
+      const out = payload?.output ?? payload?.summary;
+      agentOutputs[e.entity_id].output = typeof out === 'string' ? out : JSON.stringify(out);
     }
   }
 
