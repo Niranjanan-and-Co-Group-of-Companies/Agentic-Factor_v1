@@ -4,6 +4,7 @@ import { createServiceClient } from '../supabase/server';
 import { callLLM, generateEmbedding } from './llm-router';
 import { robustJSONParse, safeJSONParse } from '../utils/json-parser';
 import { readDecryptedToken } from './vault';
+import { MEMORY_EXTRACTION_PROMPT, cleanTenantFacts, formatTenantMemory } from './tenant-memory';
 
 // ============================================================
 // Permission Normalizer — maps free-form service names to exact provider keys
@@ -476,16 +477,17 @@ async function extractAndSaveTenantMemory(intent: string, tenantId: string): Pro
   try {
     const supabase = createServiceClient();
     const llmResponse = await callLLM([
-      { role: 'system', content: 'Extract reusable company facts, preferences, credentials, or policies from the user prompt. Ignore specific task instructions. Only extract global facts. Return JSON: { "facts": ["fact 1", "fact 2"] }' },
+      { role: 'system', content: MEMORY_EXTRACTION_PROMPT },
       { role: 'user', content: intent }
     ], { jsonMode: true, temperature: 0.1, tier: 2, budgetContext: { tenantId, missionId: 'blueprint_generation' } });
-    
+
     const data: any = safeJSONParse(llmResponse.content, { facts: [] });
-    if (data.facts && data.facts.length > 0) {
-      for (const fact of data.facts) {
-        await supabase.from('tenant_memory').insert({ tenant_id: tenantId, fact });
-      }
-      console.log(`[intake] Extracted ${data.facts.length} global facts for tenant ${tenantId}`);
+    if (!Array.isArray(data.facts) || data.facts.length === 0) return;
+    const { data: existing } = await supabase.from('tenant_memory').select('fact').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(500);
+    const fresh = cleanTenantFacts(data.facts.slice(0, 5), (existing ?? []).map(r => r.fact));
+    if (fresh.length > 0) {
+      await supabase.from('tenant_memory').insert(fresh.map(fact => ({ tenant_id: tenantId, fact })));
+      console.log(`[intake] Saved ${fresh.length} company facts for tenant ${tenantId}`);
     }
   } catch (e) {
     console.warn('[intake] Failed to extract tenant memory', e);
@@ -495,12 +497,8 @@ async function extractAndSaveTenantMemory(intent: string, tenantId: string): Pro
 async function retrieveTenantMemory(tenantId: string): Promise<string> {
   try {
     const supabase = createServiceClient();
-    const { data } = await supabase.from('tenant_memory').select('fact').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(20);
-    if (data && data.length > 0) {
-      const facts = data.map(d => `- ${d.fact}`).join('\n');
-      return `\n\nGLOBAL TENANT MEMORY (Company Policies - ALWAYS OBEY):\n${facts}`;
-    }
-    return '';
+    const { data } = await supabase.from('tenant_memory').select('fact').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(100);
+    return formatTenantMemory(cleanTenantFacts((data ?? []).map(d => d.fact)).slice(0, 20));
   } catch {
     return '';
   }

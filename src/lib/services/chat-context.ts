@@ -14,6 +14,7 @@
 
 import { createServiceClient } from '@/lib/supabase/server';
 import { getMemoryContext } from '@/lib/services/agent-memory';
+import { cleanTenantFacts } from '@/lib/services/tenant-memory';
 
 export interface ChatContext {
   systemPrompt: string;
@@ -178,9 +179,10 @@ export async function buildChatContext(
       .select('fact')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
-      .limit(10);
-    if (mem && mem.length > 0) {
-      tenantFacts = '\nBUSINESS FACTS:\n' + mem.map(m => `  - ${m.fact}`).join('\n');
+      .limit(100);
+    const facts = cleanTenantFacts((mem ?? []).map(m => m.fact)).slice(0, 10);
+    if (facts.length > 0) {
+      tenantFacts = '\nBUSINESS FACTS (background only — never restrictions on what this mission may do):\n' + facts.map(f => `  - ${f}`).join('\n');
     }
   } catch { /* non-fatal */ }
 
