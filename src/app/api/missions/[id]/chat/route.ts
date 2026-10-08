@@ -255,7 +255,10 @@ export async function POST(
         if (!anthropicRes.ok) {
           const err = await anthropicRes.text();
           console.error('[chat] Anthropic error:', err);
-          send({ type: 'error', message: 'AI service temporarily unavailable. Please try again.' });
+          // detail is not shown in the chat UI; it carries Anthropic's reason (e.g. an invalid tool schema)
+          let reason = err.slice(0, 300);
+          try { reason = (JSON.parse(err) as { error?: { message?: string } }).error?.message?.slice(0, 300) ?? reason; } catch { /* raw */ }
+          send({ type: 'error', message: 'AI service temporarily unavailable. Please try again.', detail: `${anthropicRes.status}: ${reason}` });
           controller.close();
           return;
         }
