@@ -110,14 +110,15 @@ export const executeMissionBackground = inngest.createFunction(
       //    completed run's summary so agents know what they did last time and
       //    can avoid repeating work (e.g. skip already-processed leads).
       if (runNumber > 1) {
-        const { data: lastRun } = await supabase
+        const { data: recentRuns } = await supabase
           .from('mission_runs')
           .select('run_number, started_at, agents_done, agents_total, summary')
           .eq('mission_id', missionId)
           .eq('status', 'completed')
           .order('started_at', { ascending: false })
-          .limit(1)
-          .single();
+          .limit(5);
+        // A training rehearsal did nothing real, so it is not work to build on or avoid repeating.
+        const lastRun = (recentRuns ?? []).find(r => !String(r.summary ?? '').startsWith('TRAINING REHEARSAL'));
 
         if (lastRun) {
           firstAgentInput.previous_run = {
@@ -125,7 +126,7 @@ export const executeMissionBackground = inngest.createFunction(
             date: new Date(lastRun.started_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
             agents_completed: `${lastRun.agents_done}/${lastRun.agents_total}`,
             ...(lastRun.summary ? { summary: lastRun.summary } : {}),
-            note: 'Use this to avoid repeating work already done in prior runs.',
+            note: 'Context only: what the last run did, so this run can skip items it already handled (e.g. leads already contacted). Do this run\'s task fresh with current data — never copy the previous results as this run\'s output.',
           };
         }
       }
