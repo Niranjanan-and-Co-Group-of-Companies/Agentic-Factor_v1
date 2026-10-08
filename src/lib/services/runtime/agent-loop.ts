@@ -711,7 +711,19 @@ export async function executeAgent(
     }
   }
 
+  // The whole attempt loop runs inside one Inngest step (one ~300s serverless invocation). When it
+  // overran, the step was killed mid-attempt, retried from attempt 1, killed again, and the run went
+  // silent until the watchdog. Stop starting attempts once the budget is mostly used, and fail clearly.
+  const loopStartedAt = Date.now();
+  const ATTEMPT_START_BUDGET_MS = 150_000;
+
   while (attempts < maxAttempts) {
+    if (attempts > 0 && Date.now() - loopStartedAt > ATTEMPT_START_BUDGET_MS) {
+      throw new Error(
+        `Agent "${agent.role}" ran out of time after ${attempts} attempt(s). ` +
+        `The task may be too large for one step (e.g. a very long document written into the script). ${lastError}`
+      );
+    }
     attempts++;
     
     // ── Billing Enforcement: Deduct E2B execution credit per attempt ──
@@ -1542,7 +1554,8 @@ PASS if:
 - The output reasonably accomplishes the stated task, even if imperfect, sparse, or in an unexpected (but valid) format
 - An empty result is valid if the task is a search/lookup that legitimately found nothing
 - Extra fields, metadata, or differently-named-but-equivalent keys are always fine
-- Status values like "no_email", "failed:...", "skipped" are valid outcomes, not failures${hasWriteOps ? `
+- Status values like "no_email", "failed:...", "skipped" are valid outcomes, not failures
+- Saying a specific figure is not publicly available is CORRECT when the research didn't find it — never fail an output for honesty about missing data; invented numbers are the real failure${hasWriteOps ? `
 - (Preview run) the prepared content for the write action is right, even though the write itself shows as dry_run / placeholder / not executed` : ''}
 
 Be a real critic, not a rubber stamp — but don't be pedantic about minor formatting choices.

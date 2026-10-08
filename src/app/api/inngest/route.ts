@@ -13,6 +13,10 @@ import { executeChatAgent } from '@/lib/inngest/chat-agent-function';
 // Inngest expects this at /api/inngest (configured in the dashboard).
 // ═══════════════════════════════════════════════════════════
 
+// Each Inngest step is one invocation of this route; an agent step (codegen + sandbox + critic,
+// with retries) needs the full budget. executeAgent stops starting new attempts well before it.
+export const maxDuration = 300;
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
