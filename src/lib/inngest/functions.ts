@@ -283,8 +283,10 @@ export const executeMissionBackground = inngest.createFunction(
             run_id: runId,
             payload: { agentId: agentToRun.id, agentRole: agentToRun.role, agentIndex: agents.indexOf(agentToRun) },
           });
-          // Also update mission_runs.current_agent for the top-bar indicator
-          await supabase.from('mission_runs').update({ current_agent: agentToRun.role }).eq('id', runId);
+          // Also update mission_runs.current_agent for the top-bar indicator, and leave 'queued'
+          // as soon as work starts (never reopen a run the watchdog has already closed).
+          await supabase.from('mission_runs').update({ current_agent: agentToRun.role, status: 'running' })
+            .eq('id', runId).in('status', ['queued', 'paused', 'running']);
         });
 
         // ── Each agent runs as its own Inngest step (own 5-min timeout) ──
