@@ -1773,7 +1773,7 @@ FAIL if:
 
 PASS if:
 - The output reasonably accomplishes the stated task, even if imperfect, sparse, or in an unexpected (but valid) format
-- An empty result is valid if the task is a search/lookup that legitimately found nothing
+- An empty result is valid if the task is a search/lookup/filter that legitimately found nothing — an empty list in the required structure is the correct output; never ask for example rows or a demonstration of the schema. If you conclude nothing was legitimately found, the verdict must be PASS
 - Extra fields, metadata, or differently-named-but-equivalent keys are always fine
 - Status values like "no_email", "failed:...", "skipped" are valid outcomes, not failures
 - Saying a specific figure is not publicly available is CORRECT when the research didn't find it — never fail an output for honesty about missing data; invented numbers are the real failure
