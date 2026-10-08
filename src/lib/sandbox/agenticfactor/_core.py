@@ -381,8 +381,8 @@ def ask_ai(prompt: str, system: str = "", max_tokens: int = 1500, json_mode: boo
     data = resp.json()
     if data.get("truncated"):
         raise RuntimeError(
-            f"ask_ai output was cut off at max_tokens={max_tokens} (it ends mid-sentence). Raise max_tokens "
-            "(up to 4000) or write the document in sections with ask_ai_batch, one prompt per section."
+            f"ask_ai output was cut off at max_tokens={max_tokens} (it ends mid-sentence). Write the document in "
+            "sections with ask_ai_batch, one prompt per section of ~1500 tokens; one very long call also risks the time limit."
         )
     return data.get("text", "")
 

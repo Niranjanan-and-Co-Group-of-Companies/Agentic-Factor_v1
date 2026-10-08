@@ -691,7 +691,7 @@ export async function executeAgent(
     }
   } catch { /* non-fatal — falls back to 'Mission', training mode off, free plan */ }
 
-  // Code that passed the syntax and Composio checks and actually ran — saved as the draft on failure.
+  // Latest script that passed the syntax and Composio checks — saved as the draft on failure.
   let lastCheckedCode = '';
   const saveDraft = async () => {
     if (!lastCheckedCode || lastCheckedCode === startingScript) return;
@@ -846,14 +846,10 @@ export async function executeAgent(
   let attemptTimeoutMs = SCRIPT_TIMEOUT_MS;
 
   while (attempts < maxAttempts) {
-    const timeLeft = PHASE1_DEADLINE_MS - (Date.now() - loopStartedAt) - SANDBOX_SETUP_MS;
-    attemptTimeoutMs = Math.min(SCRIPT_TIMEOUT_MS, Math.max(timeLeft, MIN_ATTEMPT_MS));
-    if (attempts > 0 && timeLeft < MIN_ATTEMPT_MS) {
+    // Hard stop well inside the step even if fixes keep failing their static checks.
+    if (attempts > 0 && Date.now() - loopStartedAt > PHASE1_DEADLINE_MS) {
       await saveDraft();
-      throw new Error(
-        `Agent "${agent.role}" ran out of time after ${attempts} attempt(s). ` +
-        `The task may be too large for one step (e.g. a very long document written into the script). ${lastError}`
-      );
+      throw new Error(`Agent "${agent.role}" ran out of time after ${attempts} attempt(s). ${lastError}`);
     }
     attempts++;
     
@@ -875,7 +871,8 @@ export async function executeAgent(
       pythonCode = existingAction.payload.pythonCode;
     } else if (
       startingScript.trim() !== '' &&
-      (attempts === 1 || (attempts === 2 && isTransientError(lastError)))
+      // A script that ran past its own time limit is deterministic (too much work), not transient.
+      (attempts === 1 || (attempts === 2 && isTransientError(lastError) && !/^Timeout \(\d+s\) in agent/.test(lastError)))
     ) {
       // Attempt 1: always use the locked script from the blueprint.
       // Attempt 2: if the failure was transient (timeout, network, rate limit) retry the same
@@ -914,7 +911,7 @@ THE AGENT'S JOB (what the fixed script must accomplish):
 ${(agent.systemPrompt || agent.role).slice(0, 4000)}
 
 RUNTIME RULES:
-- The whole script must finish within ${SCRIPT_TIMEOUT_MS / 1000}s. Generate text with \`ask_ai(prompt, system="", max_tokens=1500)\` from agenticfactor._core (10-20s per call, max 4000 tokens). For several independent pieces use \`ask_ai_batch([p1, p2, ...], system="", max_tokens=1500)\`, which runs them in parallel — never call ask_ai in a loop. If ask_ai reports its output was cut off, split the document into sections.
+- The whole script must finish within ${SCRIPT_TIMEOUT_MS / 1000}s. Generate text with \`ask_ai(prompt, system="", max_tokens=1500)\` from agenticfactor._core — about 60 tokens/second, so keep each call to ~1500 tokens. For a long document or several pieces use \`ask_ai_batch([p1, p2, ...], system="", max_tokens=1500)\` with one prompt per section; it runs them in parallel. Never call ask_ai in a loop and never ask for one huge output. If the script timed out or ask_ai reports its output was cut off, split the work into sections with ask_ai_batch.
 - If the agent writes a document, email, message or post, the printed JSON MUST include the text it wrote (\`"content": text\`, or \`"content_preview": text[:10000]\`) next to the IDs/URLs. Output with only metadata fails review.
 - If the error is a failed review, change what the script produces so the reviewer's reason no longer applies.
 
@@ -1115,7 +1112,7 @@ INSTRUCTIONS:
 11. **DO NOT CATCH FATAL ERRORS**: Let the script crash naturally on errors.
 12. **READING INPUT**: Previous agent data is in \`_input_data\` (parsed JSON dict) and \`_input\` (raw string).
 13. If you need to ask the user something, use \`ask_user()\`. The script will pause and resume when user responds.
-13b. **TEXT AT RUNTIME**: To summarise, write, translate, classify or analyse data the script fetched (emails, reports, briefs, posts, READMEs), call \`ask_ai(prompt, system="", max_tokens=1500, json_mode=False)\` from \`agenticfactor._core\` — it returns the AI's text. NEVER hard-code long documents into the script; keep scripts short and generate long text with ask_ai at runtime (max 4000 output tokens per call — split long documents into sections). Each call takes 10-20s and the whole script must finish in ${SCRIPT_TIMEOUT_MS / 1000}s: for several independent pieces (one per template, section or item) use \`ask_ai_batch(prompts, system="", max_tokens=1500)\` from \`agenticfactor._core\`, which runs them in parallel and returns the texts in order — never call ask_ai in a loop.
+13b. **TEXT AT RUNTIME**: To summarise, write, translate, classify or analyse data the script fetched (emails, reports, briefs, posts, READMEs), call \`ask_ai(prompt, system="", max_tokens=1500, json_mode=False)\` from \`agenticfactor._core\` — it returns the AI's text. NEVER hard-code long documents into the script; keep scripts short and generate long text with ask_ai at runtime (about 60 tokens/second — keep each call to ~1500 tokens and split long documents into sections). Each call takes 10-25s and the whole script must finish in ${SCRIPT_TIMEOUT_MS / 1000}s: for several independent pieces (one per template, section or item) use \`ask_ai_batch(prompts, system="", max_tokens=1500)\` from \`agenticfactor._core\`, which runs them in parallel and returns the texts in order — never call ask_ai in a loop.
 13c. **OUTPUT WHAT YOU WRITE**: if the agent writes a document, email, message or post, include the text it wrote in the printed JSON next to the IDs/URLs (\`"content": text\`, or \`"content_preview": text[:10000]\` for very long documents). The reviewer and the approval screen judge that text — output with only metadata (id, url, title, status) fails review.
 14. **MULTI-LINE STRINGS**: For multi-line text, use triple double-quotes (""" only, NEVER triple single-quotes '''). NEVER put raw HTML inside triple-quoted strings — it breaks Python syntax. Instead, build HTML using a list of strings joined together: lines = []; lines.append('<tr>'); html = '\n'.join(lines).
 15. **JSON IN STRINGS**: When building JSON manually, use json.dumps() instead of hand-crafting JSON strings with f-strings.
@@ -1299,6 +1296,18 @@ CRITICAL FIX RULES (follow these EXACTLY):
     }
 
     lastCheckedCode = pythonCode;
+
+    // Time check after the fix is generated and checked, so that when there is no time left to run it,
+    // the fixer's newest script is saved as the draft the next execution starts from — instead of the
+    // next run repeating the script that already failed.
+    const timeLeft = PHASE1_DEADLINE_MS - (Date.now() - loopStartedAt) - SANDBOX_SETUP_MS;
+    attemptTimeoutMs = Math.min(SCRIPT_TIMEOUT_MS, Math.max(timeLeft, MIN_ATTEMPT_MS));
+    if (attempts > 1 && timeLeft < MIN_ATTEMPT_MS) {
+      await saveDraft();
+      throw new Error(
+        `Agent "${agent.role}" ran out of time after ${attempts - 1} attempt(s); its latest fix is saved and will run first next time. ${lastError}`
+      );
+    }
 
     // ── SMART EXECUTION MODE: detect write ops before any sandbox is allocated ──
     // Write agents:    Phase 1 (dry run, AF_DRY_RUN=1) validates safety → Phase 2 executes real side effects.
@@ -1706,7 +1715,8 @@ PASS if:
 - An empty result is valid if the task is a search/lookup that legitimately found nothing
 - Extra fields, metadata, or differently-named-but-equivalent keys are always fine
 - Status values like "no_email", "failed:...", "skipped" are valid outcomes, not failures
-- Saying a specific figure is not publicly available is CORRECT when the research didn't find it — never fail an output for honesty about missing data; invented numbers are the real failure${hasWriteOps ? `
+- Saying a specific figure is not publicly available is CORRECT when the research didn't find it — never fail an output for honesty about missing data; invented numbers are the real failure
+- The same holds for details public sources don't reveal (e.g. job postings that don't name the team): marking them "unknown" / "not specified" and working with what is available is correct. Fail only if the agent ignored data it had or made details up${hasWriteOps ? `
 - (Preview run) the prepared content for the write action is right, even though the write itself shows as dry_run / placeholder / not executed` : ''}
 
 Be a real critic, not a rubber stamp — but don't be pedantic about minor formatting choices.
