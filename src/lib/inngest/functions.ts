@@ -92,15 +92,14 @@ export const executeMissionBackground = inngest.createFunction(
         .eq('tenant_id', tenantId);
 
       // ── Build initial context for the first agent ──
+      // Must be JSON: every generated script starts with json.loads(INPUT_CONTEXT), so a plain-text
+      // prefix crashed the first agent on every webhook and repeat run.
+      const firstAgentInput: Record<string, unknown> = {};
 
       // 1. Webhook payload: the POST body becomes the first agent's input so
       //    agents can act on the incoming data (new row, form submission, etc.)
-      let initialContext = '';
       if (trigger === 'webhook' && webhookPayload) {
-        const formatted = typeof webhookPayload === 'string'
-          ? webhookPayload
-          : JSON.stringify(webhookPayload, null, 2);
-        initialContext = `WEBHOOK TRIGGER DATA:\n${formatted}`;
+        firstAgentInput.webhook_payload = webhookPayload;
       }
 
       // 2. Cross-run memory: for recurring runs (#2+), inject the previous
@@ -117,18 +116,17 @@ export const executeMissionBackground = inngest.createFunction(
           .single();
 
         if (lastRun) {
-          const prevDate = new Date(lastRun.started_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-          const prevLines = [
-            `PREVIOUS RUN CONTEXT (Run #${lastRun.run_number} — ${prevDate}):`,
-            `- Agents completed: ${lastRun.agents_done}/${lastRun.agents_total}`,
-            ...(lastRun.summary ? [`- Summary: ${typeof lastRun.summary === 'string' ? lastRun.summary : JSON.stringify(lastRun.summary)}`] : []),
-            `Use this context to avoid repeating work already done in prior runs.`,
-          ].join('\n');
-          initialContext = initialContext
-            ? `${prevLines}\n\n${initialContext}`
-            : prevLines;
+          firstAgentInput.previous_run = {
+            run_number: lastRun.run_number,
+            date: new Date(lastRun.started_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+            agents_completed: `${lastRun.agents_done}/${lastRun.agents_total}`,
+            ...(lastRun.summary ? { summary: lastRun.summary } : {}),
+            note: 'Use this to avoid repeating work already done in prior runs.',
+          };
         }
       }
+
+      const initialContext = Object.keys(firstAgentInput).length ? JSON.stringify(firstAgentInput) : '';
 
       return { mission: missionRow.mission_json, tokens, runId, trigger, runNumber, initialContext };
     });

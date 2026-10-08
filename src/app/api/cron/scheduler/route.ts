@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
 
       const { data: mission, error: missionErr } = await supabase
         .from('missions')
-        .select('status, schedule_paused')
+        .select('status, schedule_paused, title')
         .eq('id', missionId)
         .eq('tenant_id', tenantId)
         .maybeSingle();
@@ -167,7 +167,7 @@ export async function GET(request: NextRequest) {
           // Notify the tenant that their scheduled mission couldn't run
           try {
             const { notifyMissionStatus } = await import('@/lib/services/notifications');
-            await notifyMissionStatus(tenantId, missionId, missionId, 'paused');
+            await notifyMissionStatus(tenantId, mission.title ?? 'Your scheduled mission', missionId, 'paused');
           } catch { /* non-fatal */ }
           continue;
         }
