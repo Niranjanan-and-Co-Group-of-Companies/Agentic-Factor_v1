@@ -468,6 +468,27 @@ async function runCommandLoop(params: {
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       console.error(`[CommandChat] Anthropic ${res.status}: ${body.slice(0, 500)}`);
+      // Before any tool round has run, the conversation is plain text, so answer through the
+      // multi-provider router instead of failing — actions are text tags and still work.
+      if (round === 0) {
+        try {
+          const { callLLM } = await import('@/lib/services/llm-router');
+          const fallback = await callLLM(
+            [
+              { role: 'system', content: systemPrompt },
+              ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: String(m.content) })),
+            ],
+            { tier: 1, jsonMode: false, maxTokens: 4096, temperature: 0.5 },
+          );
+          send({ type: 'delta', text: fallback.content });
+          fullText += fallback.content;
+          totalInputTokens += fallback.inputTokens ?? 0;
+          totalOutputTokens += fallback.outputTokens ?? 0;
+          break;
+        } catch (fallbackErr) {
+          console.error('[CommandChat] Router fallback failed:', fallbackErr);
+        }
+      }
       send({ type: 'error', message: `AI temporarily unavailable (${res.status}). Please try again.` });
       break;
     }
