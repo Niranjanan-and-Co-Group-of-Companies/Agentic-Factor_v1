@@ -122,27 +122,53 @@ _DEFERRED_ERROR_KEYS = frozenset({'error', 'errors', 'error_message', 'errormess
 def _is_error_key(key):
     return isinstance(key, str) and key.lower() in _DEFERRED_ERROR_KEYS
 
+_DEFERRED_PLACEHOLDER = "dry-run-preview"
+_SCALAR_KEY_SUFFIXES = ('id', 'url', 'uri', 'link', 'name', 'title', 'path', 'token', 'status',
+                        'ts', 'timestamp', 'time', 'date', 'email', 'key', 'slug', 'href')
+
+def _deferred_for(key, default=None):
+    """Placeholder shaped like what the caller expects: the .get() default's type wins, then
+    id/url/name-like keys become text and anything else a nested response object."""
+    if _is_error_key(key):
+        return None
+    if isinstance(default, dict):
+        return _DeferredResult()
+    if isinstance(default, list):
+        return []
+    if isinstance(default, str):
+        return _DeferredValue()
+    if default is not None:
+        return default
+    if isinstance(key, slice):
+        return _DeferredValue()
+    if isinstance(key, str) and key.lower().endswith(_SCALAR_KEY_SUFFIXES):
+        return _DeferredValue()
+    return _DeferredResult()
+
 class _DeferredValue(str):
-    """Any field of a write deferred by the preview pass: reads as a placeholder id/url,
-    is truthy, and supports further lookups, so success checks in agent code pass."""
+    """A text field of a write deferred by the preview pass (an id, url, name...): reads as a
+    placeholder, is truthy, and tolerates further lookups."""
     def __new__(cls):
-        return super().__new__(cls, "dry-run-preview")
+        return super().__new__(cls, _DEFERRED_PLACEHOLDER)
     def __getitem__(self, key):
-        return None if _is_error_key(key) else _DeferredValue()
+        return _DeferredValue() if isinstance(key, slice) else _deferred_for(key)
     def get(self, key, default=None):
-        return self[key]
+        return _deferred_for(key, default)
     def __contains__(self, key):
         return not _is_error_key(key)
 
 class _DeferredResult(dict):
-    """Stand-in response for a write deferred by the preview pass. Missing fields resolve to
-    a placeholder (error fields to None), so code that validates the response keeps running."""
+    """Stand-in response for a write deferred by the preview pass. Missing fields resolve to a
+    placeholder of the expected shape (error fields to None), so validation code keeps running."""
     def __missing__(self, key):
-        return None if _is_error_key(key) else _DeferredValue()
+        return _deferred_for(key)
     def get(self, key, default=None):
-        return dict.__getitem__(self, key) if dict.__contains__(self, key) else self.__missing__(key)
+        return dict.__getitem__(self, key) if dict.__contains__(self, key) else _deferred_for(key, default)
     def __contains__(self, key):
         return dict.__contains__(self, key) or not _is_error_key(key)
+    def __str__(self):
+        return dict.__repr__(self) if len(self) else _DEFERRED_PLACEHOLDER
+    __format__ = lambda self, spec: format(str(self), spec)
 
 def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:
     """Execute a Composio action for the current tenant entity.
@@ -155,6 +181,11 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
     if dry_run and not _is_composio_read(action_name):
         sys.stderr.write(f"[DRY_RUN] Skipped composio_execute({action_name}) — write op deferred\\n")
         return _DeferredResult(dry_run_result or {"status": "ok", "dry_run": True, "action": action_name})
+    # Reading back something a deferred write "created" (its id is the placeholder) can't hit the
+    # real API — the resource doesn't exist yet — so answer it with a placeholder too.
+    if dry_run and _DEFERRED_PLACEHOLDER in json.dumps(params, default=str):
+        sys.stderr.write(f"[DRY_RUN] Deferred composio_execute({action_name}) — reads a resource created in this preview\\n")
+        return _DeferredResult({"status": "ok", "dry_run": True, "action": action_name})
 
     entity_id = os.environ.get("COMPOSIO_ENTITY_ID", "")
     api_key = os.environ.get("COMPOSIO_API_KEY", "")
