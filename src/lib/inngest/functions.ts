@@ -325,22 +325,22 @@ export const executeMissionBackground = inngest.createFunction(
             tenantId, missionId, agentToRun, contextForAgent, tokens, isFinalAgent, mission.expectedOutputFormat, runId
           );
 
-          // Code lock
-          if (result.finalCode && result.finalCode !== agentToRun.pythonScript) {
-            console.log(`[Inngest] Code healed for Agent ${agentToRun.id}. Locking into blueprint.`);
-            const { data: missionData } = await supabase
-              .from('missions')
-              .select('mission_json')
-              .eq('id', missionId)
-              .single();
-            if (missionData?.mission_json) {
-              const blueprint = missionData.mission_json;
-              const agentNode = blueprint.agents?.find((n: any) => n.id === agentToRun.id);
-              if (agentNode) {
-                agentNode.pythonScript = result.finalCode;
-                await supabase.from('missions').update({ mission_json: blueprint }).eq('id', missionId);
-              }
+          // Code lock — the script that just succeeded becomes the blueprint's script, and any draft
+          // left by an earlier failed execution is retired.
+          const { data: missionData } = await supabase
+            .from('missions')
+            .select('mission_json')
+            .eq('id', missionId)
+            .single();
+          const agentNode = missionData?.mission_json?.agents?.find((n: any) => n.id === agentToRun.id);
+          const healed = !!result.finalCode && result.finalCode !== agentNode?.pythonScript;
+          if (agentNode && (healed || agentNode.pythonScriptDraft)) {
+            if (healed) {
+              console.log(`[Inngest] Code healed for Agent ${agentToRun.id}. Locking into blueprint.`);
+              agentNode.pythonScript = result.finalCode;
             }
+            delete agentNode.pythonScriptDraft;
+            await supabase.from('missions').update({ mission_json: missionData!.mission_json }).eq('id', missionId);
           }
 
           return { ...result, resumed: false };

@@ -2,6 +2,9 @@ import { callLLM, generateEmbedding } from '../llm-router';
 import { createServiceClient } from '@/lib/supabase/server';
 import { Sandbox } from '@e2b/code-interpreter';
 import { robustJSONParse } from '@/lib/utils/json-parser';
+import { createHash } from 'crypto';
+
+const scriptHash = (code: string) => createHash('sha256').update(code).digest('hex').slice(0, 16);
 
 interface AgentConfig {
   id: string;
@@ -644,6 +647,11 @@ export async function executeAgent(
   let tenantPlan = 'free';
   // Composio actions the mission plan declares (permission scopes) — what the customer approved.
   const declaredActions = new Set<string>();
+  // The script attempt 1 runs: the blueprint's locked script, or a draft left by a failed execution
+  // of that exact script, so a step retry or the next run continues the fixer's progress instead of
+  // repeating the same failures. Editing the blueprint changes the locked script and retires the draft.
+  let lockedScript = agent.pythonScript ?? '';
+  let startingScript = lockedScript;
   try {
     const [{ data: missionRow }, { data: billingRow }] = await Promise.all([
       supabase.from('missions').select('mission_json, training_enabled, training_runs_completed').eq('id', missionId).single(),
@@ -658,7 +666,30 @@ export async function executeAgent(
     isTrainingMode = missionRow?.training_enabled === true;
     trainingRunNumber = (missionRow?.training_runs_completed ?? 0) + 1;
     tenantPlan = billingRow?.plan ?? 'free';
+    const dbAgent = ((missionRow?.mission_json?.agents ?? []) as any[]).find(a => a.id === agent.id);
+    if (typeof dbAgent?.pythonScript === 'string' && dbAgent.pythonScript.trim()) lockedScript = dbAgent.pythonScript;
+    startingScript = lockedScript;
+    const draft = dbAgent?.pythonScriptDraft as { code?: string; basedOn?: string } | undefined;
+    if (draft?.code && draft.basedOn === scriptHash(lockedScript)) {
+      console.log(`[Agent ${agent.id}] Starting from the draft left by the last failed execution.`);
+      startingScript = draft.code;
+    }
   } catch { /* non-fatal — falls back to 'Mission', training mode off, free plan */ }
+
+  // Code that passed the syntax and Composio checks and actually ran — saved as the draft on failure.
+  let lastCheckedCode = '';
+  const saveDraft = async () => {
+    if (!lastCheckedCode || lastCheckedCode === startingScript) return;
+    try {
+      const { data } = await supabase.from('missions').select('mission_json').eq('id', missionId).single();
+      const node = (data?.mission_json?.agents ?? []).find((a: any) => a.id === agent.id);
+      if (!node) return;
+      node.pythonScriptDraft = { code: lastCheckedCode, basedOn: scriptHash(node.pythonScript ?? '') };
+      await supabase.from('missions').update({ mission_json: data!.mission_json }).eq('id', missionId);
+    } catch (e) {
+      console.warn(`[Agent ${agent.id}] Could not save script draft:`, (e as Error).message);
+    }
+  };
 
   // Run-scoped pass for ask_ai() in the sandbox SDK (/api/sandbox/llm) — usable for nothing else.
   let sandboxLLMEnv: Record<string, string> = {};
@@ -803,6 +834,7 @@ export async function executeAgent(
     const timeLeft = PHASE1_DEADLINE_MS - (Date.now() - loopStartedAt) - SANDBOX_SETUP_MS;
     attemptTimeoutMs = Math.min(SCRIPT_TIMEOUT_MS, Math.max(timeLeft, MIN_ATTEMPT_MS));
     if (attempts > 0 && timeLeft < MIN_ATTEMPT_MS) {
+      await saveDraft();
       throw new Error(
         `Agent "${agent.role}" ran out of time after ${attempts} attempt(s). ` +
         `The task may be too large for one step (e.g. a very long document written into the script). ${lastError}`
@@ -827,8 +859,7 @@ export async function executeAgent(
       console.log(`[Agent ${agent.id}] Resuming execution with approved Python code.`);
       pythonCode = existingAction.payload.pythonCode;
     } else if (
-      agent.pythonScript &&
-      agent.pythonScript.trim() !== '' &&
+      startingScript.trim() !== '' &&
       (attempts === 1 || (attempts === 2 && isTransientError(lastError)))
     ) {
       // Attempt 1: always use the locked script from the blueprint.
@@ -838,7 +869,7 @@ export async function executeAgent(
         `[Agent ${agent.id}] Using locked script from blueprint (attempt ${attempts}` +
         `${attempts > 1 ? ' — transient error on attempt 1, retrying locked script' : ''}).`
       );
-      pythonCode = agent.pythonScript;
+      pythonCode = startingScript;
     } else {
       // ── COMPOSIO-AWARE RETRY: if the failing script used composio_execute(),
       // regenerate with a targeted Composio correction prompt + live action schema
@@ -1218,10 +1249,16 @@ CRITICAL FIX RULES (follow these EXACTLY):
     // the Composio-aware fixer gets the valid parameter names on the next attempt.
     if (pythonCode.includes('composio_execute(')) {
       try {
-        const { findComposioCalls, checkComposioParams } = await import('../composio-param-check');
+        const { findComposioCalls, checkComposioParams, autoFixComposioParams } = await import('../composio-param-check');
         const prefixes = [...new Set(findComposioCalls(pythonCode).map(c => c.action.split('_')[0].toLowerCase()))];
         const { getComposioActionSchemas } = await import('../composio-actions');
-        const problems = checkComposioParams(pythonCode, await getComposioActionSchemas(prefixes));
+        const schemas = await getComposioActionSchemas(prefixes);
+        const autoFixed = autoFixComposioParams(pythonCode, schemas);
+        if (autoFixed.renames.length > 0) {
+          console.log(`[Agent ${agent.id}] Corrected Composio parameter names: ${autoFixed.renames.join('; ')}`);
+          pythonCode = autoFixed.code;
+        }
+        const problems = checkComposioParams(pythonCode, schemas);
         if (problems.length > 0) {
           lastError = `Composio parameter check failed before running — fix these calls:\n${problems.join('\n')}`;
           console.warn(`[Agent ${agent.id}] ${lastError}`);
@@ -1235,6 +1272,8 @@ CRITICAL FIX RULES (follow these EXACTLY):
         console.warn(`[Agent ${agent.id}] Composio parameter check skipped:`, (paramCheckErr as Error).message);
       }
     }
+
+    lastCheckedCode = pythonCode;
 
     // ── SMART EXECUTION MODE: detect write ops before any sandbox is allocated ──
     // Write agents:    Phase 1 (dry run, AF_DRY_RUN=1) validates safety → Phase 2 executes real side effects.
@@ -1818,5 +1857,6 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
     }
   }
 
+  await saveDraft();
   throw new Error(`Agent "${agent.role}" failed after ${maxAttempts} attempts. ${lastError}`);
 }

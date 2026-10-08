@@ -9,7 +9,10 @@ export interface ActionSchema {
 export interface ComposioCall {
   action: string;
   keys: string[] | null; // null when params aren't a plain dict literal (variable, **spread, etc.)
+  spans: KeySpan[] | null; // where each key's string literal sits in the code (quotes included)
 }
+
+interface KeySpan { key: string; start: number; end: number }
 
 function skipString(code: string, i: number): number {
   const triple = code.slice(i, i + 3);
@@ -24,15 +27,15 @@ function skipString(code: string, i: number): number {
 }
 
 /** Top-level keys of the dict literal starting at code[open] === '{'; null if not a plain literal. */
-function dictLiteralKeys(code: string, open: number): string[] | null {
-  const keys: string[] = [];
+function dictLiteralKeys(code: string, open: number): KeySpan[] | null {
+  const keys: KeySpan[] = [];
   let depth = 0;
   let i = open;
   while (i < code.length) {
     const ch = code[i];
     if ((ch === '"' || ch === "'") && !/[A-Za-z0-9_]/.test(code[i - 1] ?? '')) {
       const end = skipString(code, i);
-      if (depth === 1 && /^\s*:/.test(code.slice(end, end + 20))) keys.push(code.slice(i + 1, end - 1));
+      if (depth === 1 && /^\s*:/.test(code.slice(end, end + 20))) keys.push({ key: code.slice(i + 1, end - 1), start: i, end });
       i = end;
       continue;
     }
@@ -51,7 +54,8 @@ export function findComposioCalls(code: string): ComposioCall[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(code)) !== null) {
     const next = re.lastIndex;
-    calls.push({ action: m[1], keys: code[next] === '{' ? dictLiteralKeys(code, next) : null });
+    const spans = code[next] === '{' ? dictLiteralKeys(code, next) : null;
+    calls.push({ action: m[1], keys: spans ? spans.map(s => s.key) : null, spans });
   }
   return calls;
 }
@@ -76,4 +80,31 @@ export function checkComposioParams(code: string, schemas: Map<string, ActionSch
     }
   }
   return [...new Set(problems)];
+}
+
+/**
+ * Renames a parameter when the intended one is unambiguous: the unknown key and exactly one unused
+ * valid parameter differ only by an underscore suffix ('markdown' → 'markdown_text'). Fixers kept
+ * reintroducing that exact mistake, costing a full retry each time. Anything else is left for the fixer.
+ */
+export function autoFixComposioParams(code: string, schemas: Map<string, ActionSchema>): { code: string; renames: string[] } {
+  const edits: { start: number; end: number; text: string }[] = [];
+  const renames: string[] = [];
+  for (const call of findComposioCalls(code)) {
+    const props = Object.keys(schemas.get(call.action)?.input_parameters?.properties ?? {});
+    if (!call.spans || props.length === 0) continue;
+    const present = new Set(call.spans.map(s => s.key));
+    for (const span of call.spans) {
+      if (props.includes(span.key)) continue;
+      const candidates = props.filter(p => !present.has(p) && Math.min(p.length, span.key.length) >= 4 &&
+        (p.startsWith(`${span.key}_`) || span.key.startsWith(`${p}_`)));
+      if (candidates.length !== 1) continue;
+      const quote = code[span.start];
+      edits.push({ start: span.start, end: span.end, text: `${quote}${candidates[0]}${quote}` });
+      present.add(candidates[0]);
+      renames.push(`${call.action}: '${span.key}' → '${candidates[0]}'`);
+    }
+  }
+  for (const e of edits.sort((a, b) => b.start - a.start)) code = code.slice(0, e.start) + e.text + code.slice(e.end);
+  return { code, renames };
 }
