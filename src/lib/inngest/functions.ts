@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { executeAgent } from '@/lib/services/runtime/agent-loop';
 import { transitionMissionStatus } from '@/lib/services/orchestrator';
 import { withArchitectQuestion } from '@/lib/utils/architect-question';
+import { COMPOSIO_SLUG_ALIASES } from '@/lib/services/oauth-refresher';
 
 // ═══════════════════════════════════════════════════════════
 // Inngest Function: Execute Mission in Background
@@ -706,7 +707,10 @@ export const generateBlueprintBackground = inngest.createFunction(
           .reduce<Array<{ service: string; reason: string; connected: boolean }>>((acc, p) => {
             if (!seen.has(p.service)) {
               seen.add(p.service);
-              acc.push({ service: p.service, reason: p.scope, connected: tenantProviders.includes(p.service) });
+              // 'google' isn't a real connector — any connected Google app satisfies it (a Gmail-only
+              // mission showed "Connect Google" although Gmail was connected).
+              const satisfiedBy = COMPOSIO_SLUG_ALIASES[p.service] ?? [p.service];
+              acc.push({ service: p.service, reason: p.scope, connected: satisfiedBy.some(k => tenantProviders.includes(k)) });
             }
             return acc;
           }, []);

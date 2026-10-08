@@ -184,6 +184,20 @@ export async function getValidTokens(tenantId: string, provider: string): Promis
  * Returns an array of providers that are completely missing or hopelessly expired.
  * If the array is empty, all required permissions are valid.
  */
+/** Provider keys that satisfy a declared connector (e.g. 'google' is met by any Google app). */
+export const COMPOSIO_SLUG_ALIASES: Record<string, string[]> = {
+  // 'google' is not a Composio toolkit; older blueprints declared it alongside the real
+  // per-app slug (e.g. googlesheets), which is verified on its own entry.
+  google:         ['google', 'gmail', 'googlesheets', 'googledrive', 'googledocs', 'googlecalendar'],
+  gmail:          ['google', 'gmail'],
+  linkedin:       ['linkedin_oidc', 'linkedin'],
+  jira:           ['atlassian', 'jira'],
+  confluence:     ['atlassian', 'confluence'],
+  outlook:        ['microsoft', 'outlook'],
+  onedrive:       ['microsoft', 'onedrive'],
+  microsoftteams: ['microsoft', 'microsoftteams'],
+};
+
 export async function verifyMissionPermissions(missionId: string, tenantId: string): Promise<string[]> {
   const supabase = createServiceClient();
 
@@ -366,18 +380,6 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
   // outlook/microsoft: old AF key for Outlook.
   // googlesheets, googledrive, etc. are SEPARATE Composio connections — do NOT alias them
   // to 'google', as that connection cannot execute GOOGLESHEETS_* or GOOGLEDRIVE_* actions.
-  const COMPOSIO_SLUG_ALIASES: Record<string, string[]> = {
-    // 'google' is not a Composio toolkit; older blueprints declared it alongside the real
-    // per-app slug (e.g. googlesheets), which is verified on its own entry.
-    google:         ['google', 'gmail', 'googlesheets', 'googledrive', 'googledocs', 'googlecalendar'],
-    gmail:          ['google', 'gmail'],
-    linkedin:       ['linkedin_oidc', 'linkedin'],
-    jira:           ['atlassian', 'jira'],
-    confluence:     ['atlassian', 'confluence'],
-    outlook:        ['microsoft', 'outlook'],
-    onedrive:       ['microsoft', 'onedrive'],
-    microsoftteams: ['microsoft', 'microsoftteams'],
-  };
 
   // Verify Composio-managed connections: check tenant_permissions for any matching provider key.
   for (const slug of composioProviders) {
