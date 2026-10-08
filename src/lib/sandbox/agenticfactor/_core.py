@@ -349,6 +349,25 @@ class _DeferredResult(dict):
         return format(str(self), spec)
 
 
+def ask_ai(prompt: str, system: str = "", max_tokens: int = 1500, json_mode: bool = False) -> str:
+    """Use the platform's AI while the agent runs: summarise, write, classify or analyse data the
+    script fetched. Returns the model's text (a JSON string when json_mode=True).
+    Billed to the workspace's credits. Kept in sync with CORE_FALLBACK in sdk-loader.ts."""
+    token = os.environ.get("AF_LLM_TOKEN", "")
+    base = os.environ.get("AF_API_BASE", "https://agenticfactor.io").rstrip("/")
+    if not token:
+        raise RuntimeError("ask_ai is unavailable: AF_LLM_TOKEN is not set for this run.")
+    resp = requests.post(
+        f"{base}/api/sandbox/llm",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"prompt": prompt, "system": system, "max_tokens": max_tokens, "json": json_mode},
+        timeout=150,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"ask_ai failed (HTTP {resp.status_code}): {resp.text[:300]}")
+    return resp.json().get("text", "")
+
+
 def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:
     """
     Execute a Composio action for the current tenant entity.

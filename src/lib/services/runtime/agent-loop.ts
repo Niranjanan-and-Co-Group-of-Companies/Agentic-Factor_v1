@@ -617,6 +617,18 @@ export async function executeAgent(
     tenantPlan = billingRow?.plan ?? 'free';
   } catch { /* non-fatal — falls back to 'Mission', training mode off, free plan */ }
 
+  // Run-scoped pass for ask_ai() in the sandbox SDK (/api/sandbox/llm) — usable for nothing else.
+  let sandboxLLMEnv: Record<string, string> = {};
+  try {
+    const { mintSandboxLLMToken } = await import('../sandbox-llm-token');
+    sandboxLLMEnv = {
+      AF_LLM_TOKEN: await mintSandboxLLMToken({ tenantId, missionId, agentRole: agent.role }),
+      AF_API_BASE: process.env.NEXT_PUBLIC_APP_URL || 'https://agenticfactor.io',
+    };
+  } catch (tokenErr) {
+    console.warn(`[Agent ${agent.id}] ask_ai unavailable for this run:`, (tokenErr as Error).message);
+  }
+
   // Build environment variables from tokens
   const envVars = tokens.reduce((acc, t) => {
     acc[`${t.provider.toUpperCase()}_ACCESS_TOKEN`] = t.access_token;
@@ -691,6 +703,7 @@ export async function executeAgent(
         if (process.env.TWITTER_BEARER_TOKEN) resumeEnvs['TWITTER_BEARER_TOKEN'] = process.env.TWITTER_BEARER_TOKEN;
         if (process.env.FACEBOOK_APP_ID) resumeEnvs['FACEBOOK_APP_ID'] = process.env.FACEBOOK_APP_ID;
         if (extraEnvs) Object.assign(resumeEnvs, extraEnvs);
+        Object.assign(resumeEnvs, sandboxLLMEnv);
 
         const realOutput = await runRealSideEffects(approvedCode, resumeEnvs, existingAction.payload.output, agent.id, tenantId);
         return { output: realOutput, finalCode: approvedCode };
@@ -975,6 +988,7 @@ INSTRUCTIONS:
 11. **DO NOT CATCH FATAL ERRORS**: Let the script crash naturally on errors.
 12. **READING INPUT**: Previous agent data is in \`_input_data\` (parsed JSON dict) and \`_input\` (raw string).
 13. If you need to ask the user something, use \`ask_user()\`. The script will pause and resume when user responds.
+13b. **TEXT AT RUNTIME**: To summarise, write, translate, classify or analyse data the script fetched (emails, reports, briefs, posts, READMEs), call \`ask_ai(prompt, system="", max_tokens=1500, json_mode=False)\` from \`agenticfactor._core\` — it returns the AI's text. NEVER hard-code long documents into the script; keep scripts short and generate long text with ask_ai at runtime (max 4000 output tokens per call — split long documents into sections).
 14. **MULTI-LINE STRINGS**: For multi-line text, use triple double-quotes (""" only, NEVER triple single-quotes '''). NEVER put raw HTML inside triple-quoted strings — it breaks Python syntax. Instead, build HTML using a list of strings joined together: lines = []; lines.append('<tr>'); html = '\n'.join(lines).
 15. **JSON IN STRINGS**: When building JSON manually, use json.dumps() instead of hand-crafting JSON strings with f-strings.
 16. **HTML CONTENT**: NEVER embed raw HTML directly in triple-quoted strings. ALWAYS build HTML by concatenating regular strings or using a list: parts = []; parts.append(f'<tr><td>{name}</td></tr>'); html = ''.join(parts). This prevents quote conflicts.
@@ -1189,6 +1203,7 @@ CRITICAL FIX RULES (follow these EXACTLY):
       sandboxEnvs['COMPOSIO_ENTITY_ID'] = tenantId;
       // Inject custom connector metadata (base_url, auth_type, auth_header) from executor
       if (extraEnvs) Object.assign(sandboxEnvs, extraEnvs);
+      Object.assign(sandboxEnvs, sandboxLLMEnv);
 
       // Only apply dry-run guard for write-op agents — read-only agents run directly
       if (hasWriteOps) {
