@@ -520,6 +520,11 @@ except:
     _input_data = {}
     os.environ['INPUT_CONTEXT'] = '{}'
 
+import time as _af_time
+try:
+    _af_time.tzset()
+except Exception:
+    pass
 import matplotlib
 matplotlib.use('Agg')
 
@@ -733,6 +738,8 @@ export async function executeAgent(
   // every write action must be reviewed regardless of trust level (and never
   // actually executed) for this run.
   let missionTitle = 'Mission';
+  // What the customer asked for, in the mission's own words — the critic checks outputs against it.
+  let missionDescription = '';
   let isTrainingMode = false;
   let trainingRunNumber = 0;
   let tenantPlan = 'free';
@@ -754,6 +761,7 @@ export async function executeAgent(
       }
     }
     if (missionRow?.mission_json?.title) missionTitle = missionRow.mission_json.title;
+    if (typeof missionRow?.mission_json?.description === 'string') missionDescription = missionRow.mission_json.description;
     isTrainingMode = missionRow?.training_enabled === true;
     trainingRunNumber = (missionRow?.training_runs_completed ?? 0) + 1;
     tenantPlan = billingRow?.plan ?? 'free';
@@ -816,6 +824,9 @@ export async function executeAgent(
     // Composio — entity_id is the tenantId, enables composio_execute() in the Python SDK
     if (process.env.COMPOSIO_API_KEY) envs['COMPOSIO_API_KEY'] = process.env.COMPOSIO_API_KEY;
     envs['COMPOSIO_ENTITY_ID'] = tenantId;
+    // Dates in scripts follow the customer's day, not UTC: a standup bot run at 04:00 IST
+    // reported "yesterday" as two days ago. (The wrapper calls time.tzset() so it takes effect.)
+    envs['TZ'] = process.env.DEFAULT_TENANT_TIMEZONE || 'Asia/Kolkata';
     // Custom connector metadata (base_url, auth_type, auth_header) from the executor
     if (extraEnvs) Object.assign(envs, extraEnvs);
     Object.assign(envs, sandboxLLMEnv);
@@ -1438,6 +1449,11 @@ except:
     _input_data = {}
     os.environ['INPUT_CONTEXT'] = '{}'
 
+import time as _af_time
+try:
+    _af_time.tzset()
+except Exception:
+    pass
 import matplotlib
 matplotlib.use('Agg')
 
@@ -1750,7 +1766,10 @@ ${pythonCode}`;
 ${hasWriteOps ? `
 ⚠️ THIS IS A PREVIEW RUN. The platform deliberately did NOT execute this agent's write actions (send, post, create doc/sheet/page/record); they run only after a human approves this preview. So "dry_run", "dry-run-preview" IDs/URLs, "not sent", "not created", or a status like "error"/"failed" that only reflects the missing write result are EXPECTED and must NEVER be a reason to fail. Judge only the content the agent prepared for those actions.
 ` : ''}
-AGENT'S ROLE AND TASK:
+${missionDescription ? `WHAT THE CUSTOMER ASKED FOR (the whole mission):
+${missionDescription.slice(0, 2000)}
+
+` : ''}AGENT'S ROLE AND TASK:
 ${agent.systemPrompt || agent.role}
 
 INPUT THE AGENT RECEIVED (the previous agent's output, or the run's trigger data — in a pipeline it can be work on another part of the job, e.g. research on a different brand; the agent only has to use what concerns its own task):
@@ -1768,7 +1787,8 @@ PREVIEW RUN: this output comes from a safety dry run. Write actions (sending ema
 FAIL if:
 - The output doesn't address what the agent was supposed to do at all
 - The output contradicts or ignores the input it was given. Exception: in a pipeline an agent's input can be an earlier agent's work on a different part of the job (e.g. research on another brand) — adding its own part, and passing earlier data through, is correct
-- The content is generic or placeholder-like instead of reflecting the specific task${isFinalAgent && expectedOutputFormat ? `
+- The content is generic or placeholder-like instead of reflecting the specific task
+- Specifics the customer gave (names, amounts, invoice or order numbers, dates, recipients) are replaced by different or sample data such as "Acme Corp" or "John Doe" — this always fails, however polished the output${isFinalAgent && expectedOutputFormat ? `
 - Required core fields from the expected format are completely missing or have the wrong type` : ''}
 
 PASS if:
@@ -1848,6 +1868,10 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
           '"test_id"',
           '"sample_id"',
           '"dummy"',
+          'acme corp',
+          'john doe',
+          'jane doe',
+          'lorem ipsum',
           'todo: implement',
           '"dryrun_',
           '"dry_run": true',
