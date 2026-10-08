@@ -1727,7 +1727,7 @@ ${hasWriteOps ? `
 AGENT'S ROLE AND TASK:
 ${agent.systemPrompt || agent.role}
 
-INPUT THE AGENT RECEIVED:
+INPUT THE AGENT RECEIVED (the previous agent's output, or the run's trigger data — in a pipeline it can be work on another part of the job, e.g. research on a different brand; the agent only has to use what concerns its own task):
 ${(inputContext || '').slice(0, 1500)}
 
 OUTPUT THE AGENT PRODUCED:
