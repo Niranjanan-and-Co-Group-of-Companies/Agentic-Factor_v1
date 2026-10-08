@@ -622,6 +622,8 @@ export async function executeAgent(
   const maxAttempts = 5;
   let lastError = '';
   let lastPythonCode = '';
+  // Whether this agent's first script was read-only; a retry may not turn it into a writer.
+  let firstScriptReadOnly: boolean | null = null;
 
   // Check if we are resuming an approved manual action
   const { data: existingAction } = await supabase
@@ -771,6 +773,7 @@ Fix the script. Rules:
 - Keep using composio_execute() — NEVER switch to direct HTTP calls or SDK wrappers
 - If the action name was wrong, use the exact name from the list above
 - If the parameters were wrong, use the exact parameter names from [req: ...] hints above
+- If the script only reads data, it MUST stay read-only: NEVER use an action that creates, updates, sends or deletes anything to work around a missing read action. If no suitable read action exists, print a JSON object with "status": "error" explaining that.
 - Return the COMPLETE corrected Python script in a \`\`\`python block`;
 
           const composioFixResponse = await callLLM(
@@ -1080,6 +1083,22 @@ CRITICAL FIX RULES (follow these EXACTLY):
     pythonCode = await validateAndFixSyntax(pythonCode);
 
     lastPythonCode = pythonCode;
+
+    // A fixer that can't find a valid read action has substituted a write (e.g. a "fetch open deals"
+    // agent switched to HUBSPOT_CREATE_CRM_OBJECT_FROM_NL); once a mission graduates, a reversible
+    // write like that can run without review, so a read-only agent must never drift into writing.
+    const scriptWrites = classifyAgentActions(pythonCode).hasWriteOps;
+    if (firstScriptReadOnly === null) {
+      firstScriptReadOnly = !scriptWrites;
+    } else if (firstScriptReadOnly && scriptWrites) {
+      lastError = 'Rejected fix: this agent only reads data, but the corrected script calls an action that creates, updates, sends or deletes. Use read actions only (GET/LIST/SEARCH/FETCH/...); if none fits, print {"status": "error", ...} explaining what is missing.';
+      console.warn(`[Agent ${agent.id}] ${lastError}`);
+      supabase.from('events').insert({
+        tenant_id: tenantId, event_type: 'agent.attempt_failed', entity_type: 'agent', entity_id: agent.id,
+        run_id: runId ?? null, payload: { missionId, role: agent.role, attempt: attempts, maxAttempts, error: lastError },
+      }).then(() => {}, () => {});
+      continue;
+    }
 
     // Composio silently ignores unknown parameters, so a misspelled one "succeeds" while doing
     // nothing (e.g. an empty Google Doc reported as published). Reject such code before running it;
