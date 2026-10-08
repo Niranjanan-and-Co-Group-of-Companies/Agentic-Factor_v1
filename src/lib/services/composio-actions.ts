@@ -59,6 +59,9 @@ interface ComposioTool {
   };
 }
 
+// Seen live: GitHub file contents came back as a presigned download URL, and agents output the URL.
+const LARGE_CONTENT_NOTE = `LARGE CONTENT: Composio may return big payloads (file contents, attachments, exports) as a presigned download URL instead of inline data. If the field you need holds a URL rather than the content (e.g. an s3/storage https link), download it with requests.get(url, timeout=30) and use the response text/bytes — the presigned URL itself needs no auth header and must not be passed on as the result.`;
+
 // Cache all actions per app for 30 minutes — action lists rarely change
 const schemaCache: Map<string, { data: string; expiresAt: number }> = new Map();
 
@@ -200,7 +203,8 @@ export async function buildComposioFixContext(usedSlugs: string[], detailedLimit
   const others = actions.filter(a => !detailedSlugs.has(a.slug)).map(a => a.slug);
 
   return `COMPOSIO ACTIONS — the only valid names. Closest matches to what the script called (slug — description [req: required_params]):
-${detailed.map(formatActionCompact).join('')}${others.length ? `Other valid action names: ${others.join(', ')}\n` : ''}`;
+${detailed.map(formatActionCompact).join('')}${others.length ? `Other valid action names: ${others.join(', ')}\n` : ''}
+${LARGE_CONTENT_NOTE}`;
 }
 
 /**
@@ -264,6 +268,7 @@ There is NO direct Bearer token available for Composio-managed services. Direct 
   _request("GET", "https://api.trello.com/1/members/me/boards", token=_get_token("trello"))
   api.call("trello", "GET", "/members/me/boards")
 NEVER use api.call(), _request(), or any direct HTTP for these services: ${slugList}
+${LARGE_CONTENT_NOTE}
 
 PER-AGENT PROVIDER RULE (CRITICAL):
 Each agent in the mission blueprint must handle EXACTLY ONE service.
