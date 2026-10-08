@@ -33,15 +33,16 @@ export const handleInboundEmail = inngest.createFunction(
       return data;
     });
 
-    if (!mission || !['active', 'paused'].includes(mission.status)) {
+    if (!mission || !['active', 'paused', 'completed', 'failed'].includes(mission.status)) {
       return { skipped: true, reason: 'mission_not_active', status: mission?.status };
     }
 
-    // Re-trigger mission execution — the agent loop reads events table for context,
-    // so the email.received event already inserted will be visible to agents.
+    // The email itself becomes the first agent's input (nothing reads email.received events
+    // back out of the events table, so without this the agents never saw the email).
+    const { emailData } = event.data as { emailData?: Record<string, unknown> };
     await step.sendEvent('trigger-mission-for-email', {
       name: 'mission.execute',
-      data: { missionId, tenantId, trigger: 'email_received' },
+      data: { missionId, tenantId, trigger: 'email_received', webhookPayload: emailData ?? null },
     });
 
     return { triggered: true, missionId };

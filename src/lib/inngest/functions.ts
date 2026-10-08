@@ -101,6 +101,9 @@ export const executeMissionBackground = inngest.createFunction(
       if (trigger === 'webhook' && webhookPayload) {
         firstAgentInput.webhook_payload = webhookPayload;
       }
+      if (trigger === 'email_received' && webhookPayload) {
+        firstAgentInput.email = webhookPayload;
+      }
 
       // 2. Cross-run memory: for recurring runs (#2+), inject the previous
       //    completed run's summary so agents know what they did last time and

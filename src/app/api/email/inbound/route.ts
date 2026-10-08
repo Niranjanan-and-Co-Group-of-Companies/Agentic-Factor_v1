@@ -84,8 +84,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ status: 'rejected', reason: 'sender_not_whitelisted' });
     }
 
-    // ── Mission must be active to receive emails ──
-    if (!['active', 'building', 'paused'].includes(mission.status)) {
+    // A mission is left 'completed'/'failed' after every run, so those must keep receiving email —
+    // otherwise an email-triggered mission stops responding after its first run.
+    if (!['active', 'building', 'paused', 'completed', 'failed'].includes(mission.status)) {
       return NextResponse.json({ status: 'ignored', reason: 'mission_not_active' });
     }
 
