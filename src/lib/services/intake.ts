@@ -898,7 +898,7 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
   } else {
     const discoveryCheck = await callLLM([
       { role: 'system', content: discoveryPrompts[promptKey] },
-      { role: 'user', content: `Intent: ${intent}${fileNotice}${fileContext}${globalMemory}${connectedNotice}${priorNotice}` }
+      { role: 'user', content: `Intent: ${intent}${fileNotice}${fileContext}${globalMemory}${connectedNotice}${defaultsNotice}${priorNotice}` }
     ], { jsonMode: true, temperature: 0.1, tier: 2, budgetContext: { tenantId, missionId: 'blueprint_generation' } });
     try {
       discoveryData = robustJSONParse(discoveryCheck.content);
