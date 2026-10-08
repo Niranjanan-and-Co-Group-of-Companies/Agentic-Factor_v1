@@ -197,7 +197,13 @@ def ask_ai(prompt: str, system: str = "", max_tokens: int = 1500, json_mode: boo
     )
     if resp.status_code != 200:
         raise RuntimeError(f"ask_ai failed (HTTP {resp.status_code}): {resp.text[:300]}")
-    return resp.json().get("text", "")
+    data = resp.json()
+    if data.get("truncated"):
+        raise RuntimeError(
+            f"ask_ai output was cut off at max_tokens={max_tokens} (it ends mid-sentence). Raise max_tokens "
+            "(up to 4000) or write the document in sections with ask_ai_batch, one prompt per section."
+        )
+    return data.get("text", "")
 
 def ask_ai_batch(prompts, system: str = "", max_tokens: int = 1500, json_mode: bool = False, max_workers: int = 4) -> list:
     """Run several independent ask_ai prompts at the same time and return their texts in the same

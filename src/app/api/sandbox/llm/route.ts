@@ -102,6 +102,9 @@ export async function POST(request: NextRequest) {
     await deductCredits(claims.tenantId, credits, `sandbox_llm:${claims.agentRole}`, {
       provider: result.provider, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens,
     }).catch(err => console.error('[sandbox/llm] credit deduction failed:', err));
+    // Stopped at the token limit: the text ends mid-sentence. The SDK raises so the fixer can split the work.
+    const truncated = (result.outputTokens ?? 0) >= maxTokens;
+    if (truncated) return NextResponse.json({ text: result.content, model: result.model, credits, truncated });
     if (phase === 'preview' && claims.runId) {
       const { error: previewErr } = await supabase.from('events').insert({
         tenant_id: claims.tenantId,
