@@ -35,7 +35,7 @@ async function createSandboxWithRetry(timeoutMs: number, maxAttempts = 3): Promi
   throw lastErr;
 }
 
-function sanitizePythonCode(code: string): string {
+export function sanitizePythonCode(code: string): string {
   // Fix 0: Strip null bytes and other non-printable characters that crash Python's parser
   // Python hard-rejects \x00 with: "source code string cannot contain null bytes"
   code = code.replace(/\x00/g, '');
@@ -47,10 +47,24 @@ function sanitizePythonCode(code: string): string {
   const lines = code.split('\n');
   const fixedLines: string[] = [];
   let i = 0;
-  
+  // Triple-quoted strings are valid multi-line Python (and what the codegen prompt asks for);
+  // the single-quote heuristic below would read `x = """` as unterminated and corrupt it.
+  let openTriple: '"""' | "'''" | null = null;
+
   while (i < lines.length) {
     const line = lines[i];
-    
+
+    const triples = line.match(/"""|'''/g) ?? [];
+    if (openTriple || triples.length > 0) {
+      for (const t of triples) {
+        if (!openTriple) openTriple = t as '"""' | "'''";
+        else if (t === openTriple) openTriple = null;
+      }
+      fixedLines.push(line);
+      i++;
+      continue;
+    }
+
     // Detect a line that opens a string but doesn't close it
     // Matches patterns like: some_func('text that continues
     // or: variable = "text that continues  
