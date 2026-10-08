@@ -70,37 +70,36 @@ async function fetchAllActionsForApp(appName: string, apiKey: string): Promise<C
   const cached = schemaCache.get(appName);
   if (cached && cached.expiresAt > Date.now()) return JSON.parse(cached.data);
 
-  const allActions: ComposioTool[] = [];
-  const PAGE_SIZE = 100;
-  let offset = 0;
+  const bySlug = new Map<string, ComposioTool>();
+  // Composio's tools API pages with cursor/next_cursor (max 1000 per page) and has no offset
+  // parameter — paging by offset re-fetched the first page, so large toolkits (GitHub, HubSpot,
+  // Slack...) only ever exposed their first 100 actions, padded with duplicates.
+  const PAGE_SIZE = 1000;
+  let cursor: string | null = null;
 
   try {
-    while (true) {
-      const url = `${COMPOSIO_API_BASE}/api/v3.1/tools?toolkit_slug=${appName}&limit=${PAGE_SIZE}&offset=${offset}`;
+    for (let page = 0; page < 20; page++) {
+      const url = `${COMPOSIO_API_BASE}/api/v3.1/tools?toolkit_slug=${appName}&limit=${PAGE_SIZE}` +
+        (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
       const res = await fetch(url, {
         headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(20_000),
       });
 
       if (!res.ok) {
-        console.warn(`[composio-actions] ${appName} offset=${offset}: HTTP ${res.status}`);
+        console.warn(`[composio-actions] ${appName} page=${page}: HTTP ${res.status}`);
         break;
       }
 
-      const data = await res.json() as { items?: ComposioTool[] };
-      const items = data.items ?? [];
-      allActions.push(...items);
+      const data = await res.json() as { items?: ComposioTool[]; next_cursor?: string | null };
+      const before = bySlug.size;
+      for (const item of data.items ?? []) bySlug.set(item.slug, item);
 
-      // Last page reached when fewer items returned than requested
-      if (items.length < PAGE_SIZE) break;
-      offset += PAGE_SIZE;
-
-      // Safety ceiling — Composio apps shouldn't exceed this
-      if (allActions.length >= 5000) {
-        console.warn(`[composio-actions] ${appName} hit 5000-action safety limit`);
-        break;
-      }
+      // Stop at the last page, and defensively if a page added nothing new.
+      if (!data.next_cursor || bySlug.size === before) break;
+      cursor = data.next_cursor;
     }
+    const allActions = [...bySlug.values()];
 
     schemaCache.set(appName, {
       data: JSON.stringify(allActions),

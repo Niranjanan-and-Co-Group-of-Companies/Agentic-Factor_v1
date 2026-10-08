@@ -295,26 +295,28 @@ async function fetchToolkitActions(toolkit: string, apiKey: string): Promise<Com
   if (cached && cached.expiresAt > Date.now()) return cached.actions;
 
   const allActions: ComposioActionSchema[] = [];
-  const PAGE_SIZE = 100;
-  let offset = 0;
+  // Composio pages with cursor/next_cursor (max 1000 per page); there is no offset parameter.
+  let cursor: string | null = null;
 
   try {
-    while (true) {
-      const url = `${COMPOSIO_API_BASE}/api/v3.1/tools?toolkit_slug=${toolkit}&limit=${PAGE_SIZE}&offset=${offset}`;
+    for (let page = 0; page < 10; page++) {
+      const url = `${COMPOSIO_API_BASE}/api/v3.1/tools?toolkit_slug=${toolkit}&limit=1000` +
+        (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
       const res = await fetch(url, {
         headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) {
-        console.warn(`[AdsGovernor] ${toolkit} offset=${offset}: HTTP ${res.status}`);
+        console.warn(`[AdsGovernor] ${toolkit} page=${page}: HTTP ${res.status}`);
         break;
       }
-      const data = await res.json() as { items?: ComposioActionSchema[] };
-      const items = data.items ?? [];
-      allActions.push(...items);
-      if (items.length < PAGE_SIZE) break;
-      offset += PAGE_SIZE;
-      if (allActions.length >= 1000) break;
+      const data = await res.json() as { items?: ComposioActionSchema[]; next_cursor?: string | null };
+      const before = allActions.length;
+      for (const item of data.items ?? []) {
+        if (!allActions.some(a => a.slug === item.slug)) allActions.push(item);
+      }
+      if (!data.next_cursor || allActions.length === before) break;
+      cursor = data.next_cursor;
     }
   } catch (err) {
     console.warn(`[AdsGovernor] Error fetching ${toolkit} actions:`, err);
