@@ -28,6 +28,15 @@ describe('sanitizePythonCode', () => {
     expect(sanitizePythonCode('print("hello\nworld")')).toBe('print("""hello\nworld""")');
   });
 
+  it('leaves a double quote inside single quotes followed by a double-quoted string alone', () => {
+    // Real line the old quote counter corrupted into .strip("'""") on every retry.
+    unchanged(`subject = results[0].strip().strip('"').strip("'")\nfull_html = "\\n".join(parts)\nprint("done")`);
+  });
+
+  it('leaves escaped quotes and comments with quotes alone', () => {
+    unchanged(`msg = "She said \\"hi\\""  # it's fine\nx = 'don\\'t'`);
+  });
+
   it('strips null bytes', () => {
     expect(sanitizePythonCode('x = 1\x00\ny = 2')).toBe('x = 1\ny = 2');
   });

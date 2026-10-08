@@ -46,6 +46,41 @@ async function createSandboxWithRetry(timeoutMs: number, maxAttempts = 3): Promi
   throw lastErr;
 }
 
+/**
+ * The Python code in an LLM reply's fenced block. The closing fence must sit on its own line: scripts
+ * often strip ``` fences from AI output (text.startswith("```")), and a lazy match up to the first
+ * ``` cut those scripts off mid-line — the truncated script then failed every retry.
+ */
+export function extractPythonBlock(reply: string): string | null {
+  const PYTHON_FENCE = /^[ \t]*```[ \t]*(?:python|py)[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```[ \t]*$/m;
+  const ANY_FENCE = /^[ \t]*```[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```[ \t]*$/m;
+  const fenced = reply.match(PYTHON_FENCE) ?? reply.match(ANY_FENCE);
+  if (fenced) return fenced[1];
+  const loose = reply.match(/```(?:python|py)?\s*\n([\s\S]*?)```/);
+  return loose ? loose[1] : null;
+}
+
+/** Where a single-quoted or double-quoted string opened on this line is still open at its end, if any. */
+function openStringAtEndOfLine(line: string): { quote: '"' | "'"; start: number } | null {
+  let quote: '"' | "'" | null = null;
+  let start = -1;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      if (c === '\\') i++;               // skip the escaped character
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '#') return null;            // the rest is a comment
+    if (c === '"' || c === "'") {
+      if (line.startsWith(c.repeat(3), i)) return null; // triple quotes are handled by the caller
+      quote = c;
+      start = i;
+    }
+  }
+  return quote ? { quote, start } : null;
+}
+
 export function sanitizePythonCode(code: string): string {
   // Fix 0: Strip null bytes and other non-printable characters that crash Python's parser
   // Python hard-rejects \x00 with: "source code string cannot contain null bytes"
@@ -76,20 +111,17 @@ export function sanitizePythonCode(code: string): string {
       continue;
     }
 
-    // Detect a line that opens a string but doesn't close it
-    // Matches patterns like: some_func('text that continues
-    // or: variable = "text that continues  
-    const unterminatedMatch = line.match(/^(.*?)(['\"])([^'"]*?)$/);
-    
-    if (unterminatedMatch && !line.trimStart().startsWith('#')) {
-      const [, prefix, quote, startContent] = unterminatedMatch;
-      
-      // Check if this looks like an actual unterminated string (not a comment, not triple-quoted)
-      // Count unmatched quotes in the prefix to determine if we're inside a string
-      const prefixQuotes = (prefix.match(new RegExp(`(?<!\\\\)${quote === "'" ? "'" : '"'}`, 'g')) || []).length;
-      
-      if (prefixQuotes % 2 === 0) {
-        // Even number of quotes before = this opens a new string that isn't closed
+    // Detect a line that opens a single-line string and doesn't close it. Scanning the line keeps
+    // track of which quote is open: counting quote characters treated the '"' in .strip('"').strip("'")
+    // as an open string and glued the following lines into a triple-quoted block, corrupting valid code.
+    const open = openStringAtEndOfLine(line);
+
+    if (open) {
+      const prefix = line.slice(0, open.start);
+      const quote = open.quote;
+      const startContent = line.slice(open.start + 1);
+      {
+        // A string opened on this line runs onto the next lines: rejoin it as a triple-quoted string
         // Collect continuation lines until we find the closing quote
         const contentLines = [startContent];
         let j = i + 1;
@@ -968,10 +1000,9 @@ Fix the script. Rules:
             { temperature: 0.0, jsonMode: false, tier: 2 }
           );
 
-          const composioFixMatch = composioFixResponse.content.match(/```\s*python\s*\n([\s\S]*?)```/)
-            || composioFixResponse.content.match(/```\n([\s\S]*?)```/);
-          if (composioFixMatch) {
-            pythonCode = sanitizePythonCode(composioFixMatch[1]);
+          const composioFixCode = extractPythonBlock(composioFixResponse.content);
+          if (composioFixCode) {
+            pythonCode = sanitizePythonCode(composioFixCode);
             console.log(`[Agent ${agent.id}] Composio-aware correction applied (attempt ${attempts})`);
             // Deduct LLM credit for this fix call (token-proportional)
             try {
@@ -1174,16 +1205,14 @@ INSTRUCTIONS:
       }
       
       // More flexible regex: handles ```python, ``` python, and variations
-      const codeMatch = response.content.match(/```\s*python\s*\n([\s\S]*?)```/) 
-        || response.content.match(/```\n([\s\S]*?)```/)
-        || response.content.match(/```([\s\S]*?)```/);
-      if (!codeMatch) {
+      const extracted = extractPythonBlock(response.content);
+      if (!extracted) {
         lastError = "Failed to extract Python code from LLM response. Make sure to use triple-backtick python blocks.";
         console.warn(`[Agent ${agent.id} attempt ${attempts}] LLM returned no python block.`);
         continue;
       }
       
-      pythonCode = codeMatch[1];
+      pythonCode = extracted;
       } // end inner else (full AF SDK regeneration)
     } // end outer else (composio-aware + full regeneration)
 
@@ -1253,9 +1282,9 @@ CRITICAL FIX RULES (follow these EXACTLY):
             { role: 'user', content: `Fix this Python code:\n\n\`\`\`python\n${code}\n\`\`\`` }
           ], { temperature: 0.0, jsonMode: false, tier: 2 });
           
-          const fixMatch = fixResponse.content.match(/```\s*python\s*\n([\s\S]*?)```/);
-          if (fixMatch) {
-            code = sanitizePythonCode(fixMatch[1]);
+          const fixCode = extractPythonBlock(fixResponse.content);
+          if (fixCode) {
+            code = sanitizePythonCode(fixCode);
             console.log(`[Agent ${agent.id}] Code regenerated after syntax fix (pass ${pass + 1}).`);
           } else {
             console.warn(`[Agent ${agent.id}] LLM fix had no python block on pass ${pass + 1}.`);
