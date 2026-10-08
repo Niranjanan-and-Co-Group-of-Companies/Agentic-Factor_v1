@@ -1392,9 +1392,19 @@ export default function MissionChatPage() {
         }
 
       } else if (action.type === 'webhook') {
-        const url = `${window.location.origin}/api/webhooks/trigger/${missionId}`;
-        try { await navigator.clipboard.writeText(url); } catch { /* ignore */ }
-        showToast(`📋 Webhook URL copied!`);
+        // The trigger endpoint needs a webhook id + secret from mission_webhooks — a mission id URL 404s.
+        const res = await fetch('/api/webhooks/manage', {
+          method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ missionId, label: 'Created from mission chat' }),
+        });
+        if (!res.ok) {
+          showToast('❌ Could not create a webhook. Please try again.');
+        } else {
+          const hook = await res.json() as { triggerUrl: string; secret: string };
+          const details = `POST ${hook.triggerUrl}\nHeader: x-webhook-secret: ${hook.secret}\nBody: any JSON — it is passed to the first agent.`;
+          try { await navigator.clipboard.writeText(details); } catch { /* ignore */ }
+          window.alert(`Webhook created — save this now, the secret is shown only once:\n\n${details}\n\n(Copied to your clipboard.)`);
+        }
 
       } else if (action.type === 'update_mission') {
         const jobId = crypto.randomUUID();

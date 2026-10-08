@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 
 // ============================================================
 // Webhook Management API — /api/webhooks/manage
@@ -13,19 +12,14 @@ import { cookies } from 'next/headers';
 // All operations are scoped to the authenticated tenant via RLS.
 // ============================================================
 
-async function getAuthenticatedUser() {
-  const cookieStore = await cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-  );
-  const { data: { user } } = await supabase.auth.getUser();
-  return user;
+// Same auth as every other API route (session cookie or Bearer token).
+async function getAuthenticatedUser(req: NextRequest): Promise<{ id: string } | null> {
+  const ctx = await extractTenantContext(req);
+  return isAuthError(ctx) ? null : { id: ctx.tenantId };
 }
 
 export async function GET(req: NextRequest) {
-  const user = await getAuthenticatedUser();
+  const user = await getAuthenticatedUser(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const missionId = req.nextUrl.searchParams.get('missionId');
@@ -52,7 +46,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const user = await getAuthenticatedUser();
+  const user = await getAuthenticatedUser(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -96,7 +90,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const user = await getAuthenticatedUser();
+  const user = await getAuthenticatedUser(req);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const id = req.nextUrl.searchParams.get('id');
