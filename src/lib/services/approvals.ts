@@ -119,6 +119,30 @@ export async function processApprovalDecision(
       });
     }
 
+    // A rejection used to leave the run 'paused' forever — invisible to the customer, and with
+    // the scheduler skipping missions that have an unfinished run, it silently stopped schedules.
+    if (decision === 'rejected' && actualMissionId) {
+      const now = new Date().toISOString();
+      await supabase
+        .from('mission_runs')
+        .update({ status: 'failed', completed_at: now, summary: 'Stopped: the reviewer rejected a proposed action.' })
+        .eq('mission_id', actualMissionId)
+        .eq('tenant_id', tenantId)
+        .eq('status', 'paused');
+      await supabase
+        .from('missions')
+        .update({ status: 'failed', updated_at: now })
+        .eq('id', actualMissionId)
+        .eq('tenant_id', tenantId);
+      await supabase.from('events').insert({
+        tenant_id: tenantId,
+        event_type: 'mission.action_rejected',
+        entity_type: 'mission',
+        entity_id: actualMissionId,
+        payload: { actionId, agentRole: actionData?.agent_role, rejectedAt: now },
+      });
+    }
+
     return {
       ok: true,
       actionId,
