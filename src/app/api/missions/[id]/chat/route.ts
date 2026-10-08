@@ -310,17 +310,19 @@ export async function POST(
           const chatId = sessionId ?? (await ensureSession(supabase, missionId, tenantId, recentMessages));
           const userMsg = recentMessages[recentMessages.length - 1];
 
-          ;(async () => {
+          // Awaited before the stream closes: after controller.close() the serverless function can be
+          // frozen, which silently dropped the assistant reply (and its Apply action) from history.
+          await (async () => {
             await supabase.from('mission_chat_messages').insert({ chat_id: chatId, tenant_id: tenantId, role: userMsg.role, content: userMsg.content });
             await supabase.from('mission_chat_messages').insert({
               chat_id: chatId, tenant_id: tenantId, role: 'assistant', content: cleanText,
               action_payload: actionPayload, input_tokens: inputTokens, output_tokens: outputTokens, credits_deducted: credits,
             });
             await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
-            const allMsgs = recentMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: String(m.content) }));
-            allMsgs.push({ role: 'assistant', content: cleanText });
-            writeEpisode(tenantId, missionId, allMsgs, []).catch(console.error);
           })().catch(console.error);
+          const allMsgs = recentMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: String(m.content) }));
+          allMsgs.push({ role: 'assistant', content: cleanText });
+          writeEpisode(tenantId, missionId, allMsgs, []).catch(console.error);
 
           send({ type: 'done', credits, inputTokens, outputTokens, sessionId: chatId, cleanText, action: actionPayload });
           controller.close();

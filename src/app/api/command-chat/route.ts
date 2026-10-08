@@ -648,7 +648,8 @@ export async function POST(request: NextRequest) {
     const firstUserContent = messages.find(m => m.role === 'user')?.content ?? '';
     const chatId = await ensureSession(supabase, tenantId, sessionId, firstUserContent);
 
-    ;(async () => {
+    // Awaited: work left running after the response returns can be frozen by the serverless runtime.
+    await (async () => {
       await supabase.from('mission_chat_messages').insert({ chat_id: chatId, tenant_id: tenantId, role: 'user', content: redactedUserContent });
       await supabase.from('mission_chat_messages').insert({ chat_id: chatId, tenant_id: tenantId, role: 'assistant', content: confirmationText, action_payload: actionPayload });
       await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
@@ -777,7 +778,8 @@ export async function POST(request: NextRequest) {
         const chatId = await ensureSession(supabase, tenantId, sessionId, firstUserContent);
 
         const userMsg = recentMessages[recentMessages.length - 1];
-        ;(async () => {
+        // Awaited before 'done': once the stream closes the function can be frozen mid-insert.
+        await (async () => {
           const { error: ue } = await supabase.from('mission_chat_messages').insert({
             chat_id: chatId, tenant_id: tenantId, role: userMsg.role, content: userMsg.content,
           });
