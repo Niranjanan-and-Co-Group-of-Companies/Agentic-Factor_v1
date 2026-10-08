@@ -980,6 +980,7 @@ RUNTIME RULES:
 - The whole script must finish within ${SCRIPT_TIMEOUT_MS / 1000}s. Generate text with \`ask_ai(prompt, system="", max_tokens=1500)\` from agenticfactor._core — about 60 tokens/second, so keep each call to ~1500 tokens. For a long document or several pieces use \`ask_ai_batch([p1, p2, ...], system="", max_tokens=1500)\` with one prompt per section; it runs them in parallel. Never call ask_ai in a loop and never ask for one huge output. If the script timed out or ask_ai reports its output was cut off, split the work into sections with ask_ai_batch.
 - If the agent writes a document, email, message or post, the printed JSON MUST include the text it wrote (\`"content": text\`, or \`"content_preview": text[:10000]\`) next to the IDs/URLs. Output with only metadata fails review.
 - If the error is a failed review, change what the script produces so the reviewer's reason no longer applies.
+- \`input_data["_pipeline"]\` holds every earlier agent's output keyed by role; if the review says data for some parts is missing, read those parts from there.
 
 FAILED SCRIPT:
 \`\`\`python

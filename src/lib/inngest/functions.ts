@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { executeAgent } from '@/lib/services/runtime/agent-loop';
 import { transitionMissionStatus } from '@/lib/services/orchestrator';
 import { withArchitectQuestion } from '@/lib/utils/architect-question';
+import { withPipelineHistory } from '@/lib/services/runtime/pipeline-context';
 import { COMPOSIO_SLUG_ALIASES } from '@/lib/services/oauth-refresher';
 
 // ═══════════════════════════════════════════════════════════
@@ -148,6 +149,9 @@ export const executeMissionBackground = inngest.createFunction(
     let currentAgentId: string | null = orchestration.entryAgent;
     // Seed the first agent's context with webhook payload and/or previous-run memory
     let currentContext = initialContext ?? '';
+    // Every completed agent's output, so later agents can see all earlier parts (rebuilt
+    // deterministically from memoized step results on each Inngest replay).
+    const pipelineHistory: Array<{ role: string; output: string }> = [];
     let agentsDone = 0;
     let agentsFailed = 0;
 
@@ -356,6 +360,8 @@ export const executeMissionBackground = inngest.createFunction(
           updateRun({ agents_done: doneSoFar, agents_failed: failedSoFar, status: 'running' }));
 
         const output = agentResult.output;
+        pipelineHistory.push({ role: agentToRun.role, output: typeof output === 'string' ? output : JSON.stringify(output) });
+        const nextContext = withPipelineHistory(pipelineHistory[pipelineHistory.length - 1].output, pipelineHistory.slice(0, -1));
 
         // ── Orchestration: Determine next agent ──
         if (orchestration.pattern === 'supervisor' || orchestration.pattern === 'orchestrator_worker') {
@@ -377,7 +383,7 @@ export const executeMissionBackground = inngest.createFunction(
             return JSON.parse(decision.content);
           });
           currentAgentId = nextAgent.nextAgentId;
-          currentContext = output;
+          currentContext = nextContext;
 
         } else if (orchestration.pattern === 'parallel') {
           const parallelEdges = orchestration.edges.filter((e: any) => e.from === agentId);
@@ -416,7 +422,7 @@ export const executeMissionBackground = inngest.createFunction(
         } else {
           // Sequential (default)
           const edge = orchestration.edges.find((e: any) => e.from === agentId);
-          if (edge) { currentAgentId = edge.to; currentContext = output; }
+          if (edge) { currentAgentId = edge.to; currentContext = nextContext; }
           else currentAgentId = null;
         }
 
