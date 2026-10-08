@@ -29,6 +29,35 @@ export async function POST(
     const { createServiceClient } = await import('@/lib/supabase/server');
     const supabase = createServiceClient();
 
+    // ── One run at a time ────────────────────────────────────────────────────
+    // A fresh start clears the mission's cached agent outputs and proposed actions,
+    // which would wipe the inputs and pending approval of a run that is still going
+    // (and a second run repeats its side effects). Zombie queued/running runs are
+    // closed by the watchdog; a paused run only blocks while its approval is pending.
+    const { data: inFlight } = await supabase
+      .from('mission_runs')
+      .select('id, status')
+      .eq('mission_id', missionId)
+      .eq('tenant_id', tenantId)
+      .in('status', ['queued', 'running', 'paused']);
+    const active = (inFlight ?? []).find(r => r.status !== 'paused');
+    let awaitingApproval = false;
+    if (!active && (inFlight ?? []).length > 0) {
+      const { count } = await supabase
+        .from('proposed_actions')
+        .select('*', { count: 'exact', head: true })
+        .eq('mission_id', missionId)
+        .eq('tenant_id', tenantId)
+        .eq('status', 'pending');
+      awaitingApproval = (count ?? 0) > 0;
+    }
+    if (active || awaitingApproval) {
+      const message = active
+        ? 'This mission is already running. Wait for the current run to finish before starting another.'
+        : 'This mission is waiting for your approval. Approve or reject it on the Approvals page before starting a new run.';
+      return NextResponse.json({ error: message, message, code: 'run_in_progress', runId: active?.id ?? inFlight![0].id }, { status: 409 });
+    }
+
     // Fetch mission data once — used for permission check, cache clear, and run row creation
     const { data: missionData } = await supabase
       .from('missions')
