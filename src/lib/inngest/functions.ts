@@ -426,6 +426,11 @@ export const executeMissionBackground = inngest.createFunction(
               payload: { finalOutput: output },
             });
 
+            // Read before the transition below, which can graduate the mission out of training.
+            const { data: trainingRow } = await supabase
+              .from('missions').select('training_enabled').eq('id', missionId).single();
+            const wasRehearsal = trainingRow?.training_enabled === true;
+
             await transitionMissionStatus(missionId, tenantId, 'completed');
 
             const durationMs = Date.now() - startedAt;
@@ -440,6 +445,10 @@ export const executeMissionBackground = inngest.createFunction(
                 { tier: 3, jsonMode: false, maxTokens: 256 },
               );
               runSummary = summaryResult.content?.slice(0, 1000) ?? null;
+              // The next run reads this as "work already done"; a training rehearsal did none.
+              if (runSummary && wasRehearsal) {
+                runSummary = `TRAINING REHEARSAL — nothing was actually created, sent or posted; IDs/URLs shown as "dry-run-preview" do not exist. ${runSummary}`;
+              }
             } catch (e) {
               console.warn('[Inngest] Run summary generation failed (non-fatal):', e);
             }
