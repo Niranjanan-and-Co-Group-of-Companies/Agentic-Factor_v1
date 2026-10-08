@@ -358,3 +358,11 @@ describe('approvalPreview with freely named content fields', () => {
     expect(approvalPreview(out)).toBe(JSON.stringify(out, null, 2));
   });
 });
+
+describe('isComposioRead — write words used as nouns', () => {
+  it.each(['NOTION_FETCH_ALL_BLOCK_CONTENTS', 'NOTION_FETCH_BLOCK_CONTENTS', 'GITHUB_GET_A_WORKFLOW_RUN', 'NOTION_BLOCK_CHILDREN_LIST'])(
+    '%s is a read', (slug) => { expect(classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps).toBe(false); });
+
+  it.each(['GITHUB_BLOCK_A_USER', 'NOTION_APPEND_BLOCK_CHILDREN', 'NOTION_DELETE_BLOCK', 'GITHUB_GET_OR_CREATE_LABEL', 'GITHUB_RERUN_A_WORKFLOW'])(
+    '%s still needs approval', (slug) => { expect(classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps).toBe(true); });
+});

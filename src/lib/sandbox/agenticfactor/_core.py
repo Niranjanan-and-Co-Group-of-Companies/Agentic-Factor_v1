@@ -286,11 +286,23 @@ _WRITE_VERBS = frozenset({
     'DECLINE', 'JOIN', 'LEAVE', 'KICK', 'BAN', 'RESTORE', 'RESET', 'REVOKE', 'GRANT', 'SYNC',
 })
 
+_NOUN_FOLLOWERS = frozenset({'CONTENTS', 'CONTENT', 'CHILDREN', 'CHILD', 'ID', 'IDS', 'INFO', 'DETAILS', 'LOGS', 'HISTORY', 'ARTIFACTS', 'JOBS'})
+_DETERMINERS = frozenset({'A', 'AN', 'THE', 'ALL', 'EACH', 'WORKFLOW'})
+
 def _is_composio_read(action_name: str) -> bool:
     """A read: some word after the app prefix is a read verb and none is a write verb
     (so GOOGLECALENDAR_EVENTS_LIST is a read). Mirrors isComposioRead in agent-loop.ts."""
     words = action_name.upper().split('_')[1:]
-    return any(w in _READ_VERBS for w in words) and not any(w in _WRITE_VERBS for w in words)
+    def noun_before(i):
+        return i + 1 < len(words) and words[i + 1] in _NOUN_FOLLOWERS
+    first_verb = next((w for i, w in enumerate(words) if w in _READ_VERBS or (w in _WRITE_VERBS and not noun_before(i))), None)
+    leads_with_read = first_verb in _READ_VERBS
+    def is_write(i, w):
+        # Write words that are nouns in context (Notion "block", a workflow "run") don't count.
+        if w not in _WRITE_VERBS or noun_before(i):
+            return False
+        return not (leads_with_read and i > 0 and words[i - 1] in _DETERMINERS)
+    return leads_with_read and not any(is_write(i, w) for i, w in enumerate(words))
 
 
 # ── Preview-pass stand-ins for deferred writes ──────────────────────────────

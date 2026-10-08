@@ -172,6 +172,13 @@ export function translateAgentError(error: string, agentRole: string): string {
 }
 
 function friendlyAgentError(error: string, agentRole: string): string {
+  // The platform's web-search plan is used up — no script change can fix this, so say what it is.
+  if (/tavily/i.test(error) && /\b432\b/.test(error)) {
+    return (
+      `Web search unavailable in agent "${agentRole}": the platform's web-search quota (Tavily) has been used up. ` +
+      `Research steps will fail until the search plan is topped up.`
+    );
+  }
   // A critic rejection is already a plain-English reason. Matching its text against the HTTP rules
   // below turned one (it mentioned a count of 401) into "OAuth token expired — reconnect the account".
   if (error.startsWith('Output failed critic review')) return error;
@@ -385,9 +392,18 @@ const COMPOSIO_WRITE_VERBS = new Set([
   'DECLINE', 'JOIN', 'LEAVE', 'KICK', 'BAN', 'RESTORE', 'RESET', 'REVOKE', 'GRANT', 'SYNC',
 ]);
 
+// Write words that are nouns in context: Notion's "block", a workflow "run". Kept narrow — this
+// decides what needs approval — so only a following noun, or a determiner after a leading read verb.
+const COMPOSIO_NOUN_FOLLOWERS = new Set(['CONTENTS', 'CONTENT', 'CHILDREN', 'CHILD', 'ID', 'IDS', 'INFO', 'DETAILS', 'LOGS', 'HISTORY', 'ARTIFACTS', 'JOBS']);
+const COMPOSIO_DETERMINERS = new Set(['A', 'AN', 'THE', 'ALL', 'EACH', 'WORKFLOW']);
 export function isComposioRead(slug: string): boolean {
   const words = slug.toUpperCase().split('_').slice(1);
-  return words.some(w => COMPOSIO_READ_VERBS.has(w)) && !words.some(w => COMPOSIO_WRITE_VERBS.has(w));
+  const nounBefore = (i: number) => COMPOSIO_NOUN_FOLLOWERS.has(words[i + 1] ?? '');
+  const firstVerb = words.find((w, i) => COMPOSIO_READ_VERBS.has(w) || (COMPOSIO_WRITE_VERBS.has(w) && !nounBefore(i)));
+  const leadsWithRead = !!firstVerb && COMPOSIO_READ_VERBS.has(firstVerb);
+  const isWrite = (w: string, i: number) => COMPOSIO_WRITE_VERBS.has(w) && !nounBefore(i) &&
+    !(leadsWithRead && i > 0 && COMPOSIO_DETERMINERS.has(words[i - 1]));
+  return leadsWithRead && !words.some(isWrite);
 }
 const COMPOSIO_IRREVERSIBLE_TOKENS = new Set([
   'SEND', 'SENDS', 'POST', 'PUBLISH', 'REPLY', 'FORWARD', 'DELETE', 'REMOVE', 'TRASH',
@@ -1773,7 +1789,17 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
           const criticCostBase = await calcCriticCost(criticResult.model, criticResult.inputTokens ?? 0, criticResult.outputTokens ?? 0);
           const criticCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(criticCostBase / 2) : criticCostBase;
           deductCritic(tenantId, criticCost, `critic_llm:${agent.role}`).catch(() => {});
-          const criticParsed = robustJSONParse(criticResult.content);
+          // A malformed verdict (e.g. an unescaped quote in the reason) used to fail the agent's attempt
+          // with "Failed to extract valid JSON". Read the verdict from the text; if there is none, pass.
+          let criticParsed: { valid?: boolean; reason?: string };
+          try {
+            criticParsed = robustJSONParse(criticResult.content);
+          } catch {
+            const verdict = /"valid"\s*:\s*(true|false)/i.exec(criticResult.content)?.[1]?.toLowerCase();
+            const reason = /"reason"\s*:\s*"([\s\S]*?)("\s*[,}]|$)/.exec(criticResult.content)?.[1];
+            console.warn(`[Agent ${agent.id}] Critic reply was not valid JSON; verdict read from text: ${verdict ?? 'none (passing)'}`);
+            criticParsed = { valid: verdict !== 'false', reason: reason ?? 'The reviewer rejected the output.' };
+          }
           if (!criticParsed.valid) {
             // Capture this as a feedback example before retrying — an
             // AI-self-detected mistake is a lower-confidence signal than a

@@ -16,3 +16,10 @@ describe('translateAgentError', () => {
     expect(translateAgentError('Processed 14012 rows then stopped: KeyError', 'X')).not.toContain('Authentication failed');
   });
 });
+
+describe('translateAgentError — provider quota', () => {
+  it('names an exhausted web-search quota', () => {
+    const msg = translateAgentError(`E2B execution error: APIError: [tavily] HTTP 432: {'detail': {'error': "This request exceeds your plan's set usage limit."}}`, 'Researcher');
+    expect(msg).toContain('web-search quota (Tavily) has been used up');
+  });
+});
