@@ -92,33 +92,48 @@ export async function POST(request: NextRequest) {
     const { callLLM } = await import('@/lib/services/llm-router');
     // The model otherwise assumes its training year ("Last updated: 2025" in a 2026 handbook).
     const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
-    const result = await callLLM(
-      [
-        // Customer-facing text must not carry made-up facts (a FAQ invented "support@novabrand.in").
-        { role: 'system' as const, content: `Today's date is ${today}. Never invent contact details, URLs, prices or statistics that are not given to you — write a clear placeholder in [brackets] instead.${system ? `\n\n${system}` : ''}` },
-        { role: 'user' as const, content: prompt },
-      ],
-      { tier: 2, jsonMode, maxTokens, temperature: 0.4 },
-    );
-    const credits = await calculateLLMCreditCost(result.model, result.inputTokens ?? 0, result.outputTokens ?? 0);
-    // actionType ends with ":<agent role>" so the run detail attributes it to this agent.
-    await deductCredits(claims.tenantId, credits, `sandbox_llm:${claims.agentRole}`, {
-      provider: result.provider, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens,
-    }).catch(err => console.error('[sandbox/llm] credit deduction failed:', err));
-    // Stopped at the token limit: the text ends mid-sentence. The SDK raises so the fixer can split the work.
-    const truncated = (result.outputTokens ?? 0) >= maxTokens;
-    if (truncated) return NextResponse.json({ text: result.content, model: result.model, credits, truncated });
+    const conversation = [
+      // Customer-facing text must not carry made-up facts (a FAQ invented "support@novabrand.in").
+      { role: 'system' as const, content: `Today's date is ${today}. Never invent contact details, URLs, prices or statistics that are not given to you — write a clear placeholder in [brackets] instead.${system ? `\n\n${system}` : ''}` },
+      { role: 'user' as const, content: prompt },
+    ];
+    let text = '';
+    let model = '';
+    let credits = 0;
+    let truncated = false;
+    // A text reply that hits the token limit stops mid-sentence. Ask once for the rest and join the two,
+    // so agents get complete sections without having to guess lengths (JSON can't be stitched safely).
+    for (let part = 0; part < (jsonMode ? 1 : 2); part++) {
+      const result = await callLLM(
+        part === 0 ? conversation : [...conversation,
+          { role: 'assistant' as const, content: text },
+          { role: 'user' as const, content: 'Continue exactly where you stopped. Do not repeat or summarise anything already written.' }],
+        { tier: 2, jsonMode, maxTokens, temperature: 0.4 },
+      );
+      const partCredits = await calculateLLMCreditCost(result.model, result.inputTokens ?? 0, result.outputTokens ?? 0);
+      // actionType ends with ":<agent role>" so the run detail attributes it to this agent.
+      await deductCredits(claims.tenantId, partCredits, `sandbox_llm:${claims.agentRole}`, {
+        provider: result.provider, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+      }).catch(err => console.error('[sandbox/llm] credit deduction failed:', err));
+      credits += partCredits;
+      model = result.model;
+      text += result.content; // appended as-is: the cut can fall mid-word
+      truncated = (result.outputTokens ?? 0) >= maxTokens;
+      if (!truncated) break;
+    }
+    // Still cut off after the continuation: the SDK raises so the fixer can split the work.
+    if (truncated) return NextResponse.json({ text, model, credits, truncated });
     if (phase === 'preview' && claims.runId) {
       const { error: previewErr } = await supabase.from('events').insert({
         tenant_id: claims.tenantId,
         event_type: PREVIEW_EVENT,
         entity_type: 'mission_run',
         entity_id: claims.runId,
-        payload: { agentRole: claims.agentRole, requestHash, text: result.content, model: result.model },
+        payload: { agentRole: claims.agentRole, requestHash, text, model },
       });
       if (previewErr) console.warn('[sandbox/llm] could not store preview text:', previewErr.message);
     }
-    return NextResponse.json({ text: result.content, model: result.model, credits });
+    return NextResponse.json({ text, model, credits });
   } catch (err) {
     console.error('[sandbox/llm] LLM call failed:', err);
     return NextResponse.json({ error: 'AI call failed', detail: (err as Error).message.slice(0, 300) }, { status: 502 });
