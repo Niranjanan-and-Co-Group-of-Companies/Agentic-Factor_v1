@@ -2,6 +2,7 @@ import { callLLM, generateEmbedding } from '../llm-router';
 import { createServiceClient } from '@/lib/supabase/server';
 import { Sandbox } from '@e2b/code-interpreter';
 import { robustJSONParse } from '@/lib/utils/json-parser';
+import { criticInputView } from './pipeline-context';
 import { createHash } from 'crypto';
 
 const scriptHash = (code: string) => createHash('sha256').update(code).digest('hex').slice(0, 16);
@@ -1729,7 +1730,7 @@ AGENT'S ROLE AND TASK:
 ${agent.systemPrompt || agent.role}
 
 INPUT THE AGENT RECEIVED (the previous agent's output, or the run's trigger data — in a pipeline it can be work on another part of the job, e.g. research on a different brand; the agent only has to use what concerns its own task):
-${(inputContext || '').slice(0, 1500)}
+${criticInputView(inputContext || '')}
 
 OUTPUT THE AGENT PRODUCED:
 ${finalOutputJSON}

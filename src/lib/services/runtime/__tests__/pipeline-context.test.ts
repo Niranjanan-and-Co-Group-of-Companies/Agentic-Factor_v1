@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { withPipelineHistory } from '../pipeline-context';
+import { criticInputView, withPipelineHistory } from '../pipeline-context';
 
 describe('withPipelineHistory', () => {
   it('keeps the previous output on top and adds every earlier output by role', () => {
@@ -32,5 +32,23 @@ describe('withPipelineHistory', () => {
       { role: 'Newest', output: '{"small":true}' },
     ]));
     expect(Object.keys(parsed._pipeline)).toEqual(['Middle', 'Newest']);
+  });
+});
+
+describe('criticInputView', () => {
+  it('shows every earlier part, not just the start of the previous output', () => {
+    const input = withPipelineHistory(JSON.stringify({ brand: 'Dot & Key', notes: 'x'.repeat(3000) }), [
+      { role: 'Researcher - Minimalist', output: '{"brand":"Minimalist"}' },
+      { role: 'Researcher - The Derma Co', output: '{"brand":"The Derma Co"}' },
+    ]);
+    const view = criticInputView(input);
+    expect(view).toContain('Dot & Key');
+    expect(view).toContain('From earlier agent "Researcher - Minimalist"');
+    expect(view).toContain('"brand":"The Derma Co"');
+  });
+
+  it('falls back to the first 1500 characters for ordinary input', () => {
+    expect(criticInputView('{"a":"' + 'y'.repeat(3000) + '"}')).toHaveLength(1500);
+    expect(criticInputView('plain')).toBe('plain');
   });
 });
