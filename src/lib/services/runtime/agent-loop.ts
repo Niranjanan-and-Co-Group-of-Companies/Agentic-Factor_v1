@@ -583,7 +583,15 @@ export function approvalPreview(output: unknown): string {
     pick('channel', 'channel_name') && `Channel: ${pick('channel', 'channel_name')}`,
     pick('subject', 'email_subject') && `Subject: ${pick('subject', 'email_subject')}`,
   ].filter(Boolean).join('\n');
-  const text = pick('body', 'email_body', 'body_preview', 'message', 'message_text', 'message_preview', 'slack_message', 'post_text', 'text', 'content', 'content_preview');
+  // Known names first, then the longest text field whose name says it holds the written content
+  // (agents name it freely: notes_content, report_markdown, summary_text, ...).
+  const contentLike = (): string | undefined => {
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    return Object.entries(parsed as Record<string, unknown>)
+      .filter(([k, v]) => typeof v === 'string' && v.length > 200 && /content|text|body|markdown|notes|summary|report|message|draft/i.test(k))
+      .sort((a, b) => (b[1] as string).length - (a[1] as string).length)[0]?.[1] as string | undefined;
+  };
+  const text = pick('body', 'email_body', 'body_preview', 'message', 'message_text', 'message_preview', 'slack_message', 'post_text', 'text', 'content', 'content_preview') ?? contentLike();
   if (header) return `${header}\n\n${text ?? ''}`.trim().slice(0, 12_000);
   if (text) return text.slice(0, 12_000);
   return (typeof output === 'string' ? output : JSON.stringify(output, null, 2)).slice(0, 6_000);

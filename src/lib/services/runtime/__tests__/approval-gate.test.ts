@@ -346,3 +346,15 @@ describe('approvalPreview message field names', () => {
     expect(approvalPreview({ channel: '#test', message_preview: 'Audit: 0 packages' })).toBe('Channel: #test\n\nAudit: 0 packages');
   });
 });
+
+describe('approvalPreview with freely named content fields', () => {
+  it('shows the longest content-like field', () => {
+    const notes = '# Kick-off notes\n' + 'Decision: 70/30 split. '.repeat(20);
+    expect(approvalPreview({ doc_id: 'dry-run-preview', notes_content: notes, status: 'created' })).toBe(notes);
+  });
+
+  it('ignores short or unrelated strings', () => {
+    const out = { doc_url: 'https://docs.google.com/document/d/x', status: 'created' };
+    expect(approvalPreview(out)).toBe(JSON.stringify(out, null, 2));
+  });
+});
