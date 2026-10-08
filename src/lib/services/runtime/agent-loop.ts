@@ -454,6 +454,11 @@ ${pythonCode}`.replace(/\x00/g, '');
         console.log(`[Agent ${agentId}] Phase 2: Side effects executed successfully.`);
         const cleanFinalStdout = finalStdout.split('\n').filter(line => !line.startsWith('__SIGNAL__:')).join('\n').trim();
         if (cleanFinalStdout) {
+          // Scripts usually catch API errors and print {"status": "failed", "error": ...}; that is a
+          // failed write, not a successful run, so surface it for the retry fixer instead of returning it.
+          let realFailure: string | null = null;
+          try { realFailure = reportedFailure(robustJSONParse(cleanFinalStdout)); } catch { /* not JSON */ }
+          if (realFailure) throw new Error(`Phase 2 real execution reported failure: ${realFailure}`);
           try {
             const parsed2 = robustJSONParse(cleanFinalStdout);
             const parsed1 = JSON.parse(dryRunOutputJSON);
@@ -474,6 +479,17 @@ ${pythonCode}`.replace(/\x00/g, '');
     throw phase2Err;
   }
   return finalOutputJSON;
+}
+
+// A top-level status of exactly "failed"/"error" means the script caught an API error itself.
+// ("failed:no_recipients"-style statuses are legitimate outcomes and are not matched.)
+export function reportedFailure(output: unknown): string | null {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return null;
+  const o = output as Record<string, unknown>;
+  const status = typeof o.status === 'string' ? o.status.trim().toLowerCase() : '';
+  if (status !== 'failed' && status !== 'error') return null;
+  const detail = o.error ?? o.message ?? o.reason;
+  return typeof detail === 'string' ? detail.slice(0, 800) : JSON.stringify(detail ?? `status: ${status}`).slice(0, 800);
 }
 
 // Short label of which external service an action targets — used by the
