@@ -14,6 +14,7 @@ interface Mission {
 interface Credits {
   remaining: number;
   topup: number;
+  used: number;
   plan: string;
 }
 
@@ -48,7 +49,7 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
         .limit(50),
       supabase
         .from('tenant_billing')
-        .select('credits_remaining, credits_topup, plan')
+        .select('credits_remaining, credits_topup, credits_used_this_month, plan')
         .eq('tenant_id', user.id)
         .single(),
     ]);
@@ -58,6 +59,7 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
       setCredits({
         remaining: creditsRes.data.credits_remaining ?? 0,
         topup: creditsRes.data.credits_topup ?? 0,
+        used: creditsRes.data.credits_used_this_month ?? 0,
         plan: creditsRes.data.plan ?? 'free',
       });
     }
@@ -67,7 +69,9 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
 
   const isCommandCenter = !activeMissionId;
   const total = credits ? credits.remaining + credits.topup : 0;
-  const creditPct = credits ? Math.min(100, Math.round(credits.remaining / Math.max(total, 1) * 100)) : 0;
+  // Fuel gauge: what's left out of what was available this period. It used to show the monthly bucket's
+  // share of the balance, so 12,947 credits (mostly top-up) drew a bar 38% full.
+  const creditPct = credits ? Math.min(100, Math.round(total / Math.max(total + credits.used, 1) * 100)) : 0;
 
   return (
     <div style={{
@@ -182,7 +186,7 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
             <div style={{ height: 3, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
               <div style={{
                 height: '100%', borderRadius: 4,
-                background: credits.remaining < 100 ? '#ef4444' : 'var(--accent)',
+                background: total < 100 ? '#ef4444' : 'var(--accent)',
                 width: `${creditPct}%`,
               }} />
             </div>
