@@ -15,6 +15,12 @@ describe('sandbox LLM token', () => {
     expect(out?.tokenId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it('carries the run id when given', async () => {
+    const out = await verifySandboxLLMToken(await mintSandboxLLMToken({ ...claims, runId: 'run-7' }));
+    expect(out?.runId).toBe('run-7');
+    expect((await verifySandboxLLMToken(await mintSandboxLLMToken(claims)))?.runId).toBeUndefined();
+  });
+
   it('has no sub claim, so the tenant-session JWT path can never accept it', async () => {
     const token = await mintSandboxLLMToken(claims);
     expect(decodeJwt(token).sub).toBeUndefined();

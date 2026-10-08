@@ -230,6 +230,7 @@ describe('classifyAgentActions — composio_execute', () => {
     'GITHUB_LIST_PULL_REQUESTS', 'GMAIL_FETCH_EMAILS', 'HUBSPOT_SEARCH_DEALS', 'GOOGLEDOCS_GET_DOCUMENT_BY_ID',
     // read verb not in second position
     'GOOGLECALENDAR_EVENTS_LIST', 'GITHUB_REPOS_GET_CONTENT', 'GOOGLESHEETS_BATCH_GET', 'NOTION_QUERY_DATABASE',
+    'GITHUB_WHO_AM_I',
   ])(
     '%s is read-only', (slug) => {
       expectRisk(cx(slug), 'read');

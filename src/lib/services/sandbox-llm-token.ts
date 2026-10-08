@@ -17,6 +17,8 @@ export interface SandboxLLMClaims {
   tenantId: string;
   missionId: string;
   agentRole: string;
+  /** Mission run the agent belongs to — lets the live phase reuse text the preview generated. */
+  runId?: string;
   tokenId: string;
 }
 
@@ -24,7 +26,10 @@ export async function mintSandboxLLMToken(
   claims: Omit<SandboxLLMClaims, 'tokenId'>,
   ttlSeconds = 1800,
 ): Promise<string> {
-  return new SignJWT({ tid: claims.tenantId, mid: claims.missionId, role: claims.agentRole, scope: SCOPE })
+  return new SignJWT({
+    tid: claims.tenantId, mid: claims.missionId, role: claims.agentRole, scope: SCOPE,
+    ...(claims.runId ? { rid: claims.runId } : {}),
+  })
     .setProtectedHeader({ alg: 'HS256' })
     .setJti(crypto.randomUUID())
     .setIssuedAt()
@@ -41,6 +46,7 @@ export async function verifySandboxLLMToken(token: string): Promise<SandboxLLMCl
       tenantId: payload.tid,
       missionId: typeof payload.mid === 'string' ? payload.mid : '',
       agentRole: typeof payload.role === 'string' ? payload.role : 'agent',
+      ...(typeof payload.rid === 'string' ? { runId: payload.rid } : {}),
       tokenId: payload.jti,
     };
   } catch {

@@ -273,7 +273,7 @@ if _custom_urls:
 
 _READ_VERBS = frozenset({
     'GET', 'LIST', 'SEARCH', 'FIND', 'FETCH', 'READ', 'CHECK', 'VIEW', 'QUERY',
-    'RETRIEVE', 'SHOW', 'DESCRIBE', 'LOOKUP', 'COUNT', 'DOWNLOAD', 'EXPORT',
+    'RETRIEVE', 'SHOW', 'DESCRIBE', 'LOOKUP', 'COUNT', 'DOWNLOAD', 'EXPORT', 'WHO',
 })
 _WRITE_VERBS = frozenset({
     'CREATE', 'UPDATE', 'DELETE', 'REMOVE', 'SEND', 'SENDS', 'POST', 'PUT', 'PATCH', 'ADD', 'INSERT',
@@ -371,12 +371,25 @@ def ask_ai(prompt: str, system: str = "", max_tokens: int = 1500, json_mode: boo
     resp = requests.post(
         f"{base}/api/sandbox/llm",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        json={"prompt": prompt, "system": system, "max_tokens": max_tokens, "json": json_mode},
+        # The preview's text is stored and handed back to the live run, so what was approved is what gets written.
+        json={"prompt": prompt, "system": system, "max_tokens": max_tokens, "json": json_mode,
+              "phase": "preview" if os.environ.get("AF_DRY_RUN", "0") == "1" else "live"},
         timeout=150,
     )
     if resp.status_code != 200:
         raise RuntimeError(f"ask_ai failed (HTTP {resp.status_code}): {resp.text[:300]}")
     return resp.json().get("text", "")
+
+
+def ask_ai_batch(prompts, system: str = "", max_tokens: int = 1500, json_mode: bool = False, max_workers: int = 4) -> list:
+    """Run several independent ask_ai prompts at the same time and return their texts in the same
+    order. Each AI call takes ~10-20s, so use this instead of calling ask_ai in a loop."""
+    from concurrent.futures import ThreadPoolExecutor
+    prompts = list(prompts)
+    if not prompts:
+        return []
+    with ThreadPoolExecutor(max_workers=max(1, min(max_workers, 6, len(prompts)))) as pool:
+        return list(pool.map(lambda p: ask_ai(p, system=system, max_tokens=max_tokens, json_mode=json_mode), prompts))
 
 
 def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:

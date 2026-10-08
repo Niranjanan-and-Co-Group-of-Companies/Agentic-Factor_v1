@@ -17,6 +17,14 @@ interface AgentConfig {
  * Sanitize LLM-generated Python code before execution.
  * Fixes common issues like unterminated string literals.
  */
+// How long one execution of an agent script may run. E2B's runCode default is 60s, which killed
+// scripts that write long documents with ask_ai. The sandbox outlives the script by setup time.
+export const SCRIPT_TIMEOUT_MS = 90_000;
+const SANDBOX_LIFETIME_MS = SCRIPT_TIMEOUT_MS + 60_000;
+// An agent's attempts, critic review and live (Phase 2) execution all run inside one Inngest step,
+// i.e. one 300s serverless invocation; stay under it.
+const STEP_BUDGET_MS = 285_000;
+
 /** Create an E2B sandbox with automatic retry on transient infrastructure failures. */
 async function createSandboxWithRetry(timeoutMs: number, maxAttempts = 3): Promise<InstanceType<typeof Sandbox>> {
   let lastErr: unknown;
@@ -176,7 +184,7 @@ function friendlyAgentError(error: string, agentRole: string): string {
   // E2B timeout
   if (error.toLowerCase().includes('timed out') || error.toLowerCase().includes('timeout')) {
     return (
-      `Timeout (120s) in agent "${agentRole}": The script ran too long. ` +
+      `Timeout (${SCRIPT_TIMEOUT_MS / 1000}s) in agent "${agentRole}": The script ran too long. ` +
       `The external API may be slow or unresponsive. ` +
       `Try reducing the data fetch scope in the mission description.`
     );
@@ -325,7 +333,7 @@ function classifyGenericCalls(code: string): ActionRisk[] {
 // word misread slugs like GOOGLECALENDAR_EVENTS_LIST as irreversible writes.)
 const COMPOSIO_READ_VERBS = new Set([
   'GET', 'LIST', 'SEARCH', 'FIND', 'FETCH', 'READ', 'CHECK', 'VIEW', 'QUERY',
-  'RETRIEVE', 'SHOW', 'DESCRIBE', 'LOOKUP', 'COUNT', 'DOWNLOAD', 'EXPORT',
+  'RETRIEVE', 'SHOW', 'DESCRIBE', 'LOOKUP', 'COUNT', 'DOWNLOAD', 'EXPORT', 'WHO',
 ]);
 const COMPOSIO_WRITE_VERBS = new Set([
   'CREATE', 'UPDATE', 'DELETE', 'REMOVE', 'SEND', 'SENDS', 'POST', 'PUT', 'PATCH', 'ADD', 'INSERT',
@@ -421,7 +429,7 @@ async function runRealSideEffects(
     const finalEnvs = { ...sandboxEnvs };
     delete finalEnvs['AF_DRY_RUN'];
 
-    const finalSandbox = await createSandboxWithRetry(120_000);
+    const finalSandbox = await createSandboxWithRetry(SANDBOX_LIFETIME_MS);
 
     try {
       const phase2Pkgs = getRequiredPackages(pythonCode);
@@ -462,7 +470,7 @@ matplotlib.use('Agg')
 
 ${pythonCode}`.replace(/\x00/g, '');
 
-      const finalExec = await finalSandbox.runCode(finalWrapped, { envs: finalEnvs });
+      const finalExec = await finalSandbox.runCode(finalWrapped, { envs: finalEnvs, timeoutMs: SCRIPT_TIMEOUT_MS });
       const finalStdout = finalExec.logs.stdout.join('\n').trim();
 
       if (finalExec.error) {
@@ -639,7 +647,7 @@ export async function executeAgent(
   try {
     const { mintSandboxLLMToken } = await import('../sandbox-llm-token');
     sandboxLLMEnv = {
-      AF_LLM_TOKEN: await mintSandboxLLMToken({ tenantId, missionId, agentRole: agent.role }),
+      AF_LLM_TOKEN: await mintSandboxLLMToken({ tenantId, missionId, agentRole: agent.role, runId }),
       AF_API_BASE: process.env.NEXT_PUBLIC_APP_URL || 'https://agenticfactor.io',
     };
   } catch (tokenErr) {
@@ -744,11 +752,18 @@ export async function executeAgent(
   // The whole attempt loop runs inside one Inngest step (one ~300s serverless invocation). When it
   // overran, the step was killed mid-attempt, retried from attempt 1, killed again, and the run went
   // silent until the watchdog. Stop starting attempts once the budget is mostly used, and fail clearly.
+  // Phase 1 attempts must leave room for the critic and a full-length Phase 2 (~30s setup + script),
+  // so each attempt's script timeout shrinks to the time left before that deadline.
   const loopStartedAt = Date.now();
-  const ATTEMPT_START_BUDGET_MS = 150_000;
+  const PHASE1_DEADLINE_MS = STEP_BUDGET_MS - SCRIPT_TIMEOUT_MS - 30_000;
+  const SANDBOX_SETUP_MS = 15_000;
+  const MIN_ATTEMPT_MS = 20_000;
+  let attemptTimeoutMs = SCRIPT_TIMEOUT_MS;
 
   while (attempts < maxAttempts) {
-    if (attempts > 0 && Date.now() - loopStartedAt > ATTEMPT_START_BUDGET_MS) {
+    const timeLeft = PHASE1_DEADLINE_MS - (Date.now() - loopStartedAt) - SANDBOX_SETUP_MS;
+    attemptTimeoutMs = Math.min(SCRIPT_TIMEOUT_MS, Math.max(timeLeft, MIN_ATTEMPT_MS));
+    if (attempts > 0 && timeLeft < MIN_ATTEMPT_MS) {
       throw new Error(
         `Agent "${agent.role}" ran out of time after ${attempts} attempt(s). ` +
         `The task may be too large for one step (e.g. a very long document written into the script). ${lastError}`
@@ -1005,7 +1020,7 @@ INSTRUCTIONS:
 11. **DO NOT CATCH FATAL ERRORS**: Let the script crash naturally on errors.
 12. **READING INPUT**: Previous agent data is in \`_input_data\` (parsed JSON dict) and \`_input\` (raw string).
 13. If you need to ask the user something, use \`ask_user()\`. The script will pause and resume when user responds.
-13b. **TEXT AT RUNTIME**: To summarise, write, translate, classify or analyse data the script fetched (emails, reports, briefs, posts, READMEs), call \`ask_ai(prompt, system="", max_tokens=1500, json_mode=False)\` from \`agenticfactor._core\` — it returns the AI's text. NEVER hard-code long documents into the script; keep scripts short and generate long text with ask_ai at runtime (max 4000 output tokens per call — split long documents into sections).
+13b. **TEXT AT RUNTIME**: To summarise, write, translate, classify or analyse data the script fetched (emails, reports, briefs, posts, READMEs), call \`ask_ai(prompt, system="", max_tokens=1500, json_mode=False)\` from \`agenticfactor._core\` — it returns the AI's text. NEVER hard-code long documents into the script; keep scripts short and generate long text with ask_ai at runtime (max 4000 output tokens per call — split long documents into sections). Each call takes 10-20s and the whole script must finish in ${SCRIPT_TIMEOUT_MS / 1000}s: for several independent pieces (one per template, section or item) use \`ask_ai_batch(prompts, system="", max_tokens=1500)\` from \`agenticfactor._core\`, which runs them in parallel and returns the texts in order — never call ask_ai in a loop.
 14. **MULTI-LINE STRINGS**: For multi-line text, use triple double-quotes (""" only, NEVER triple single-quotes '''). NEVER put raw HTML inside triple-quoted strings — it breaks Python syntax. Instead, build HTML using a list of strings joined together: lines = []; lines.append('<tr>'); html = '\n'.join(lines).
 15. **JSON IN STRINGS**: When building JSON manually, use json.dumps() instead of hand-crafting JSON strings with f-strings.
 16. **HTML CONTENT**: NEVER embed raw HTML directly in triple-quoted strings. ALWAYS build HTML by concatenating regular strings or using a list: parts = []; parts.append(f'<tr><td>{name}</td></tr>'); html = ''.join(parts). This prevents quote conflicts.
@@ -1255,7 +1270,7 @@ matplotlib.use('Agg')
 ${pythonCode}`;
 
       // Execute in E2B cloud sandbox (pre-warmed, <1s start time)
-      const sandbox = await createSandboxWithRetry(120_000);
+      const sandbox = await createSandboxWithRetry(SANDBOX_LIFETIME_MS);
 
       try {
         // Install only the packages this script actually imports — skip unused heavy deps.
@@ -1283,7 +1298,7 @@ ${pythonCode}`;
         const safeCode = wrappedCode.replace(/\x00/g, '');
         
         // Execute the agent's Python script
-        const execution = await sandbox.runCode(safeCode, { envs: sandboxEnvs });
+        const execution = await sandbox.runCode(safeCode, { envs: sandboxEnvs, timeoutMs: attemptTimeoutMs });
 
         const stdout = execution.logs.stdout.join('\n').trim();
         const stderr = execution.logs.stderr.join('\n').trim();
