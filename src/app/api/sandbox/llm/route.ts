@@ -90,9 +90,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const { callLLM } = await import('@/lib/services/llm-router');
+    // The model otherwise assumes its training year ("Last updated: 2025" in a 2026 handbook).
+    const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
     const result = await callLLM(
       [
-        ...(system ? [{ role: 'system' as const, content: system }] : []),
+        { role: 'system' as const, content: `Today's date is ${today}.${system ? `\n\n${system}` : ''}` },
         { role: 'user' as const, content: prompt },
       ],
       { tier: 2, jsonMode, maxTokens, temperature: 0.4 },
