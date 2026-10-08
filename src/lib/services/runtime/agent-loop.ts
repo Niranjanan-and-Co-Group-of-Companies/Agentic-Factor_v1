@@ -1441,7 +1441,9 @@ ${pythonCode}`;
         {
           console.log(`[Agent ${agent.id}] Running critic pass on output...`);
           const criticPrompt = `You are a strict but fair Critic reviewing an AI agent's work — not just whether its output is shaped correctly, but whether it actually accomplishes the task.
-
+${hasWriteOps ? `
+⚠️ THIS IS A PREVIEW RUN. The platform deliberately did NOT execute this agent's write actions (send, post, create doc/sheet/page/record); they run only after a human approves this preview. So "dry_run", "dry-run-preview" IDs/URLs, "not sent", "not created", or a status like "error"/"failed" that only reflects the missing write result are EXPECTED and must NEVER be a reason to fail. Judge only the content the agent prepared for those actions.
+` : ''}
 AGENT'S ROLE AND TASK:
 ${agent.systemPrompt || agent.role}
 
@@ -1467,7 +1469,8 @@ PASS if:
 - The output reasonably accomplishes the stated task, even if imperfect, sparse, or in an unexpected (but valid) format
 - An empty result is valid if the task is a search/lookup that legitimately found nothing
 - Extra fields, metadata, or differently-named-but-equivalent keys are always fine
-- Status values like "no_email", "failed:...", "skipped" are valid outcomes, not failures
+- Status values like "no_email", "failed:...", "skipped" are valid outcomes, not failures${hasWriteOps ? `
+- (Preview run) the prepared content for the write action is right, even though the write itself shows as dry_run / placeholder / not executed` : ''}
 
 Be a real critic, not a rubber stamp — but don't be pedantic about minor formatting choices.
 

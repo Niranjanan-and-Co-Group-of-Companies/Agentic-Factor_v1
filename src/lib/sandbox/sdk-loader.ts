@@ -117,19 +117,32 @@ def _is_composio_read(action_name: str) -> bool:
     parts = action_name.upper().split('_')
     return len(parts) >= 2 and parts[1] in _READ_VERBS
 
-class _DeferredResult(dict):
-    """Stand-in response for a write deferred by the preview pass. Any field lookup returns
-    another empty stand-in, so code that reads ids/urls from the response keeps running."""
-    def __missing__(self, key):
-        return _DeferredResult()
-    def __bool__(self):
-        return True
-    def __str__(self):
-        return dict.__repr__(self) if len(self) else ""
+_DEFERRED_ERROR_KEYS = frozenset({'error', 'errors', 'error_message', 'errormessage'})
+
+def _is_error_key(key):
+    return isinstance(key, str) and key.lower() in _DEFERRED_ERROR_KEYS
+
+class _DeferredValue(str):
+    """Any field of a write deferred by the preview pass: reads as a placeholder id/url,
+    is truthy, and supports further lookups, so success checks in agent code pass."""
+    def __new__(cls):
+        return super().__new__(cls, "dry-run-preview")
+    def __getitem__(self, key):
+        return None if _is_error_key(key) else _DeferredValue()
     def get(self, key, default=None):
-        if key in self:
-            return dict.__getitem__(self, key)
-        return _DeferredResult() if default is None else default
+        return self[key]
+    def __contains__(self, key):
+        return not _is_error_key(key)
+
+class _DeferredResult(dict):
+    """Stand-in response for a write deferred by the preview pass. Missing fields resolve to
+    a placeholder (error fields to None), so code that validates the response keeps running."""
+    def __missing__(self, key):
+        return None if _is_error_key(key) else _DeferredValue()
+    def get(self, key, default=None):
+        return dict.__getitem__(self, key) if dict.__contains__(self, key) else self.__missing__(key)
+    def __contains__(self, key):
+        return dict.__contains__(self, key) or not _is_error_key(key)
 
 def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:
     """Execute a Composio action for the current tenant entity.
