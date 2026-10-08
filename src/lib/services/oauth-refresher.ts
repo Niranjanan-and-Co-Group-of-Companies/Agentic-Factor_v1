@@ -178,12 +178,6 @@ export async function getValidTokens(tenantId: string, provider: string): Promis
   }
 }
 
-/**
- * Parses a mission's required permissions and checks if the tenant has valid tokens for all of them.
- * Attempts to silently refresh any expired tokens.
- * Returns an array of providers that are completely missing or hopelessly expired.
- * If the array is empty, all required permissions are valid.
- */
 /** Provider keys that satisfy a declared connector (e.g. 'google' is met by any Google app). */
 export const COMPOSIO_SLUG_ALIASES: Record<string, string[]> = {
   // 'google' is not a Composio toolkit; older blueprints declared it alongside the real
@@ -198,6 +192,12 @@ export const COMPOSIO_SLUG_ALIASES: Record<string, string[]> = {
   microsoftteams: ['microsoft', 'microsoftteams'],
 };
 
+/**
+ * Parses a mission's required permissions and checks if the tenant has valid tokens for all of them.
+ * Attempts to silently refresh any expired tokens.
+ * Returns an array of providers that are completely missing or hopelessly expired.
+ * If the array is empty, all required permissions are valid.
+ */
 export async function verifyMissionPermissions(missionId: string, tenantId: string): Promise<string[]> {
   const supabase = createServiceClient();
 
