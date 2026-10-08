@@ -874,9 +874,18 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
 
   console.log(`[intake] Discovery check — intent: ${intent.length} chars, fileContext: ${fileContext.length} chars, files: ${files?.length || 0}`);
 
+  // Without this the check asks customers whether they have a token for apps they already connected.
+  const { data: connectedRows } = await createServiceClient()
+    .from('tenant_permissions')
+    .select('provider')
+    .eq('tenant_id', tenantId);
+  const connectedNotice = connectedRows?.length
+    ? `\n\n[Connected integrations, already authorised — never ask about tokens, credentials or whether an account is connected: ${connectedRows.map(r => r.provider).join(', ')}]`
+    : '';
+
   const discoveryCheck = await callLLM([
     { role: 'system', content: discoveryPrompts[promptKey] },
-    { role: 'user', content: `Intent: ${intent}${fileNotice}${fileContext}${globalMemory}` }
+    { role: 'user', content: `Intent: ${intent}${fileNotice}${fileContext}${globalMemory}${connectedNotice}` }
   ], { jsonMode: true, temperature: 0.1, tier: 2, budgetContext: { tenantId, missionId: 'blueprint_generation' } });
   
   let discoveryData;
