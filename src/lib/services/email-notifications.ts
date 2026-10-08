@@ -37,6 +37,8 @@ async function sendEmail(params: EmailParams): Promise<boolean> {
           html_body: htmlBody,
           text_body: textBody || htmlBody.replace(/<[^>]+>/g, ''),
         }),
+        // Bounded: awaited inside request handlers with a 60s limit (a hang caused 504s).
+        signal: AbortSignal.timeout(10_000),
       });
       const data = await res.json();
       if (data.data?.succeeded > 0) {

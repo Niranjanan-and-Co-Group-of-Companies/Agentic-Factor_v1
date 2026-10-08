@@ -32,6 +32,10 @@ export async function sendOutreachEmail(options: EmailOptions): Promise<{ succes
       port: parseInt(process.env.ZOHO_SMTP_PORT || '587', 10),
       secure: false,
       auth: { user: zohoUser, pass: zohoPass },
+      // nodemailer defaults (2 min connect, 10 min socket) outlive the serverless request.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
     });
 
     const htmlContent = options.htmlBody || `
@@ -104,10 +108,12 @@ export async function sendEmail(options: EmailOptions): Promise<{ success: boole
       }));
     }
 
+    // Bounded: callers await this inside request handlers with a 60s limit (a hang caused 504s).
     const res = await fetch('https://api.smtp2go.com/v3/email/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': apiKey },
       body: JSON.stringify(emailPayload),
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (!res.ok) {
