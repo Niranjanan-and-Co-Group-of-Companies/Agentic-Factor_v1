@@ -170,6 +170,7 @@ You must decompose the user's intent into:
    - PREFER WebMCP (Model Context Protocol) or Semantic APIs for data extraction.
    - If an API is unavailable, prefer Vision Models to "read" the page.
    - **READING INPUT FROM PREVIOUS AGENTS**: The script MUST read input from the INPUT_CONTEXT environment variable: \`input_data = json.loads(os.environ.get('INPUT_CONTEXT', '{}'))\`. Do NOT use sys.stdin.read(). The \`_input\` and \`_input_data\` variables are also pre-set with the raw string and parsed JSON respectively.
+   - **PASS EARLIER RESULTS THROUGH**: when sequential agents each handle an independent part (one agent per brand, region or source), every agent must print \`{**input_data, "<its_part>": result}\` so earlier parts reach the final agent intact. Better still, give independent parts to one agent (e.g. loop over the brands with ask_ai_batch) instead of one agent per part.
    - The script must print its final output to \`sys.stdout\` as a JSON string.
    - **CRITICAL: DO NOT EMPTY THE BUCKET.** The script MUST parse the input JSON and merge its new output into it. If the previous agent generated a newsletter, keep it in the final JSON alongside your new status receipts so the final output contains ALL accumulated content.
    - **NEVER use sys.exit().** E2B sandbox treats ANY sys.exit() as a crash. Use print(json.dumps({...})) to output and let the script end naturally.

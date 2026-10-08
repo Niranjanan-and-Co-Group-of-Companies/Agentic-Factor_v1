@@ -163,7 +163,7 @@ export function sanitizePythonCode(code: string): string {
 
 // The retry fixer is prompted with this text, so the original error must survive translation —
 // a friendly summary alone ("Cannot reach the external API") leaves it nothing to fix.
-function translateAgentError(error: string, agentRole: string): string {
+export function translateAgentError(error: string, agentRole: string): string {
   const friendly = friendlyAgentError(error, agentRole);
   return friendly === error || friendly.includes('Original:')
     ? friendly
@@ -171,6 +171,9 @@ function translateAgentError(error: string, agentRole: string): string {
 }
 
 function friendlyAgentError(error: string, agentRole: string): string {
+  // A critic rejection is already a plain-English reason. Matching its text against the HTTP rules
+  // below turned one (it mentioned a count of 401) into "OAuth token expired — reconnect the account".
+  if (error.startsWith('Output failed critic review')) return error;
   // LinkedIn-specific 403 — most common cause of failed social missions
   if (
     (error.toLowerCase().includes('linkedin') || error.includes('ugcPosts') || error.includes('linkedin.com')) &&
@@ -183,14 +186,14 @@ function friendlyAgentError(error: string, agentRole: string): string {
     );
   }
   // Generic 403
-  if (error.includes('403') || error.toLowerCase().includes('forbidden')) {
+  if (/\b403\b/.test(error) || error.toLowerCase().includes('forbidden')) {
     return (
       `Permission denied (403) in agent "${agentRole}": The OAuth token lacks the required scope. ` +
       `Go to the Connectors page and reconnect the account with the correct permissions.`
     );
   }
   // 401
-  if (error.includes('401') || error.toLowerCase().includes('unauthorized')) {
+  if (/\b401\b/.test(error) || error.toLowerCase().includes('unauthorized')) {
     return (
       `Authentication failed (401) in agent "${agentRole}": The OAuth token has expired or been revoked. ` +
       `Go to the Connectors page and reconnect the account.`
@@ -1738,7 +1741,7 @@ PREVIEW RUN: this output comes from a safety dry run. Write actions (sending ema
 ` : ''}
 FAIL if:
 - The output doesn't address what the agent was supposed to do at all
-- The output contradicts or ignores the input it was given
+- The output contradicts or ignores the input it was given. Exception: in a pipeline an agent's input can be an earlier agent's work on a different part of the job (e.g. research on another brand) — adding its own part, and passing earlier data through, is correct
 - The content is generic or placeholder-like instead of reflecting the specific task${isFinalAgent && expectedOutputFormat ? `
 - Required core fields from the expected format are completely missing or have the wrong type` : ''}
 
