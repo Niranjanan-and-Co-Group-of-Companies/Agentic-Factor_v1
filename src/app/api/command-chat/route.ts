@@ -465,7 +465,12 @@ async function runCommandLoop(params: {
       body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4096, stream: true, system: systemPrompt, tools: CC_TOOLS, messages }),
     });
 
-    if (!res.ok) { send({ type: 'error', message: 'AI temporarily unavailable. Please try again.' }); break; }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[CommandChat] Anthropic ${res.status}: ${body.slice(0, 500)}`);
+      send({ type: 'error', message: `AI temporarily unavailable (${res.status}). Please try again.` });
+      break;
+    }
 
     const { textContent, contentBlocks, stopReason, inputTokens, outputTokens } =
       await parseCCStream(res, text => send({ type: 'delta', text }));
