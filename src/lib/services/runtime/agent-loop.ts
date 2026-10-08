@@ -1081,6 +1081,29 @@ CRITICAL FIX RULES (follow these EXACTLY):
 
     lastPythonCode = pythonCode;
 
+    // Composio silently ignores unknown parameters, so a misspelled one "succeeds" while doing
+    // nothing (e.g. an empty Google Doc reported as published). Reject such code before running it;
+    // the Composio-aware fixer gets the valid parameter names on the next attempt.
+    if (pythonCode.includes('composio_execute(')) {
+      try {
+        const { findComposioCalls, checkComposioParams } = await import('../composio-param-check');
+        const prefixes = [...new Set(findComposioCalls(pythonCode).map(c => c.action.split('_')[0].toLowerCase()))];
+        const { getComposioActionSchemas } = await import('../composio-actions');
+        const problems = checkComposioParams(pythonCode, await getComposioActionSchemas(prefixes));
+        if (problems.length > 0) {
+          lastError = `Composio parameter check failed before running — fix these calls:\n${problems.join('\n')}`;
+          console.warn(`[Agent ${agent.id}] ${lastError}`);
+          supabase.from('events').insert({
+            tenant_id: tenantId, event_type: 'agent.attempt_failed', entity_type: 'agent', entity_id: agent.id,
+            run_id: runId ?? null, payload: { missionId, role: agent.role, attempt: attempts, maxAttempts, error: lastError.slice(0, 1000) },
+          }).then(() => {}, () => {});
+          continue;
+        }
+      } catch (paramCheckErr) {
+        console.warn(`[Agent ${agent.id}] Composio parameter check skipped:`, (paramCheckErr as Error).message);
+      }
+    }
+
     // ── SMART EXECUTION MODE: detect write ops before any sandbox is allocated ──
     // Write agents:    Phase 1 (dry run, AF_DRY_RUN=1) validates safety → Phase 2 executes real side effects.
     // Read-only agents: bypass dry run entirely — one sandbox, direct execution. ~50% fewer sandbox launches.
