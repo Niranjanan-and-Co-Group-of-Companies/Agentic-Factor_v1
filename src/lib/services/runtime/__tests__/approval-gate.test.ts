@@ -340,3 +340,9 @@ describe('approvalPreview for messages', () => {
     expect(approvalPreview({ channel: '#growth', message: 'Weekly digest' })).toBe('Channel: #growth\n\nWeekly digest');
   });
 });
+
+describe('approvalPreview message field names', () => {
+  it('finds a Slack message reported as message_preview', () => {
+    expect(approvalPreview({ channel: '#test', message_preview: 'Audit: 0 packages' })).toBe('Channel: #test\n\nAudit: 0 packages');
+  });
+});

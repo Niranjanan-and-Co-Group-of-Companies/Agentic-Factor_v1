@@ -547,7 +547,7 @@ export function approvalPreview(output: unknown): string {
     pick('channel', 'channel_name') && `Channel: ${pick('channel', 'channel_name')}`,
     pick('subject', 'email_subject') && `Subject: ${pick('subject', 'email_subject')}`,
   ].filter(Boolean).join('\n');
-  const text = pick('body', 'email_body', 'message', 'message_text', 'content', 'content_preview');
+  const text = pick('body', 'email_body', 'body_preview', 'message', 'message_text', 'message_preview', 'slack_message', 'post_text', 'text', 'content', 'content_preview');
   if (header) return `${header}\n\n${text ?? ''}`.trim().slice(0, 12_000);
   if (text) return text.slice(0, 12_000);
   return (typeof output === 'string' ? output : JSON.stringify(output, null, 2)).slice(0, 6_000);
