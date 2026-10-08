@@ -1751,7 +1751,8 @@ PASS if:
 - Extra fields, metadata, or differently-named-but-equivalent keys are always fine
 - Status values like "no_email", "failed:...", "skipped" are valid outcomes, not failures
 - Saying a specific figure is not publicly available is CORRECT when the research didn't find it — never fail an output for honesty about missing data; invented numbers are the real failure
-- The same holds for details public sources don't reveal (e.g. job postings that don't name the team): marking them "unknown" / "not specified" and working with what is available is correct. Fail only if the agent ignored data it had or made details up${hasWriteOps ? `
+- The same holds for details public sources don't reveal (e.g. job postings that don't name the team): marking them "unknown" / "not specified" and working with what is available is correct. Fail only if the agent ignored data it had or made details up
+- For web research, judge the findings and how honestly they are reported, not the search process: a source that returned only listing or category pages, a different number of searches than planned, or fewer results than hoped are not failures${hasWriteOps ? `
 - (Preview run) the prepared content for the write action is right, even though the write itself shows as dry_run / placeholder / not executed` : ''}
 
 Be a real critic, not a rubber stamp — but don't be pedantic about minor formatting choices.
