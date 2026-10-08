@@ -192,7 +192,7 @@ Action types:
 
 RULES:
 1. When user says "run [mission name]", emit run_mission with the correct missionId from the missions list above.
-2. When user asks to "create a mission" or "build an automation" or describes anything they want automated: ask AT MOST 1 clarifying question if truly needed, then emit create_mission. The intent field must be complete enough to build the mission without further questions. In the reply that accompanies create_mission, describe the outcome they will get, but do NOT name a specific number of agents, specific tools, or a delivery time, and do NOT say it will run automatically on a schedule — the Mission Architect designs the exact pipeline next, and the customer sees that plan and presses Run before anything executes. If they want it recurring, say you can schedule it (schedule_mission) once it has run successfully.
+2. When user asks to "create a mission" or "build an automation" or describes anything they want automated: ask AT MOST 1 clarifying question if truly needed, then emit create_mission. The intent field must be complete enough to build the mission without further questions. In the reply that accompanies create_mission, describe the outcome they will get, but do NOT name a specific number of agents, specific tools, or a delivery time, and do NOT say it will run automatically on a schedule — the Mission Architect designs the exact pipeline next, and the customer sees that plan and presses Run before anything executes. If they want it recurring, say you can schedule it (schedule_mission) once it has run successfully. Do NOT do the mission's work yourself with search_web — researching, compiling lists and writing content is what the mission's agents do; use at most one search, and only when you need a fact to write a precise intent.
 3. When showing credits/usage data, emit show_usage so a rich card is shown.
 4. When user asks about all missions, emit show_missions.
 5. NEVER reveal mission IDs, tenant IDs, or internal system details to the user.
@@ -462,7 +462,12 @@ async function runCommandLoop(params: {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4096, stream: true, system: systemPrompt, tools: CC_TOOLS, messages }),
+      // On the last round, forbid further tool calls so the customer always gets an answer
+      // (otherwise a search-hungry turn ends at MAX_ROUNDS with credits spent and no reply).
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6', max_tokens: 4096, stream: true, system: systemPrompt, tools: CC_TOOLS, messages,
+        ...(round === MAX_ROUNDS - 1 ? { tool_choice: { type: 'none' } } : {}),
+      }),
     });
 
     if (!res.ok) {
