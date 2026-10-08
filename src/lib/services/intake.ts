@@ -884,6 +884,9 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
   const connectedNotice = connectedRows?.length
     ? `\n\n[Connected integrations, already authorised — never ask about tokens, credentials or whether an account is connected: ${connectedRows.map(r => r.provider).join(', ')}]`
     : '';
+  // Agents can discover these themselves; asking about them only delays the customer (a Notion
+  // mission got four questions about where to put one page).
+  const defaultsNotice = `\n\n[Never ask about details with a sensible default — choose it and proceed: where to save files (root of the connected Google Drive), where to put a Notion page (under any page the integration can access), which connected account or repo to use (the connected account; its most recently updated repo), file names or formatting the user didn't specify.]`;
 
   // The plan's clarification allowance covers the whole conversation. Each blueprint job used to start
   // fresh, so the architect asked about the same detail four times in a row.
