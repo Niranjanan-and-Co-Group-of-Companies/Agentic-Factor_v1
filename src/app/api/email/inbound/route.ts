@@ -17,6 +17,16 @@ import { inngest } from '@/lib/inngest/client';
 // ============================================================
 
 export async function POST(request: NextRequest) {
+  // SendGrid Inbound Parse doesn't sign requests and From headers are spoofable, so the parse URL
+  // configured in SendGrid must carry ?key=<INBOUND_EMAIL_SECRET>. Fail closed when unset.
+  const expectedKey = process.env.INBOUND_EMAIL_SECRET;
+  if (!expectedKey) {
+    return NextResponse.json({ error: 'Inbound email is not configured' }, { status: 503 });
+  }
+  if (request.nextUrl.searchParams.get('key') !== expectedKey) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
     // SendGrid sends multipart/form-data
     const formData = await request.formData();

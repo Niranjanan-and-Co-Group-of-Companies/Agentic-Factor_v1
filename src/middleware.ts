@@ -55,6 +55,16 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // ── Machine-to-machine mission triggers: external systems have no session, and each of these
+  //    routes authenticates the caller itself (webhook secret / customer API key / inbound secret).
+  if (
+    pathname.startsWith('/api/webhooks/trigger/') ||
+    pathname.startsWith('/api/v1/trigger/') ||
+    pathname === '/api/email/inbound'
+  ) {
+    return NextResponse.next();
+  }
+
   // ── Allow admin panel routes (secured by their own bcrypt+OTP auth, not Supabase) ──
   if (pathname.startsWith('/api/mgmt-x7k9/') || pathname.startsWith('/mgmt-x7k9')) {
     return NextResponse.next();
