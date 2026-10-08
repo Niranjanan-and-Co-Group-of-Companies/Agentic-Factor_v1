@@ -24,7 +24,9 @@ export const AgentDefinitionSchema = z.object({
   systemPrompt: z.string().optional().default(""),
   handoffProtocol: z.string().optional(),
   pythonScript: z.string().optional(),
-  trustLevel: z.enum(['autonomous', 'conditional', 'manual']).default('autonomous'),
+  // 'conditional' (irreversible actions — sends, posts, deletes — always ask) matches the
+  // orchestrator/persist defaults; customers opt an agent into 'autonomous' via PATCH /api/agents.
+  trustLevel: z.enum(['autonomous', 'conditional', 'manual']).default('conditional'),
 });
 
 // ============================================================

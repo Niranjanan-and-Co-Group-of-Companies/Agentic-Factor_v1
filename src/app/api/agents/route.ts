@@ -153,7 +153,7 @@ export async function PATCH(request: NextRequest) {
     // Verify ownership: agent must belong to this tenant
     const { data: agent } = await supabase
       .from('agents')
-      .select('id')
+      .select('id, mission_id')
       .eq('id', agentId)
       .eq('tenant_id', tenantId)
       .single();
@@ -170,6 +170,26 @@ export async function PATCH(request: NextRequest) {
 
     if (error) {
       throw new Error(`Failed to update trust level: ${error.message}`);
+    }
+
+    // The approval gate reads trustLevel from missions.mission_json, not agents.trust_level,
+    // so the change only takes effect once it is written there too.
+    const { data: missionRow } = await supabase
+      .from('missions')
+      .select('mission_json')
+      .eq('id', agent.mission_id)
+      .eq('tenant_id', tenantId)
+      .single();
+    const missionJson = missionRow?.mission_json as { agents?: Array<{ id: string; trustLevel?: string }> } | null;
+    const blueprintAgent = missionJson?.agents?.find(a => a.id === agentId);
+    if (missionJson && blueprintAgent) {
+      blueprintAgent.trustLevel = trustLevel;
+      const { error: jsonErr } = await supabase
+        .from('missions')
+        .update({ mission_json: missionJson })
+        .eq('id', agent.mission_id)
+        .eq('tenant_id', tenantId);
+      if (jsonErr) throw new Error(`Failed to update mission trust level: ${jsonErr.message}`);
     }
 
     return NextResponse.json({ success: true, agentId, trustLevel });
