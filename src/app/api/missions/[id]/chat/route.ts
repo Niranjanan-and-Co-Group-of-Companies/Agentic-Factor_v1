@@ -252,19 +252,37 @@ export async function POST(
           }),
         });
 
+        let streamed: Awaited<ReturnType<typeof parseAnthropicStream>>;
         if (!anthropicRes.ok) {
           const err = await anthropicRes.text();
           console.error('[chat] Anthropic error:', err);
           // detail is not shown in the chat UI; it carries Anthropic's reason (e.g. an invalid tool schema)
           let reason = err.slice(0, 300);
           try { reason = (JSON.parse(err) as { error?: { message?: string } }).error?.message?.slice(0, 300) ?? reason; } catch { /* raw */ }
-          send({ type: 'error', message: 'AI service temporarily unavailable. Please try again.', detail: `${anthropicRes.status}: ${reason}` });
-          controller.close();
-          return;
+          // Answer through the multi-provider router instead of failing (e.g. Anthropic balance exhausted);
+          // tools are unavailable in this mode but action tags in the text still work.
+          try {
+            const { callLLM } = await import('@/lib/services/llm-router');
+            const fallback = await callLLM(
+              [
+                { role: 'system', content: systemPrompt },
+                ...recentMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: String(m.content) })),
+              ],
+              { tier: 1, jsonMode: false, maxTokens: 4096, temperature: 0.5 },
+            );
+            send({ type: 'delta', text: fallback.content });
+            streamed = { textContent: fallback.content, contentBlocks: [], stopReason: 'end_turn', inputTokens: fallback.inputTokens ?? 0, outputTokens: fallback.outputTokens ?? 0 };
+          } catch (fallbackErr) {
+            console.error('[chat] Router fallback failed:', fallbackErr);
+            send({ type: 'error', message: 'AI service temporarily unavailable. Please try again.', detail: `${anthropicRes.status}: ${reason}` });
+            controller.close();
+            return;
+          }
+        } else {
+          streamed = await parseAnthropicStream(anthropicRes, text => send({ type: 'delta', text }));
         }
 
-        const { textContent, contentBlocks, stopReason, inputTokens, outputTokens } =
-          await parseAnthropicStream(anthropicRes, text => send({ type: 'delta', text }));
+        const { textContent, contentBlocks, stopReason, inputTokens, outputTokens } = streamed;
 
         const toolBlocks = contentBlocks.filter(b => b.type === 'tool_use' && b.id && b.name);
 
