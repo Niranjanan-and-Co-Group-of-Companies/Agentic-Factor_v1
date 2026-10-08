@@ -40,7 +40,8 @@ export async function PATCH(
       pause: ['active', 'building'],
       resume: ['paused', 'deadlocked'],
       cancel: ['active', 'building', 'paused', 'draft', 'pending_permissions', 'pending_validation', 'pending_approval', 'deadlocked'],
-      schedule: ['completed', 'paused', 'draft', 'failed'],
+      // Missions are created 'active', so a brand-new mission must be schedulable too.
+      schedule: ['completed', 'paused', 'draft', 'failed', 'active'],
       unschedule: ['paused'],
     };
 

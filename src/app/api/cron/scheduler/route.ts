@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { inngest } from '@/lib/inngest/client';
+import { cronMatches } from '@/lib/services/cron-match';
 
 // ============================================================
 // Cron Scheduler — Wakes up paused/scheduled missions
@@ -47,16 +48,18 @@ export async function GET(request: NextRequest) {
 
       if (!payload || !missionId || !tenantId) continue;
 
-      // Check if this mission is still paused (might have been manually resumed)
-      const { data: mission } = await supabase
+      const { data: mission, error: missionErr } = await supabase
         .from('missions')
-        .select('status')
+        .select('status, schedule_paused')
         .eq('id', missionId)
         .eq('tenant_id', tenantId)
-        .single();
+        .maybeSingle();
+      if (missionErr) continue; // never delete a schedule because of a transient read failure
 
-      if (!mission || mission.status !== 'paused') {
-        // Mission is no longer paused — clean up the wait event
+      // A one-time sleep belongs to a paused run; a recurring schedule lives until it is removed,
+      // whatever state the last run left the mission in (completed, failed, active...).
+      const orphaned = !mission || (payload.action !== 'schedule' && mission.status !== 'paused');
+      if (orphaned) {
         await supabase
           .from('events')
           .delete()
@@ -64,6 +67,7 @@ export async function GET(request: NextRequest) {
           .eq('event_type', 'mission.wait');
         continue;
       }
+      if (payload.action === 'schedule' && mission.schedule_paused) continue;
 
       let shouldWake = false;
 
@@ -112,6 +116,23 @@ export async function GET(request: NextRequest) {
         
         // Evaluate if current time matches the schedule
         shouldWake = matchesSchedule(config, now);
+
+        if (shouldWake) {
+          // Don't stack runs: skip while the previous one is still going or waiting for approval,
+          // and don't fire twice if the cron is invoked more than once in the same minute.
+          const { count: inFlight } = await supabase
+            .from('mission_runs')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId)
+            .in('status', ['queued', 'running', 'paused']);
+          const { count: firedThisMinute } = await supabase
+            .from('events')
+            .select('*', { count: 'exact', head: true })
+            .eq('entity_id', missionId)
+            .eq('event_type', 'mission.resumed_by_cron')
+            .gte('created_at', new Date(now.getTime() - 55_000).toISOString());
+          if ((inFlight ?? 0) > 0 || (firedThisMinute ?? 0) > 0) shouldWake = false;
+        }
       }
 
       if (shouldWake) {
@@ -178,6 +199,17 @@ export async function GET(request: NextRequest) {
             .delete()
             .eq('entity_id', missionId)
             .eq('event_type', 'mission.wait');
+        }
+
+        // A scheduled run is a fresh run: decided approvals from earlier runs must not carry over,
+        // or agents would replay last run's approved output / execute without a new review.
+        if (payload.action === 'schedule') {
+          await supabase
+            .from('proposed_actions')
+            .delete()
+            .eq('mission_id', missionId)
+            .eq('tenant_id', tenantId)
+            .neq('status', 'pending');
         }
 
         // Fire Inngest event — runs in background, no Vercel timeout risk.
@@ -317,6 +349,10 @@ function toLocalTime(utcNow: Date, timezone?: string): { hour: number; minute: n
  *       time: "HH:MM", timezone?: string, endDate?: string, maxRuns?: number }
  */
 function matchesSchedule(config: string | Record<string, any>, now: Date): boolean {
+  // Command Center and mission chat schedule with { cron, timezone }
+  if (typeof config === 'object' && config !== null && typeof config.cron === 'string') {
+    return cronMatches(config.cron, now, config.timezone);
+  }
   // Handle JSON config objects (custom schedules)
   if (typeof config === 'object' && config !== null) {
     if (config.type === 'custom') {
