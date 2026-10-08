@@ -519,7 +519,25 @@ export function reportedFailure(output: unknown): string | null {
 
 // Short label of which external service an action targets — used by the
 // /approvals page to pick a display icon/description for the review queue.
-function inferActionTarget(code: string, agentRole: string): string {
+const COMPOSIO_TARGETS: Record<string, string> = {
+  GMAIL: 'gmail', GOOGLESHEETS: 'sheets', GOOGLEDOCS: 'docs', GOOGLECALENDAR: 'calendar', GOOGLEDRIVE: 'drive',
+  SLACK: 'slack', GITHUB: 'github', NOTION: 'notion', LINKEDIN: 'linkedin', TWITTER: 'twitter',
+  FACEBOOK: 'facebook', INSTAGRAM: 'instagram', DISCORD: 'discord', WHATSAPP: 'whatsapp', HUBSPOT: 'hubspot',
+};
+
+export function inferActionTarget(code: string, agentRole: string): string {
+  // Prefer the write actions the script actually calls (riskiest first). Matching service names
+  // anywhere in the code labelled a Google Doc write "slack" because a prompt string mentioned Slack.
+  const writeSlugs = [...code.matchAll(/composio_execute\(\s*["']([A-Z][A-Z0-9_]+)["']/g)]
+    .map(m => m[1])
+    .filter(slug => classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps)
+    .sort((a, b) => Number(classifyAgentActions(`composio_execute("${b}", {})`).writeRisk === 'write_irreversible')
+      - Number(classifyAgentActions(`composio_execute("${a}", {})`).writeRisk === 'write_irreversible'));
+  if (writeSlugs.length > 0) {
+    const toolkit = writeSlugs[0].split('_')[0];
+    return COMPOSIO_TARGETS[toolkit] ?? toolkit.toLowerCase();
+  }
+
   const c = code.toLowerCase();
   if (c.includes('gmail')) return 'gmail';
   if (c.includes('sheet')) return 'sheets';

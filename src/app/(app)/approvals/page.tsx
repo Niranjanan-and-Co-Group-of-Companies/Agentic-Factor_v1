@@ -40,7 +40,9 @@ export default function ApprovalsPage() {
     const t = target.toLowerCase();
     if (t.includes('gmail') || t.includes('email')) return { icon: '📧', label: 'Send emails on your behalf' };
     if (t.includes('sheet') || t.includes('spreadsheet')) return { icon: '📊', label: 'Create & edit Google Sheets' };
+    if (t === 'docs' || t.includes('document')) return { icon: '📄', label: 'Create & edit Google Docs' };
     if (t.includes('calendar')) return { icon: '📅', label: 'Access your Google Calendar' };
+    if (t.includes('hubspot')) return { icon: '🧲', label: 'Update your HubSpot CRM' };
     if (t.includes('drive')) return { icon: '📁', label: 'Access your Google Drive files' };
     if (t.includes('tavily') || t.includes('search') || t.includes('web')) return { icon: '🔍', label: 'Search the web' };
     if (t.includes('twitter') || t.includes('tweet')) return { icon: '🐦', label: 'Post to Twitter/X' };

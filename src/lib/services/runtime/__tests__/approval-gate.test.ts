@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { classifyAgentActions, type ActionRisk } from '../agent-loop';
+import { classifyAgentActions, inferActionTarget, type ActionRisk } from '../agent-loop';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -250,6 +250,25 @@ describe('classifyAgentActions — composio_execute', () => {
 
   it('an action name held in a variable requires review', () => {
     expectWriteOps(`action = "GMAIL_" + verb\ncomposio_execute(action, params)`, true);
+  });
+});
+
+// ── Approval card target (icon + label on /approvals) ───────────────────────
+
+describe('inferActionTarget', () => {
+  it('uses the write action the script calls, not service names in its text', () => {
+    const code = `text = ask_ai("Compare integrations with Slack and GitHub")\ncomposio_execute("GOOGLEDOCS_CREATE_DOCUMENT", {"title": "SWOT"})`;
+    expect(inferActionTarget(code, 'Doc Publisher')).toBe('docs');
+  });
+
+  it('prefers the riskiest write when there are several', () => {
+    const code = `composio_execute("GOOGLEDOCS_CREATE_DOCUMENT", {})\ncomposio_execute("GMAIL_SEND_EMAIL", {})`;
+    expect(inferActionTarget(code, 'x')).toBe('gmail');
+  });
+
+  it('ignores reads and falls back to the role without writes', () => {
+    expect(inferActionTarget(`composio_execute("GITHUB_LIST_PULL_REQUESTS", {})`, 'PR Reader')).toBe('github');
+    expect(inferActionTarget(`print(1)`, 'Summariser')).toBe('summariser');
   });
 });
 
