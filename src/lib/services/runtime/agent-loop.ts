@@ -906,7 +906,17 @@ export async function executeAgent(
             composioHint = await buildComposioFixContext([...usedSlugs]).catch(() => '');
           }
 
+          // The fixer must know the agent's job and the runtime rules, not just the error: without them it
+          // kept "fixing" critic rejections ("output shows only metadata") by changing anything but the output.
           const composioFixPrompt = `You are an expert Python developer fixing a script that uses composio_execute().
+
+THE AGENT'S JOB (what the fixed script must accomplish):
+${(agent.systemPrompt || agent.role).slice(0, 4000)}
+
+RUNTIME RULES:
+- The whole script must finish within ${SCRIPT_TIMEOUT_MS / 1000}s. Generate text with \`ask_ai(prompt, system="", max_tokens=1500)\` from agenticfactor._core (10-20s per call, max 4000 tokens). For several independent pieces use \`ask_ai_batch([p1, p2, ...], system="", max_tokens=1500)\`, which runs them in parallel — never call ask_ai in a loop. If ask_ai reports its output was cut off, split the document into sections.
+- If the agent writes a document, email, message or post, the printed JSON MUST include the text it wrote (\`"content": text\`, or \`"content_preview": text[:10000]\`) next to the IDs/URLs. Output with only metadata fails review.
+- If the error is a failed review, change what the script produces so the reviewer's reason no longer applies.
 
 FAILED SCRIPT:
 \`\`\`python
