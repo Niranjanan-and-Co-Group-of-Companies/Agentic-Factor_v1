@@ -91,10 +91,10 @@ export async function POST(request: NextRequest) {
   try {
     const { callLLM } = await import('@/lib/services/llm-router');
     // The model otherwise assumes its training year ("Last updated: 2025" in a 2026 handbook).
-    const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
+    const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
     const conversation = [
       // Customer-facing text must not carry made-up facts (a FAQ invented "support@novabrand.in").
-      { role: 'system' as const, content: `Today's date is ${today}. Never invent contact details, URLs, prices, statistics, or product claims such as certifications, awards or safety and clinical claims ("cruelty-free", "dermatologist-tested") that are not given to you — write a clear placeholder in [brackets] instead.${system ? `\n\n${system}` : ''}` },
+      { role: 'system' as const, content: `Today's date is ${today}. Never invent contact details, URLs, prices, statistics, or product claims such as certifications, awards or safety and clinical claims ("cruelty-free", "dermatologist-tested") that are not given to you — write a clear placeholder in [brackets] instead. Never state the day of the week for a date unless it is given to you — models get weekdays wrong (interview emails called Wednesday 14 Oct a Tuesday); write the date without it.${system ? `\n\n${system}` : ''}` },
       { role: 'user' as const, content: prompt },
     ];
     let text = '';
