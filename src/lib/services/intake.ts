@@ -624,7 +624,8 @@ export function repairMissionPermissions(
 export async function generateMissionJSON(
   intent: string,
   tenantId: string,
-  files?: Array<{name: string; content: string}>
+  files?: Array<{name: string; content: string}>,
+  options: { priorQuestions?: string[] } = {},
 ): Promise<{ mission?: Mission; rawLLMOutput?: LLMOutput; isDiscovery?: boolean; question?: string }> {
   // ── Build file context from attached files ──
   let fileContext = '';
@@ -883,17 +884,26 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
     ? `\n\n[Connected integrations, already authorised — never ask about tokens, credentials or whether an account is connected: ${connectedRows.map(r => r.provider).join(', ')}]`
     : '';
 
-  const discoveryCheck = await callLLM([
-    { role: 'system', content: discoveryPrompts[promptKey] },
-    { role: 'user', content: `Intent: ${intent}${fileNotice}${fileContext}${globalMemory}${connectedNotice}` }
-  ], { jsonMode: true, temperature: 0.1, tier: 2, budgetContext: { tenantId, missionId: 'blueprint_generation' } });
-  
-  let discoveryData;
-  try {
-    discoveryData = robustJSONParse(discoveryCheck.content);
-  } catch {
-    console.warn('[intake] Discovery check returned non-JSON, skipping discovery');
-    discoveryData = { ready: true };
+  // The plan's clarification allowance covers the whole conversation. Each blueprint job used to start
+  // fresh, so the architect asked about the same detail four times in a row.
+  const priorQuestions = (options.priorQuestions ?? []).filter(q => q.trim());
+  const priorNotice = priorQuestions.length
+    ? `\n\n[Questions you already asked in this conversation — the user's answers are reflected in the intent. Never ask about these topics again; if a detail is still unclear, choose a sensible default and proceed:\n${priorQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}]`
+    : '';
+
+  let discoveryData: any = { ready: true };
+  if (priorQuestions.length >= maxQ) {
+    console.log(`[intake] Clarification allowance used (${priorQuestions.length}/${maxQ}) — building with sensible defaults.`);
+  } else {
+    const discoveryCheck = await callLLM([
+      { role: 'system', content: discoveryPrompts[promptKey] },
+      { role: 'user', content: `Intent: ${intent}${fileNotice}${fileContext}${globalMemory}${connectedNotice}${priorNotice}` }
+    ], { jsonMode: true, temperature: 0.1, tier: 2, budgetContext: { tenantId, missionId: 'blueprint_generation' } });
+    try {
+      discoveryData = robustJSONParse(discoveryCheck.content);
+    } catch {
+      console.warn('[intake] Discovery check returned non-JSON, skipping discovery');
+    }
   }
   if (!discoveryData.ready && discoveryData.question) {
     return { isDiscovery: true, question: discoveryData.question as string };

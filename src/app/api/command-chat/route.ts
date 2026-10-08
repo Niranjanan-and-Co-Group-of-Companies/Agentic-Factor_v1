@@ -763,9 +763,12 @@ export async function POST(request: NextRequest) {
           const jobId = crypto.randomUUID();
           try {
             const { inngest } = await import('@/lib/inngest/client');
+            // Questions the architect already asked in this conversation: it must not keep asking.
+            const { architectQuestionsIn } = await import('@/lib/utils/architect-question');
+            const priorQuestions = architectQuestionsIn(recentMessages);
             await inngest.send({
               name: 'mission/blueprint.generate',
-              data: { jobId, intent: actionPayload.intent as string, tenantId },
+              data: { jobId, intent: actionPayload.intent as string, tenantId, priorQuestions },
             });
             actionPayload = { type: 'building_blueprint', jobId };
           } catch (inngestErr) {

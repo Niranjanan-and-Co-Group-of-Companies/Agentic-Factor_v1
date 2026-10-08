@@ -596,7 +596,7 @@ export const generateBlueprintBackground = inngest.createFunction(
     triggers: [{ event: 'mission/blueprint.generate' }],
   },
   async ({ event, step }) => {
-    const { jobId, intent, tenantId, files } = event.data;
+    const { jobId, intent, tenantId, files, priorQuestions } = event.data;
     const supabase = createServiceClient();
 
     const updateJobStatus = async (status: string, data: Record<string, any> = {}) => {
@@ -636,7 +636,7 @@ export const generateBlueprintBackground = inngest.createFunction(
         await updateJobStatus('processing', { step: '🤖 AI architect is designing your agent team...' });
 
         const { generateMissionJSON } = await import('@/lib/services/intake');
-        const result = await generateMissionJSON(intent, tenantId, files);
+        const result = await generateMissionJSON(intent, tenantId, files, { priorQuestions });
 
         if (result.isDiscovery && result.question) {
           return { type: 'discovery' as const, question: result.question };
