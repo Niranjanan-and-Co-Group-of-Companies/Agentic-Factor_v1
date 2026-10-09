@@ -134,12 +134,14 @@ async function buildCommandContext(tenantId: string): Promise<{
   const failedMissions = missions?.filter(m => m.status === 'failed') ?? [];
   const draftMissions = missions?.filter(m => m.status === 'draft') ?? [];
 
+  const { getMissionSchedules, describeSchedule } = await import('@/lib/services/mission-schedule');
+  const schedules = await getMissionSchedules(supabase, tenantId, (missions ?? []).map(m => m.id)).catch(() => new Map());
   const missionLines = (missions ?? []).map(m => {
     const lastRun = runs?.find(r => r.mission_id === m.id);
     const lastRunStr = lastRun
       ? `last ran ${formatAgo(lastRun.started_at)} — ${lastRun.status}`
       : 'never run';
-    return `  • [${m.status.toUpperCase()}] "${m.title}" (id: ${m.id}) — ${lastRunStr}`;
+    return `  • [${m.status.toUpperCase()}] "${m.title}" (id: ${m.id}) — ${lastRunStr} — ${describeSchedule(schedules.get(m.id))}`;
   }).join('\n') || '  (no missions yet)';
 
   const recentRunLines = (runs ?? []).slice(0, 5).map(r => {
@@ -197,6 +199,7 @@ RULES:
 3. When showing credits/usage data, emit show_usage so a rich card is shown.
 4. When user asks about all missions, emit show_missions.
 5. NEVER reveal mission IDs, tenant IDs, or internal system details to the user.
+5b. An action you emit (schedule, pause, run…) only takes effect when the user clicks it. Never say a mission IS scheduled, paused or running unless the MISSIONS list above shows it — if you proposed it earlier and the list doesn't show it, propose it again.
 6. NEVER mention Composio, E2B, Supabase, or Inngest to the user.
 7. Keep replies concise and conversational. Under 150 words unless explaining a run failure or giving a capability overview.
 8. If a mission failed, proactively explain why based on its status — don't just say it failed.

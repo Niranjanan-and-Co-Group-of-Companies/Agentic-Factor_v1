@@ -157,18 +157,11 @@ export async function buildChatContext(
   // ── Schedule ─────────────────────────────────────────────────────────
   let scheduleInfo = 'No schedule set.';
   try {
-    const { data: sched } = await supabase
-      .from('mission_schedules')
-      .select('cron_expression, timezone, is_active, next_run_at')
-      .eq('mission_id', missionId)
-      .eq('tenant_id', tenantId)
-      .maybeSingle();
-    if (sched?.cron_expression) {
-      scheduleInfo = `${sched.cron_expression} (${sched.timezone ?? 'UTC'}), active: ${sched.is_active ? 'yes' : 'paused'}`;
-      if (sched.next_run_at) {
-        scheduleInfo += `, next: ${new Date(sched.next_run_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
-      }
-    }
+    // The schedule lives in the mission's mission.wait event (what the scheduler reads); the
+    // mission_schedules table this used to read is never written, so chat always saw "No schedule".
+    const { getMissionSchedules } = await import('@/lib/services/mission-schedule');
+    const sched = (await getMissionSchedules(supabase as any, tenantId, [missionId])).get(missionId);
+    if (sched) scheduleInfo = `${sched.cron} (${sched.timezone}), active: ${sched.paused ? 'paused' : 'yes'}`;
   } catch { /* non-fatal */ }
 
   // ── Tenant memory (business facts) ───────────────────────────────────
