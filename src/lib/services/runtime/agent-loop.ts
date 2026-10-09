@@ -1766,8 +1766,9 @@ ${pythonCode}`;
 ${hasWriteOps ? `
 ⚠️ THIS IS A PREVIEW RUN. The platform deliberately did NOT execute this agent's write actions (send, post, create doc/sheet/page/record); they run only after a human approves this preview. So "dry_run", "dry-run-preview" IDs/URLs, "not sent", "not created", or a status like "error"/"failed" that only reflects the missing write result are EXPECTED and must NEVER be a reason to fail. Judge only the content the agent prepared for those actions.
 ` : ''}
-${missionDescription ? `WHAT THE CUSTOMER ASKED FOR (the whole mission):
+${missionDescription ? `WHAT THE CUSTOMER ASKED FOR (the whole mission — for reference only):
 ${missionDescription.slice(0, 2000)}
+This agent is ONE step of that mission. Judge it only on its own task below; other steps handle the rest. Use the mission text only to check that specifics the customer gave (names, amounts, numbers, dates, recipients) are not replaced by different data.
 
 ` : ''}AGENT'S ROLE AND TASK:
 ${agent.systemPrompt || agent.role}
