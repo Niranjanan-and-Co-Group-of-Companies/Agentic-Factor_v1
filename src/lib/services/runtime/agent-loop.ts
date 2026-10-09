@@ -1023,6 +1023,7 @@ RUNTIME RULES:
 - If the agent writes a document, email, message or post, the printed JSON MUST include the text it wrote (\`"content": text\`, or \`"content_preview": text[:10000]\`) next to the IDs/URLs. Output with only metadata fails review.
 - If the error is a failed review, change what the script produces so the reviewer's reason no longer applies.
 - \`input_data["_pipeline"]\` holds every earlier agent's output keyed by role; if the review says data for some parts is missing, read those parts from there.
+- If the script found nothing, its output must say what it checked (repos/channels/inboxes, date range, items scanned) next to the zero.
 
 THE INPUT THIS SCRIPT RECEIVES (input_data, shortened — read fields by these exact names):
 ${describeInputShape(inputContext || '')}
@@ -1803,7 +1804,7 @@ FAIL if:
 
 PASS if:
 - The output reasonably accomplishes the stated task, even if imperfect, sparse, or in an unexpected (but valid) format
-- An empty result is valid if the task is a search/lookup/filter that legitimately found nothing — an empty list in the required structure is the correct output; never ask for example rows or a demonstration of the schema. If you conclude nothing was legitimately found, the verdict must be PASS
+- An empty result is valid if the task is a search/lookup/filter that legitimately found nothing — an empty list in the required structure is the correct output; never ask for example rows or a demonstration of the schema. If you conclude nothing was legitimately found, the verdict must be PASS. But a bare "no activity" / count 0 that does not say what was checked (which repos, channels, inboxes, date range, how many items scanned) FAILS — without that nobody can tell an empty week from a broken query
 - Extra fields, metadata, or differently-named-but-equivalent keys are always fine
 - Status values like "no_email", "failed:...", "skipped" are valid outcomes, not failures
 - Saying a specific figure is not publicly available is CORRECT when the research didn't find it — never fail an output for honesty about missing data; invented numbers are the real failure
