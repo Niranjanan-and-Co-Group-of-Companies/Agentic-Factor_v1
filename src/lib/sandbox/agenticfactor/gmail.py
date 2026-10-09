@@ -21,6 +21,19 @@ def _token():
     return _get_token("google")
 
 
+def _via_composio() -> bool:
+    """Composio-managed Google connections have no direct token: route through Composio instead.
+    (A mission's interview emails reported 'No access token for google' and would never have sent.)"""
+    return not os.environ.get("GOOGLE_ACCESS_TOKEN") and bool(os.environ.get("COMPOSIO_ENTITY_ID"))
+
+
+def _composio_data(result) -> Dict:
+    if isinstance(result, dict):
+        data = result.get("data", result)
+        return data if isinstance(data, dict) else {}
+    return {}
+
+
 def send(
     to: str,
     subject: str,
@@ -47,6 +60,15 @@ def send(
     Returns:
         Dict with message id and thread id
     """
+    if _via_composio() and not attachments and not reply_to:
+        from ._core import composio_execute
+        params: Dict[str, Any] = {"recipient_email": to, "subject": subject, "body": body, "is_html": html}
+        if cc:
+            params["cc"] = [a.strip() for a in cc.split(",") if a.strip()]
+        if bcc:
+            params["bcc"] = [a.strip() for a in bcc.split(",") if a.strip()]
+        data = _composio_data(composio_execute("GMAIL_SEND_EMAIL", params))
+        return {"id": data.get("id"), "threadId": data.get("threadId"), "status": "sent", "via": "composio"}
     token = _token()
     
     if attachments:
@@ -190,6 +212,11 @@ def draft(
     html: bool = False,
 ) -> Dict:
     """Create a draft email (not sent)."""
+    if _via_composio():
+        from ._core import composio_execute
+        data = _composio_data(composio_execute(
+            "GMAIL_CREATE_EMAIL_DRAFT", {"recipient_email": to, "subject": subject, "body": body, "is_html": html}))
+        return {"id": data.get("id"), "status": "draft_created", "via": "composio"}
     token = _token()
     
     content_type = "html" if html else "plain"
