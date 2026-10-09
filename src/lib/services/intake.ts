@@ -5,6 +5,7 @@ import { callLLM, generateEmbedding } from './llm-router';
 import { robustJSONParse, safeJSONParse } from '../utils/json-parser';
 import { readDecryptedToken } from './vault';
 import { MEMORY_EXTRACTION_PROMPT, cleanTenantFacts, formatTenantMemory } from './tenant-memory';
+import { restoreUnchangedScripts, UNCHANGED_SCRIPT } from './blueprint-edit';
 
 // ============================================================
 // Permission Normalizer — maps free-form service names to exact provider keys
@@ -1297,6 +1298,7 @@ EDITING CONTRACT:
 - Preserve the mission id and createdAt fields exactly
 - Change ONLY what the instruction specifies — leave everything else unchanged
 - If adding a new agent, use a placeholder id like "new-agent-0" (gets remapped to a real UUID after)
+- For every agent whose pythonScript the instruction does NOT require changing, set "pythonScript": "${UNCHANGED_SCRIPT}" — do not repeat it. Write a full script only for agents you change or add.
 - Return ONLY valid JSON — no markdown, no explanation, no code fences
 
 ${SYSTEM_PROMPT}`;
@@ -1345,6 +1347,10 @@ ${SYSTEM_PROMPT}`;
     llmOutput = LLMOutputSchema.parse(rawJSON);
   }
 
+  // Unchanged scripts were validated when they were written; only new or changed ones go through the fix passes.
+  const changedScripts = restoreUnchangedScripts(llmOutput.agents, currentBlueprint.agents);
+  const scriptsToValidate = () => llmOutput.agents.filter((a): a is typeof a & { pythonScript: string } => !!a.pythonScript && changedScripts.has(a.agentIndex));
+
   // Normalize permission service names
   if (llmOutput.permissions?.length > 0) {
     llmOutput.permissions = normalizePermissions(llmOutput.permissions as any) as any;
@@ -1383,8 +1389,7 @@ ${SYSTEM_PROMPT}`;
       if (validActions.size > 0) {
         const invalidActions = new Set<string>();
         const actionRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
-        for (const agent of llmOutput.agents) {
-          if (!agent.pythonScript) continue;
+        for (const agent of scriptsToValidate()) {
           actionRegex.lastIndex = 0;
           let match;
           while ((match = actionRegex.exec(agent.pythonScript)) !== null) {
@@ -1403,7 +1408,7 @@ Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected scrip
             },
             {
               role: 'user',
-              content: JSON.stringify(llmOutput.agents.filter(a => a.pythonScript).map(a => ({ agentIndex: a.agentIndex, pythonScript: a.pythonScript }))),
+              content: JSON.stringify(scriptsToValidate().map(a => ({ agentIndex: a.agentIndex, pythonScript: a.pythonScript }))),
             },
           ], { temperature: 0, jsonMode: true, tier: 2 });
           try {
@@ -1431,8 +1436,7 @@ Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected scrip
       if (actionSchemas.size > 0) {
         const usedActions = new Set<string>();
         const usedRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
-        for (const agent of llmOutput.agents) {
-          if (!agent.pythonScript) continue;
+        for (const agent of scriptsToValidate()) {
           usedRegex.lastIndex = 0;
           let m;
           while ((m = usedRegex.exec(agent.pythonScript)) !== null) usedActions.add(m[1]);
@@ -1458,7 +1462,7 @@ Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected scrip
             },
             {
               role: 'user',
-              content: JSON.stringify(llmOutput.agents.filter(a => a.pythonScript).map(a => ({ agentIndex: a.agentIndex, pythonScript: a.pythonScript }))),
+              content: JSON.stringify(scriptsToValidate().map(a => ({ agentIndex: a.agentIndex, pythonScript: a.pythonScript }))),
             },
           ], { temperature: 0, jsonMode: true, tier: 2 });
           try {
