@@ -32,7 +32,7 @@ export const executeMissionBackground = inngest.createFunction(
     triggers: [{ event: 'mission.execute' }],
   },
   async ({ event, step }) => {
-    const { missionId, tenantId, runId: incomingRunId, trigger: incomingTrigger, webhookPayload, selectedAgents, executionMode } = event.data;
+    const { missionId, tenantId, runId: incomingRunId, trigger: incomingTrigger, webhookPayload, selectedAgents, executionMode, resumeRunIds } = event.data;
 
     // ── Step 1: Fetch mission data + initialise run tracking ──
     const missionData = await step.run('fetch-mission', async () => {
@@ -301,19 +301,28 @@ export const executeMissionBackground = inngest.createFunction(
 
           const supabase = createServiceClient();
 
-          // Resume check: filter by run_id so run #2 never reuses run #1's outputs.
+          // Resume check: filter by run_id so run #2 never reuses run #1's outputs — except an explicit
+          // resume, which also reuses steps finished in the failed runs it continues.
+          const lookupRunIds = [runId, ...((resumeRunIds as string[] | undefined) ?? [])];
           const { data: existingEvents } = await supabase
             .from('events')
-            .select('payload')
+            .select('payload, run_id')
             .eq('tenant_id', tenantId)
             .eq('event_type', 'agent.completed')
             .eq('entity_id', agentToRun.id)
-            .eq('run_id', runId)
+            .in('run_id', lookupRunIds)
             .order('created_at', { ascending: false })
             .limit(1);
 
           if (existingEvents?.length && existingEvents[0].payload.output) {
-            console.log(`[Inngest] Agent ${agentToRun.role} already completed in this run. Using cached output.`);
+            console.log(`[Inngest] Agent ${agentToRun.role} already completed (run ${existingEvents[0].run_id}). Using cached output.`);
+            if (existingEvents[0].run_id !== runId) {
+              // Record it on this run too, so the run shows the step done and a later resume finds it.
+              await supabase.from('events').insert({
+                tenant_id: tenantId, event_type: 'agent.completed', entity_type: 'agent', entity_id: agentToRun.id,
+                run_id: runId, payload: { missionId, output: existingEvents[0].payload.output, resumedFrom: existingEvents[0].run_id },
+              });
+            }
             return { output: existingEvents[0].payload.output, finalCode: agentToRun.pythonScript || '', resumed: true };
           }
 

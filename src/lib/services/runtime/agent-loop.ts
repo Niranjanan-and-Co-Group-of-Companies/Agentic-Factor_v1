@@ -1145,6 +1145,7 @@ RUNTIME RULES:
 - If the error is a failed review, change what the script produces so the reviewer's reason no longer applies.
 - \`input_data["_pipeline"]\` holds every earlier agent's output keyed by role; if the review says data for some parts is missing, read those parts from there.
 - If the script found nothing, its output must say what it checked (repos/channels/inboxes, date range, items scanned) next to the zero.
+- This script may already have run partway (a retry after a partial failure): before creating a record, look it up by its natural key (name, number, title + date) and reuse it — never create a duplicate.
 - If the toolkit has no action for what the script needs (e.g. Zoho Books reports), call the app's REST API through the customer's connection: \`composio_proxy("<toolkit_slug>", "GET", "/path", params={...}, body=None)\` from agenticfactor._core — never approximate the data from other actions.
 
 THE INPUT THIS SCRIPT RECEIVES (input_data, shortened — read fields by these exact names):

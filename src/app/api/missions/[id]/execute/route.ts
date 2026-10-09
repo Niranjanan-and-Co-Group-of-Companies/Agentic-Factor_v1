@@ -196,11 +196,31 @@ export async function POST(
       agents_failed: 0,
     });
 
+    // A resume reuses the steps that finished in the failed or paused runs since the last completed
+    // one. Each run gets a new id and the completed-step check is per run, so "Resume from failed
+    // point" re-ran every step — and re-created everything a finished write step had created.
+    let resumeRunIds: string[] = [];
+    if (mode === 'resume') {
+      const { data: recent } = await supabase
+        .from('mission_runs')
+        .select('id, status')
+        .eq('mission_id', missionId)
+        .eq('tenant_id', tenantId)
+        .neq('id', runId)
+        .order('started_at', { ascending: false })
+        .limit(10);
+      for (const r of recent ?? []) {
+        if (r.status === 'completed') break;
+        resumeRunIds.push(r.id);
+      }
+    }
+
     // ── Send to Inngest ─────────────────────────────────────────────────────
     await inngest.send({
       name: 'mission.execute',
       data: {
         missionId, tenantId, mode, runId,
+        ...(resumeRunIds.length ? { resumeRunIds } : {}),
         ...(selectedAgents ? { selectedAgents, executionMode } : {}),
       },
     });
