@@ -374,19 +374,22 @@ def _connected_account_id(toolkit: str) -> str:
     return items[0]["id"]
 
 
-def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Dict] = None, body: Any = None, headers: Optional[Dict] = None) -> Any:
+def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Dict] = None, body: Any = None, headers: Optional[Dict] = None, binary: Optional[bytes] = None, content_type: str = "application/octet-stream") -> Any:
     """Call an app's own REST API through the customer's Composio connection, for anything the
     toolkit has no action for. Zoho Books has no report actions, so a P&L is:
         composio_proxy("zoho_books", "GET", "/reports/profitandloss",
                        params={"organization_id": org_id, "from_date": "2025-04-01", "to_date": "2026-03-31"})
     endpoint is a path relative to the connected account's API base (as in the app's REST API
-    docs) or an absolute URL. Returns the response body. Writes (POST/PUT/PATCH/DELETE) are
-    deferred in previews like composio_execute writes. Kept in sync with CORE_FALLBACK."""
+    docs) or an absolute URL. binary= sends raw file bytes, e.g. a generated XLSX to Google Drive:
+        composio_proxy("googledrive", "POST", "https://www.googleapis.com/upload/drive/v3/files?uploadType=media",
+                       binary=xlsx_bytes, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    Returns the response body. Writes (POST/PUT/PATCH/DELETE) are deferred in previews like
+    composio_execute writes. Kept in sync with CORE_FALLBACK."""
     method = method.upper()
     label = f"{toolkit.upper()} {method} {endpoint}"
     if os.environ.get("AF_DRY_RUN", "0") == "1" and method not in ("GET", "HEAD"):
         sys.stderr.write(f"[DRY_RUN] Skipped composio_proxy({label}) — write op deferred\\n")
-        _record_deferred(label, body if body is not None else params)
+        _record_deferred(label, body if body is not None else (params if binary is None else {**(params or {}), "file": f"{len(binary)} bytes ({content_type})"}))
         return _DeferredResult({"status": "ok", "dry_run": True, "action": label})
 
     def value(v):
@@ -397,6 +400,9 @@ def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Di
     payload = {"endpoint": endpoint, "method": method, "connected_account_id": _connected_account_id(toolkit), "parameters": parameters}
     if body is not None:
         payload["body"] = body
+    if binary is not None:
+        import base64
+        payload["binary_body"] = {"base64": base64.b64encode(binary).decode(), "content_type": content_type}
     resp = requests.post(
         "https://backend.composio.dev/api/v3.1/tools/execute/proxy",
         headers={"x-api-key": os.environ.get("COMPOSIO_API_KEY", ""), "Content-Type": "application/json"},

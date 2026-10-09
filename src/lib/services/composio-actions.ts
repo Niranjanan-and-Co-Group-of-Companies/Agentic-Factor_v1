@@ -319,6 +319,9 @@ NO ACTION FOR IT? Some toolkits lack whole areas (Zoho Books has no report actio
   from agenticfactor._core import composio_proxy
   pnl = composio_proxy("zoho_books", "GET", "/reports/profitandloss", params={"organization_id": org_id, "from_date": "2025-04-01", "to_date": "2026-03-31"})
 The first argument is the toolkit slug; the path is relative to the app's API base, as in the app's REST API docs. GET reads run in previews; POST/PUT/PATCH/DELETE are writes and go through approval like composio_execute writes.
+FILES the script generates (an .xlsx built with openpyxl, a .pdf, an image) are uploaded the same way, as raw bytes — e.g. to the customer's Google Drive:
+  f = composio_proxy("googledrive", "POST", "https://www.googleapis.com/upload/drive/v3/files?uploadType=media", binary=data, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+  composio_proxy("googledrive", "PATCH", f"https://www.googleapis.com/drive/v3/files/{f['id']}", body={"name": "Report.xlsx"})
 
 COMPOSIO CALL RULE — ABSOLUTE (applies to reads AND writes, every single interaction):
 For ALL services listed above (${slugList}), you MUST use composio_execute() for EVERY call — lookups, searches, reads, and writes.
