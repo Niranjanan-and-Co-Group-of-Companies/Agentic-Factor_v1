@@ -408,10 +408,11 @@ def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Di
         return _DeferredResult({"status": "ok", "dry_run": True, "action": label})
 
     def value(v):
-        return str(v).lower() if isinstance(v, bool) else (v if isinstance(v, (int, float)) else str(v))
+        return str(v).lower() if isinstance(v, bool) else str(v)
 
-    parameters = [{"in": "query", "name": k, "value": value(v)} for k, v in (params or {}).items() if v is not None]
-    parameters += [{"in": "header", "name": k, "value": str(v)} for k, v in (headers or {}).items()]
+    # Composio's proxy wants {name, type: "query" | "header", value: string}.
+    parameters = [{"name": k, "type": "query", "value": value(v)} for k, v in (params or {}).items() if v is not None]
+    parameters += [{"name": k, "type": "header", "value": str(v)} for k, v in (headers or {}).items()]
     payload = {"endpoint": endpoint, "method": method, "connected_account_id": account_id, "parameters": parameters}
     if body is not None:
         payload["body"] = body
