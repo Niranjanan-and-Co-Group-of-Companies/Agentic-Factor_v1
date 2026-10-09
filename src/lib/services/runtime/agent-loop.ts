@@ -1773,6 +1773,7 @@ ${pythonCode}`;
         {
           console.log(`[Agent ${agent.id}] Running critic pass on output...`);
           const criticPrompt = `You are a strict but fair Critic reviewing an AI agent's work — not just whether its output is shaped correctly, but whether it actually accomplishes the task.
+Today is ${new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}. Dates up to today are past or present — never fail an output for using "future" dates that are not after today.
 ${hasWriteOps ? `
 ⚠️ THIS IS A PREVIEW RUN. The platform deliberately did NOT execute this agent's write actions (send, post, create doc/sheet/page/record); they run only after a human approves this preview. So "dry_run", "dry-run-preview" IDs/URLs, "not sent", "not created", or a status like "error"/"failed" that only reflects the missing write result are EXPECTED and must NEVER be a reason to fail. Judge only the content the agent prepared for those actions.
 ` : ''}
@@ -1805,6 +1806,7 @@ FAIL if:
 PASS if:
 - The output reasonably accomplishes the stated task, even if imperfect, sparse, or in an unexpected (but valid) format
 - An empty result is valid if the task is a search/lookup/filter that legitimately found nothing — an empty list in the required structure is the correct output; never ask for example rows or a demonstration of the schema. If you conclude nothing was legitimately found, the verdict must be PASS. But a bare "no activity" / count 0 that does not say what was checked (which repos, channels, inboxes, date range, how many items scanned) FAILS — without that nobody can tell an empty week from a broken query
+- When the task or the mission says what happens if nothing qualifies (a fallback list the customer supplied, default content, "if none…"), finding nothing — or fewer than hoped — is an expected outcome: PASS when the output says what was checked and how many items were reviewed. Never demand a per-item explanation of why each item didn't qualify
 - Extra fields, metadata, or differently-named-but-equivalent keys are always fine
 - Status values like "no_email", "failed:...", "skipped" are valid outcomes, not failures
 - Saying a specific figure is not publicly available is CORRECT when the research didn't find it — never fail an output for honesty about missing data; invented numbers are the real failure
