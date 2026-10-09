@@ -6,6 +6,7 @@ import { robustJSONParse, safeJSONParse } from '../utils/json-parser';
 import { readDecryptedToken } from './vault';
 import { MEMORY_EXTRACTION_PROMPT, cleanTenantFacts, formatTenantMemory } from './tenant-memory';
 import { restoreUnchangedScripts, UNCHANGED_SCRIPT } from './blueprint-edit';
+import { autoFixComposioParams, checkComposioParams } from './composio-param-check';
 
 // ============================================================
 // Permission Normalizer — maps free-form service names to exact provider keys
@@ -1434,36 +1435,21 @@ Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected scrip
       const { getComposioActionSchemas } = await import('./composio-actions');
       const actionSchemas = await getComposioActionSchemas(connectedProviders);
       if (actionSchemas.size > 0) {
-        const usedActions = new Set<string>();
-        const usedRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
+        // Rename the unambiguous mistakes in place; only scripts that still have problems go to the LLM.
+        const needsFix: Array<{ agentIndex: number; pythonScript: string; problems: string[] }> = [];
         for (const agent of scriptsToValidate()) {
-          usedRegex.lastIndex = 0;
-          let m;
-          while ((m = usedRegex.exec(agent.pythonScript)) !== null) usedActions.add(m[1]);
+          agent.pythonScript = autoFixComposioParams(agent.pythonScript, actionSchemas).code;
+          const problems = checkComposioParams(agent.pythonScript, actionSchemas);
+          if (problems.length > 0) needsFix.push({ agentIndex: agent.agentIndex, pythonScript: agent.pythonScript, problems });
         }
-        const schemaRef: Record<string, { required: string[]; properties: Record<string, string> }> = {};
-        for (const actionName of usedActions) {
-          const schema = actionSchemas.get(actionName);
-          if (schema) {
-            const props: Record<string, string> = {};
-            for (const [param, info] of Object.entries(schema.input_parameters?.properties ?? {})) {
-              props[param] = (info as any).type ?? 'any';
-            }
-            schemaRef[actionName] = { required: schema.input_parameters?.required ?? [], properties: props };
-          }
-        }
-        if (Object.keys(schemaRef).length > 0) {
+        if (needsFix.length > 0) {
           const paramResp = await callLLM([
             {
               role: 'system',
-              content: `Fix wrong or missing composio_execute() parameter names.
-Schemas: ${JSON.stringify(schemaRef, null, 2)}
-Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected script"}]} or {"agents": []} if no changes needed.`,
+              content: `Fix the listed composio_execute() parameter problems. Change nothing else.
+Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected script"}]}`,
             },
-            {
-              role: 'user',
-              content: JSON.stringify(scriptsToValidate().map(a => ({ agentIndex: a.agentIndex, pythonScript: a.pythonScript }))),
-            },
+            { role: 'user', content: JSON.stringify(needsFix) },
           ], { temperature: 0, jsonMode: true, tier: 2 });
           try {
             const paramFixes = robustJSONParse(paramResp.content);
