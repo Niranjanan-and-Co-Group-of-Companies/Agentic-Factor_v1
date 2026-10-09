@@ -290,6 +290,24 @@ def ask_ai_batch(prompts, system: str = "", max_tokens: int = 1500, json_mode: b
     with ThreadPoolExecutor(max_workers=max(1, min(max_workers, 6, len(prompts)))) as pool:
         return list(pool.map(lambda p: ask_ai(p, system=system, max_tokens=max_tokens, json_mode=json_mode), prompts))
 
+def _slack_ts_params(action_name: str, params: Any) -> Any:
+    """Slack timestamps must have at most 6 decimals. str(time.time() - 7 * 86400) has 7, and
+    Composio re-placed the decimal point 6 digits from the end ('1790946094.1895018' became
+    '17909460941.895018', centuries ahead), so every history read came back empty."""
+    if not action_name.startswith("SLACK_") or not isinstance(params, dict):
+        return params
+    fixed = dict(params)
+    for key in ("oldest", "latest"):
+        value = fixed.get(key)
+        if isinstance(value, bool) or value is None or value == "":
+            continue
+        try:
+            fixed[key] = f"{float(value):.6f}"
+        except (TypeError, ValueError):
+            pass
+    return fixed
+
+
 def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:
     """Execute a Composio action for the current tenant entity.
     Use instead of api.call() for any provider connected via Composio OAuth.
@@ -297,6 +315,7 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
     In DRY_RUN mode: reads execute normally (so downstream code gets real IDs),
     writes are safely mocked.
     """
+    params = _slack_ts_params(action_name, params)
     dry_run = os.environ.get("AF_DRY_RUN", "0") == "1"
     if dry_run and not _is_composio_read(action_name):
         sys.stderr.write(f"[DRY_RUN] Skipped composio_execute({action_name}) — write op deferred\\n")
