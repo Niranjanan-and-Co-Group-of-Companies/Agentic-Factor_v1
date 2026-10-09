@@ -587,6 +587,24 @@ export function reportedFailure(output: unknown): string | null {
  * it (content / content_preview), otherwise the output itself. A 3000-character cut of the raw JSON hid
  * most of a long document — a FAQ's payment answers never reached the reviewer.
  */
+/**
+ * The shape (field names and types, no values) of each Composio response the script received, as
+ * the sandbox SDK reports it on stderr (`__AF_SHAPE__:{json}`). Fixers guessed response fields: a
+ * Gmail script read 'internalDate' where Composio sends 'messageTimestamp' and dated every email 1970.
+ */
+export function parseResponseShapes(stderr: string): string {
+  const lines: string[] = [];
+  for (const line of stderr.split('\n')) {
+    const at = line.indexOf('__AF_SHAPE__:');
+    if (at === -1) continue;
+    try {
+      const s = JSON.parse(line.slice(at + '__AF_SHAPE__:'.length));
+      if (typeof s?.action === 'string' && typeof s?.shape === 'string') lines.push(`${s.action} → ${s.shape}`);
+    } catch { /* truncated line */ }
+  }
+  return lines.slice(0, 12).join('\n').slice(0, 6000);
+}
+
 export interface DeferredWrite { action: string; params: unknown }
 
 /** Writes the preview deferred, as reported by the sandbox SDK on stderr (`__AF_DEFERRED__:{json}`). */
@@ -892,6 +910,8 @@ export async function executeAgent(
   let attempts = 0;
   const maxAttempts = 5;
   let lastError = '';
+  // What the script's Composio calls actually returned on the last attempt — shown to the fixers.
+  let lastResponseShapes = '';
   let lastPythonCode = '';
   // Whether this agent's first script was read-only; a retry may not turn it into a writer.
   let firstScriptReadOnly: boolean | null = null;
@@ -1076,7 +1096,10 @@ RUNTIME RULES:
 THE INPUT THIS SCRIPT RECEIVES (input_data, shortened — read fields by these exact names):
 ${describeInputShape(inputContext || '')}
 
-FAILED SCRIPT:
+${lastResponseShapes ? `WHAT THE COMPOSIO CALLS RETURNED on the last attempt (field names and types — read values by exactly these names, never guess others):
+${lastResponseShapes}
+
+` : ''}FAILED SCRIPT:
 \`\`\`python
 ${lastPythonCode}
 \`\`\`
@@ -1171,6 +1194,11 @@ Available Tools/APIs: ${toolDescriptions || 'No tools available.'}
 
 INPUT CONTEXT FROM PREVIOUS STEPS (input_data, shortened — read fields by these exact names):
 ${describeInputShape(inputContext || '', 6000)}
+
+${lastResponseShapes ? `WHAT THE COMPOSIO CALLS RETURNED on the last attempt (field names and types — read values by exactly these names, never guess others):
+${lastResponseShapes}
+
+` : ''}
 
 AVAILABLE RESOURCES (Extracted from RAG Database):
 ${availableResources || 'None.'}
@@ -1551,6 +1579,7 @@ ${pythonCode}`;
         const stdout = execution.logs.stdout.join('\n').trim();
         const stderr = execution.logs.stderr.join('\n').trim();
         const deferredWrites = parseDeferredWrites(stderr);
+        lastResponseShapes = parseResponseShapes(stderr) || lastResponseShapes;
 
         if (execution.error) {
           throw new Error(`E2B execution error: ${execution.error.name}: ${execution.error.value}\n${execution.error.traceback}`);

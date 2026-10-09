@@ -321,6 +321,31 @@ def _slack_ts_params(action_name: str, params: Any) -> Any:
     return fixed
 
 
+_SHAPES_SEEN = set()
+
+
+def _record_shape(action: str, result: Any) -> None:
+    """Report the shape of a Composio response (field names and types, never values) so a fixer
+    reads fields that exist: a Gmail script read 'internalDate' where Composio sends
+    'messageTimestamp', and every email was dated 1970."""
+    if action in _SHAPES_SEEN:
+        return
+    _SHAPES_SEEN.add(action)
+
+    def shape(v, depth):
+        if isinstance(v, dict):
+            return "object" if depth >= 3 else {k: shape(x, depth + 1) for k, x in list(v.items())[:25]}
+        if isinstance(v, list):
+            return [shape(v[0], depth + 1)] if v else []
+        return "null" if v is None else type(v).__name__
+
+    try:
+        text = json.dumps(shape(result, 0), default=str)[:1500]
+        sys.stderr.write("__AF_SHAPE__:" + json.dumps({"action": action, "shape": text}) + "\\n")
+    except Exception:
+        pass
+
+
 def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:
     """Execute a Composio action for the current tenant entity.
     Use instead of api.call() for any provider connected via Composio OAuth.
@@ -374,6 +399,7 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
             sys.stderr.write(f"[COMPOSIO] Action '{action_name}' rejected — {err_msg}\\n")
         raise APIError(resp.status_code, err_msg, action_name)
     result = data.get("data", data)
+    _record_shape(action_name, result)
     return _ComposioData(result) if isinstance(result, dict) else result
 `;
 
