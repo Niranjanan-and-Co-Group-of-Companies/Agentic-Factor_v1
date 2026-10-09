@@ -234,25 +234,38 @@ class _WrappedList(list):
         return self._wrapper[key] if isinstance(key, str) else list.__getitem__(self, key)
 
 
+# Single objects come in an envelope too ({"ok": true, "user": {"profile": {...}}}); a script that
+# read user["profile"] got nothing and showed raw user IDs instead of names. A key missing from a
+# small envelope resolves into its one nested object. Status and error keys never do.
+_ENVELOPE_SKIP = {"ok", "error", "errors", "warning", "warnings", "successful", "status"}
+_NOT_FOUND = object()
+
+
 class _ComposioData(dict):
-    def _wrapped_list(self, key):
-        if key not in _GENERIC_LIST_KEYS or len(self) > 4:
-            return None
-        lists = [v for v in self.values() if isinstance(v, list)]
-        scalars = all(isinstance(v, (list, str, int, float, bool)) or v is None for v in self.values())
-        return _WrappedList(lists[0], self) if len(lists) == 1 and scalars else None
+    def _resolve(self, key):
+        if len(self) <= 4 and key in _GENERIC_LIST_KEYS:
+            lists = [v for v in self.values() if isinstance(v, list)]
+            scalars = all(isinstance(v, (list, str, int, float, bool)) or v is None for v in self.values())
+            if len(lists) == 1 and scalars:
+                return _WrappedList(lists[0], self)
+        if len(self) <= 6 and key not in _ENVELOPE_SKIP:
+            objects = [v for v in self.values() if isinstance(v, dict)]
+            if len(objects) == 1 and key in objects[0]:
+                value = objects[0][key]
+                return _ComposioData(value) if isinstance(value, dict) and not isinstance(value, _ComposioData) else value
+        return _NOT_FOUND
 
     def __missing__(self, key):
-        found = self._wrapped_list(key)
-        if found is None:
+        found = self._resolve(key)
+        if found is _NOT_FOUND:
             raise KeyError(key)
         return found
 
     def get(self, key, default=None):
         if dict.__contains__(self, key):
             return dict.__getitem__(self, key)
-        found = self._wrapped_list(key)
-        return default if found is None else found
+        found = self._resolve(key)
+        return default if found is _NOT_FOUND else found
 
 
 def ask_ai(prompt: str, system: str = "", max_tokens: int = 1500, json_mode: bool = False) -> str:
