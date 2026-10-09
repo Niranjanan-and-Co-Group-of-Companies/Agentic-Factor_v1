@@ -61,7 +61,7 @@ def _record_deferred(action: str, params: Any) -> None:
     would make it public to anyone with the link."""
     def short(v):
         if isinstance(v, str):
-            return v if len(v) <= 160 else v[:160] + "..."
+            return v if len(v) <= 12000 else v[:12000] + "..."
         if isinstance(v, (list, tuple)):
             return [short(x) for x in list(v)[:10]]
         if isinstance(v, dict):

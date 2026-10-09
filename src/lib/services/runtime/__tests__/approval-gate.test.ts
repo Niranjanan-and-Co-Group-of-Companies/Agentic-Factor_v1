@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { approvalPreview, classifyAgentActions, inferActionTarget, parseDeferredWrites, type ActionRisk } from '../agent-loop';
+import { approvalPreview, classifyAgentActions, compactWrites, inferActionTarget, parseDeferredWrites, type ActionRisk } from '../agent-loop';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -381,13 +381,24 @@ describe('approval card shows the deferred calls themselves', () => {
     expect(writes.map(w => w.action)).toEqual(['GOOGLEDRIVE_CREATE_PERMISSION', 'GMAIL_SEND_EMAIL']);
   });
 
-  it('puts who/where/access above the content and leaves long text to the preview', () => {
+  it('puts who/where/access above the content, then the full text the call will send', () => {
     const preview = approvalPreview('{"content":"' + 'Proposal text '.repeat(20) + '"}', parseDeferredWrites(stderr));
     expect(preview.startsWith('Will run:')).toBe(true);
     expect(preview).toContain('GOOGLEDRIVE_CREATE_PERMISSION — file_id: 1AbC, type: anyone, role: reader');
-    expect(preview).toContain('GMAIL_SEND_EMAIL — recipient_email: niranjan+test@gmail.com, subject: Digest');
-    expect(preview).not.toContain('xxxxxxxx');
-    expect(preview).toContain('Proposal text');
+    expect(preview.split('\n').find(l => l.startsWith('• GMAIL_SEND_EMAIL'))).toBe('• GMAIL_SEND_EMAIL — recipient_email: niranjan+test@gmail.com, subject: Digest');
+    expect(preview).toContain('x'.repeat(160));
+    expect(preview).not.toContain('Proposal text');
+  });
+
+  it("falls back to the agent's output when no call carries long text", () => {
+    const writes = parseDeferredWrites('__AF_DEFERRED__:{"action": "SLACK_SEND_MESSAGE", "params": {"channel": "#c", "text": "short"}}');
+    expect(approvalPreview('{"content":"' + 'Report '.repeat(40) + '"}', writes)).toContain('Report Report');
+  });
+
+  it('stores calls with long text shortened', () => {
+    const [w] = compactWrites([{ action: 'GMAIL_SEND_EMAIL', params: { body: 'y'.repeat(1000), subject: 's' } }]);
+    expect((w.params as any).body).toHaveLength(301);
+    expect((w.params as any).subject).toBe('s');
   });
 
   it('is unchanged when nothing was deferred', () => {

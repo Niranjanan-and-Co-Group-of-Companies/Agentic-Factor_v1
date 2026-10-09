@@ -644,9 +644,32 @@ export function describeDeferredWrites(writes: DeferredWrite[]): string {
   return `Will run:\n${lines.join('\n')}`;
 }
 
+/** The longest text a deferred call will write (email body, message, document) — exactly what gets sent. */
+function deferredText(writes: DeferredWrite[]): string | undefined {
+  let best: string | undefined;
+  for (const w of writes) {
+    if (!w.params || typeof w.params !== 'object' || Array.isArray(w.params)) continue;
+    for (const [k, v] of Object.entries(w.params as Record<string, unknown>)) {
+      if (typeof v === 'string' && v.length > 160 && /body|text|markdown|content|message|html|description/i.test(k) && v.length > (best?.length ?? 0)) best = v;
+    }
+  }
+  return best;
+}
+
+/** Deferred calls for storage on the approval row: long text is already in the preview. */
+export function compactWrites(writes: DeferredWrite[]): DeferredWrite[] {
+  return writes.map(w => ({
+    action: w.action,
+    params: w.params && typeof w.params === 'object' && !Array.isArray(w.params)
+      ? Object.fromEntries(Object.entries(w.params as Record<string, unknown>).map(([k, v]) => [k, typeof v === 'string' && v.length > 300 ? `${v.slice(0, 300)}…` : v]))
+      : w.params,
+  }));
+}
+
 export function approvalPreview(output: unknown, writes: DeferredWrite[] = []): string {
   const calls = describeDeferredWrites(writes);
-  const body = previewText(output);
+  // The text the call itself carries beats the agent's own summary of it, which is often cut short.
+  const body = deferredText(writes) ?? previewText(output);
   return calls ? `${calls}\n\n${body}`.slice(0, 12_000) : body;
 }
 
@@ -1879,7 +1902,8 @@ FAIL if:
 - The output contradicts or ignores the input it was given. Exception: in a pipeline an agent's input can be an earlier agent's work on a different part of the job (e.g. research on another brand) — adding its own part, and passing earlier data through, is correct
 - The content is generic or placeholder-like instead of reflecting the specific task
 - Specifics the customer gave (names, amounts, invoice or order numbers, dates, recipients) are replaced by different or sample data such as "Acme Corp" or "John Doe" — this always fails, however polished the output
-- Text presented as a direct quote (in quotation marks or a blockquote) from material the customer supplied above, but worded differently from it — a reworded or invented quote always fails${isFinalAgent && expectedOutputFormat ? `
+- Text presented as a direct quote (in quotation marks or a blockquote) from material the customer supplied above, but worded differently from it — a reworded or invented quote always fails
+- Factual claims about the customer's product or company that the material above doesn't contain — rankings ("a leading brand"), certifications, test results or how something was tested, regulated claims ("broad-spectrum", "dermatologist-tested", "clinically proven") — when the customer supplied the facts to use. Promotional tone ("innovative", "exciting") is fine; new facts are not${isFinalAgent && expectedOutputFormat ? `
 - Required core fields from the expected format are completely missing or have the wrong type` : ''}
 
 PASS if:
@@ -2032,7 +2056,7 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
               actions: [...new Set([...pythonCode.matchAll(/composio_execute\s*\(\s*["']([A-Z0-9_]+)["']/g)].map(m => m[1]))]
                 .filter(slug => classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps),
               preview: approvalPreview(finalOutputJSON, deferredWrites),
-              writes: deferredWrites,
+              writes: compactWrites(deferredWrites),
             },
             status: 'pending'
           });
