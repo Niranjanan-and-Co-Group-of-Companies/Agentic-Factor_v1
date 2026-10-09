@@ -73,6 +73,13 @@ export async function declareCalledToolkits(
     const toolkit = await lookup(action);
     if (toolkit) byToolkit.set(toolkit, [...(byToolkit.get(toolkit) ?? []), action]);
   }));
+  // composio_proxy("zoho_books", "GET", ...) names its toolkit directly.
+  for (const code of scripts) {
+    for (const m of code.matchAll(/composio_proxy\(\s*["']([A-Za-z0-9_]+)["']\s*,\s*["']([A-Za-z]+)["'](?:\s*,\s*f?["']([^"']*)["'])?/g)) {
+      const toolkit = m[1].toLowerCase();
+      byToolkit.set(toolkit, [...(byToolkit.get(toolkit) ?? []), `PROXY ${m[2].toUpperCase()} ${m[3] ?? ''}`.trim()]);
+    }
+  }
   const connected = new Set(connectedProviders.map(composioSlug));
   const result = [...permissions];
   for (const [toolkit, used] of byToolkit) {

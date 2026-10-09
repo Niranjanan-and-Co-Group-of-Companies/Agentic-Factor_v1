@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { approvalPreview, classifyAgentActions, compactWrites, inferActionTarget, parseDeferredWrites, type ActionRisk } from '../agent-loop';
+import { approvalPreview, classifyAgentActions, compactWrites, inferActionTarget, parseDeferredWrites, proxyWriteLabels, type ActionRisk } from '../agent-loop';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -403,5 +403,19 @@ describe('approval card shows the deferred calls themselves', () => {
 
   it('is unchanged when nothing was deferred', () => {
     expect(approvalPreview('{"content":"hello"}', [])).toBe(approvalPreview('{"content":"hello"}'));
+  });
+});
+
+describe('composio_proxy calls', () => {
+  it('reads are reads; writes need review; deletes and sends are irreversible', () => {
+    expect(classifyAgentActions(`composio_proxy("zoho_books", "GET", "/reports/profitandloss", params={})`)).toEqual({ hasWriteOps: false, writeRisk: 'read' });
+    expect(classifyAgentActions(`composio_proxy("zoho_books", "POST", "/invoices", body=inv)`).writeRisk).toBe('write_reversible');
+    expect(classifyAgentActions(`composio_proxy("zoho_books", "POST", f"/invoices/{iid}/email", body={})`).writeRisk).toBe('write_irreversible');
+    expect(classifyAgentActions(`composio_proxy("zoho_books", "DELETE", f"/invoices/{iid}")`).writeRisk).toBe('write_irreversible');
+    expect(classifyAgentActions(`composio_proxy(tk, method, path)`).writeRisk).toBe('write_reversible');
+  });
+
+  it('lists proxy writes for the approval card', () => {
+    expect(proxyWriteLabels(`composio_proxy("zoho_books", "GET", "/reports/x")\ncomposio_proxy('zoho_books', 'post', '/bills', body=b)`)).toEqual(['ZOHO_BOOKS POST /bills']);
   });
 });

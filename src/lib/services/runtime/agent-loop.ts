@@ -417,6 +417,35 @@ const COMPOSIO_COMMS_PREFIXES = new Set([
 ]);
 const COMPOSIO_PRIVATE_TOKENS = new Set(['DRAFT', 'LABEL', 'LABELS', 'MARK', 'STAR']);
 
+// composio_proxy(toolkit, method, path, ...) calls an app's own API through its Composio connection.
+const PROXY_CALL = /composio_proxy\(\s*["']([A-Za-z0-9_]+)["']\s*,\s*["']([A-Za-z]+)["'](?:\s*,\s*f?["']([^"']*)["'])?/g;
+const PROXY_SEND_KEYWORDS = [...SEND_PATH_KEYWORDS, 'email', 'mail', 'message', 'sms', 'whatsapp'];
+
+function classifyProxyCalls(code: string): ActionRisk[] {
+  const totalCalls = (code.match(/composio_proxy\s*\(/g) ?? []).length;
+  if (totalCalls === 0) return [];
+  const risks: ActionRisk[] = [];
+  let literalCalls = 0;
+  for (const m of code.matchAll(PROXY_CALL)) {
+    literalCalls++;
+    const method = m[2].toUpperCase();
+    const path = (m[3] ?? '').toLowerCase();
+    if (method === 'GET' || method === 'HEAD') risks.push('read');
+    else if (method === 'DELETE' || PROXY_SEND_KEYWORDS.some(k => path.includes(k)) || COMMUNICATION_PROVIDERS.has(m[1].toLowerCase())) risks.push('write_irreversible');
+    else risks.push('write_reversible');
+  }
+  // A method or toolkit passed in a variable can't be classified statically — require review.
+  if (totalCalls > literalCalls) risks.push('write_reversible');
+  return risks;
+}
+
+/** Proxy writes as approval-card labels ("ZOHO_BOOKS POST /invoices"). */
+export function proxyWriteLabels(code: string): string[] {
+  return [...code.matchAll(PROXY_CALL)]
+    .filter(m => !['GET', 'HEAD'].includes(m[2].toUpperCase()))
+    .map(m => `${m[1].toUpperCase()} ${m[2].toUpperCase()} ${m[3] ?? ''}`.trim());
+}
+
 function classifyComposioCalls(code: string): ActionRisk[] {
   const totalCalls = (code.match(/composio_execute\s*\(/g) ?? []).length;
   if (totalCalls === 0) return [];
@@ -446,6 +475,7 @@ export function classifyAgentActions(code: string): { hasWriteOps: boolean; writ
     .map(({ risk }) => risk);
   matchedRisks.push(...classifyGenericCalls(code));
   matchedRisks.push(...classifyComposioCalls(code));
+  matchedRisks.push(...classifyProxyCalls(code));
 
   const writeRisk: ActionRisk = matchedRisks.includes('write_irreversible')
     ? 'write_irreversible'
@@ -1115,6 +1145,7 @@ RUNTIME RULES:
 - If the error is a failed review, change what the script produces so the reviewer's reason no longer applies.
 - \`input_data["_pipeline"]\` holds every earlier agent's output keyed by role; if the review says data for some parts is missing, read those parts from there.
 - If the script found nothing, its output must say what it checked (repos/channels/inboxes, date range, items scanned) next to the zero.
+- If the toolkit has no action for what the script needs (e.g. Zoho Books reports), call the app's REST API through the customer's connection: \`composio_proxy("<toolkit_slug>", "GET", "/path", params={...}, body=None)\` from agenticfactor._core — never approximate the data from other actions.
 
 THE INPUT THIS SCRIPT RECEIVES (input_data, shortened — read fields by these exact names):
 ${describeInputShape(inputContext || '')}
@@ -2053,8 +2084,11 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
             payload: { output: finalOutputJSON, pythonCode, writeRisk, runNumber: isTrainingMode ? trainingRunNumber : undefined, runId },
             // What the reviewer sees on /approvals: the write actions about to run and the prepared content.
             payload_redacted: {
-              actions: [...new Set([...pythonCode.matchAll(/composio_execute\s*\(\s*["']([A-Z0-9_]+)["']/g)].map(m => m[1]))]
-                .filter(slug => classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps),
+              actions: [...new Set([
+                ...[...pythonCode.matchAll(/composio_execute\s*\(\s*["']([A-Z0-9_]+)["']/g)].map(m => m[1])
+                  .filter(slug => classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps),
+                ...proxyWriteLabels(pythonCode),
+              ])],
               preview: approvalPreview(finalOutputJSON, deferredWrites),
               writes: compactWrites(deferredWrites),
             },

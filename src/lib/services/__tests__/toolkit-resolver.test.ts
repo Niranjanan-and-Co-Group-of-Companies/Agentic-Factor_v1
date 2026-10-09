@@ -39,6 +39,11 @@ describe('declareCalledToolkits', () => {
     expect(out[2]).toMatchObject({ type: 'composio_oauth', scope: 'ZOHO_BOOKS_GET_PROFIT_AND_LOSS,ZOHO_BOOKS_LIST_ACCOUNTS', granted: true });
   });
 
+  it('declares the toolkit a composio_proxy call names', async () => {
+    const out = await declareCalledToolkits([`pnl = composio_proxy("zoho_books", "GET", "/reports/profitandloss", params={})`], [], [], lookup);
+    expect(out).toEqual([expect.objectContaining({ type: 'composio_oauth', service: 'zoho_books', scope: 'PROXY GET /reports/profitandloss' })]);
+  });
+
   it('treats the legacy google permission as covering every Google toolkit', async () => {
     const out = await declareCalledToolkits([`composio_execute("GOOGLESHEETS_BATCH_UPDATE", {})`], [perm('google', 'oauth_token')], [], lookup);
     expect(out).toHaveLength(1);

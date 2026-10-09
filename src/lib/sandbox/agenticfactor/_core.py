@@ -530,6 +530,74 @@ def _record_shape(action: str, result: Any) -> None:
         pass
 
 
+_CONNECTED_ACCOUNTS: Dict[str, str] = {}
+
+
+def _connected_account_id(toolkit: str) -> str:
+    """The customer's active Composio connection for a toolkit (e.g. zoho_books)."""
+    toolkit = toolkit.lower()
+    if toolkit in _CONNECTED_ACCOUNTS:
+        return _CONNECTED_ACCOUNTS[toolkit]
+    entity_id = os.environ.get("COMPOSIO_ENTITY_ID", "")
+    if not entity_id:
+        _signal_missing_permission("composio")
+        raise PermissionError("COMPOSIO_ENTITY_ID is not set — the tenant's Composio connection is not configured.")
+    resp = requests.get(
+        "https://backend.composio.dev/api/v3.1/connected_accounts",
+        headers={"x-api-key": os.environ.get("COMPOSIO_API_KEY", "")},
+        params={"user_ids": entity_id, "toolkit_slugs": toolkit, "statuses": "ACTIVE", "limit": 1},
+        timeout=30,
+    )
+    if resp.status_code >= 400:
+        raise APIError(resp.status_code, resp.text[:500], f"composio_proxy:{toolkit}")
+    items = (resp.json() or {}).get("items") or []
+    if not items:
+        _signal_missing_permission(toolkit)
+        raise PermissionError(f"{toolkit} is not connected — connect it on the Connectors page.")
+    _CONNECTED_ACCOUNTS[toolkit] = items[0]["id"]
+    return items[0]["id"]
+
+
+def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Dict] = None, body: Any = None, headers: Optional[Dict] = None) -> Any:
+    """Call an app's own REST API through the customer's Composio connection, for anything the
+    toolkit has no action for. Zoho Books has no report actions, so a P&L is:
+        composio_proxy("zoho_books", "GET", "/reports/profitandloss",
+                       params={"organization_id": org_id, "from_date": "2025-04-01", "to_date": "2026-03-31"})
+    endpoint is a path relative to the connected account's API base (as in the app's REST API
+    docs) or an absolute URL. Returns the response body. Writes (POST/PUT/PATCH/DELETE) are
+    deferred in previews like composio_execute writes. Kept in sync with CORE_FALLBACK."""
+    method = method.upper()
+    label = f"{toolkit.upper()} {method} {endpoint}"
+    if os.environ.get("AF_DRY_RUN", "0") == "1" and method not in ("GET", "HEAD"):
+        sys.stderr.write(f"[DRY_RUN] Skipped composio_proxy({label}) — write op deferred\n")
+        _record_deferred(label, body if body is not None else params)
+        return _DeferredResult({"status": "ok", "dry_run": True, "action": label})
+
+    def value(v):
+        return str(v).lower() if isinstance(v, bool) else (v if isinstance(v, (int, float)) else str(v))
+
+    parameters = [{"in": "query", "name": k, "value": value(v)} for k, v in (params or {}).items() if v is not None]
+    parameters += [{"in": "header", "name": k, "value": str(v)} for k, v in (headers or {}).items()]
+    payload = {"endpoint": endpoint, "method": method, "connected_account_id": _connected_account_id(toolkit), "parameters": parameters}
+    if body is not None:
+        payload["body"] = body
+    resp = requests.post(
+        "https://backend.composio.dev/api/v3.1/tools/execute/proxy",
+        headers={"x-api-key": os.environ.get("COMPOSIO_API_KEY", ""), "Content-Type": "application/json"},
+        json=payload,
+        timeout=60,
+    )
+    if resp.status_code >= 400:
+        raise APIError(resp.status_code, resp.text[:800], f"composio_proxy:{label}")
+    data = resp.json()
+    status = data.get("status", 200) if isinstance(data, dict) else 200
+    result = data.get("data", data) if isinstance(data, dict) else data
+    if isinstance(status, int) and status >= 400:
+        raise APIError(status, json.dumps(result, default=str)[:800], f"composio_proxy:{label}")
+    _record_shape(f"PROXY {label}", result)
+    return _ComposioData(result) if isinstance(result, dict) else result
+
+
 def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:
     """
     Execute a Composio action for the current tenant entity.

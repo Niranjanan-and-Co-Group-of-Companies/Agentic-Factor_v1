@@ -315,6 +315,11 @@ All available actions for this tenant's connected apps (format: slug — descrip
 ${sections.join('\n')}
 NOTE: Every action name used in composio_execute() MUST appear verbatim in the list above.
 
+NO ACTION FOR IT? Some toolkits lack whole areas (Zoho Books has no report actions — no P&L, balance sheet or trial balance). Then call the app's own REST API through the customer's connection — never invent an action name, and never fall back to approximating the data:
+  from agenticfactor._core import composio_proxy
+  pnl = composio_proxy("zoho_books", "GET", "/reports/profitandloss", params={"organization_id": org_id, "from_date": "2025-04-01", "to_date": "2026-03-31"})
+The first argument is the toolkit slug; the path is relative to the app's API base, as in the app's REST API docs. GET reads run in previews; POST/PUT/PATCH/DELETE are writes and go through approval like composio_execute writes.
+
 COMPOSIO CALL RULE — ABSOLUTE (applies to reads AND writes, every single interaction):
 For ALL services listed above (${slugList}), you MUST use composio_execute() for EVERY call — lookups, searches, reads, and writes.
 There is NO direct Bearer token available for Composio-managed services. Direct HTTP calls ALWAYS return 401.
