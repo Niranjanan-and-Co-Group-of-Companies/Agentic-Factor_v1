@@ -55,6 +55,24 @@ class APIError(Exception):
         super().__init__(f"[{provider}] HTTP {status_code}: {message}")
 
 
+def _record_deferred(action: str, params: Any) -> None:
+    """Report a write the preview deferred, with its parameters shortened, so the approval screen
+    shows the exact call — an approval card once showed a document's text but not that the call
+    would make it public to anyone with the link."""
+    def short(v):
+        if isinstance(v, str):
+            return v if len(v) <= 160 else v[:160] + "..."
+        if isinstance(v, (list, tuple)):
+            return [short(x) for x in list(v)[:10]]
+        if isinstance(v, dict):
+            return {k: short(x) for k, x in list(v.items())[:20]}
+        return v
+    try:
+        sys.stderr.write("__AF_DEFERRED__:" + json.dumps({"action": action, "params": short(params)}, default=str) + "\n")
+    except Exception:
+        pass
+
+
 def _request(
     method: str,
     url: str,
@@ -77,6 +95,7 @@ def _request(
     dry_run = os.environ.get("AF_DRY_RUN", "0") == "1"
     if dry_run and method.upper() in ("POST", "PUT", "PATCH", "DELETE"):
         sys.stderr.write(f"[DRY_RUN] Skipped {method} {url} (side effects deferred to final run)\n")
+        _record_deferred(f"{method.upper()} {url}", json_data if json_data is not None else params)
         # Return realistic mock responses based on the URL/provider
         mock_id = f"dryrun_{int(time.time())}"
         if "messages/send" in url or "gmail" in provider:
@@ -475,6 +494,7 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
     if dry_run and not _is_composio_read(action_name):
         # Skip writes in DRY_RUN — reads still execute so downstream code gets real IDs/data
         sys.stderr.write(f"[DRY_RUN] Skipped composio_execute({action_name}) — write op deferred\n")
+        _record_deferred(action_name, params)
         return _DeferredResult(dry_run_result or {"status": "ok", "dry_run": True, "action": action_name})
     # Reading back something a deferred write "created" (its id is the placeholder) can't hit the
     # real API — the resource doesn't exist yet — so answer it with a placeholder too.

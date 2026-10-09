@@ -52,6 +52,24 @@ class APIError(Exception):
         self.provider = provider
         super().__init__(f"[{provider}] HTTP {status_code}: {message}")
 
+def _record_deferred(action: str, params: Any) -> None:
+    """Report a write the preview deferred, with its parameters shortened, so the approval screen
+    shows the exact call — an approval card once showed a document's text but not that the call
+    would make it public to anyone with the link."""
+    def short(v):
+        if isinstance(v, str):
+            return v if len(v) <= 160 else v[:160] + "..."
+        if isinstance(v, (list, tuple)):
+            return [short(x) for x in list(v)[:10]]
+        if isinstance(v, dict):
+            return {k: short(x) for k, x in list(v.items())[:20]}
+        return v
+    try:
+        sys.stderr.write("__AF_DEFERRED__:" + json.dumps({"action": action, "params": short(params)}, default=str) + "\\n")
+    except Exception:
+        pass
+
+
 def _request(method, url, token=None, api_key=None, headers=None, json_data=None, data=None, params=None, retries=2, timeout=30, provider=""):
     _headers = {"Content-Type": "application/json"}
     if token: _headers["Authorization"] = f"Bearer {token}"
@@ -282,6 +300,7 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
     dry_run = os.environ.get("AF_DRY_RUN", "0") == "1"
     if dry_run and not _is_composio_read(action_name):
         sys.stderr.write(f"[DRY_RUN] Skipped composio_execute({action_name}) — write op deferred\\n")
+        _record_deferred(action_name, params)
         return _DeferredResult(dry_run_result or {"status": "ok", "dry_run": True, "action": action_name})
     # Reading back something a deferred write "created" (its id is the placeholder) can't hit the
     # real API — the resource doesn't exist yet — so answer it with a placeholder too.

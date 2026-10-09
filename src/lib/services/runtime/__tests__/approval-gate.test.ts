@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { approvalPreview, classifyAgentActions, inferActionTarget, type ActionRisk } from '../agent-loop';
+import { approvalPreview, classifyAgentActions, inferActionTarget, parseDeferredWrites, type ActionRisk } from '../agent-loop';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -365,4 +365,32 @@ describe('isComposioRead — write words used as nouns', () => {
 
   it.each(['GITHUB_BLOCK_A_USER', 'NOTION_APPEND_BLOCK_CHILDREN', 'NOTION_DELETE_BLOCK', 'GITHUB_GET_OR_CREATE_LABEL', 'GITHUB_RERUN_A_WORKFLOW'])(
     '%s still needs approval', (slug) => { expect(classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps).toBe(true); });
+});
+
+describe('approval card shows the deferred calls themselves', () => {
+  const stderr = [
+    '[DRY_RUN] Skipped composio_execute(GOOGLEDRIVE_CREATE_PERMISSION) — write op deferred',
+    '__AF_DEFERRED__:{"action": "GOOGLEDRIVE_CREATE_PERMISSION", "params": {"file_id": "1AbC", "type": "anyone", "role": "reader"}}',
+    'some other log line',
+    '__AF_DEFERRED__:{"action": "GMAIL_SEND_EMAIL", "params": {"recipient_email": "niranjan+test@gmail.com", "subject": "Digest", "body": "' + 'x'.repeat(160) + '..."}}',
+    '__AF_DEFERRED__:{"action": "TRUNC',
+  ].join('\n');
+
+  it('parses complete lines and skips truncated ones', () => {
+    const writes = parseDeferredWrites(stderr);
+    expect(writes.map(w => w.action)).toEqual(['GOOGLEDRIVE_CREATE_PERMISSION', 'GMAIL_SEND_EMAIL']);
+  });
+
+  it('puts who/where/access above the content and leaves long text to the preview', () => {
+    const preview = approvalPreview('{"content":"' + 'Proposal text '.repeat(20) + '"}', parseDeferredWrites(stderr));
+    expect(preview.startsWith('Will run:')).toBe(true);
+    expect(preview).toContain('GOOGLEDRIVE_CREATE_PERMISSION — file_id: 1AbC, type: anyone, role: reader');
+    expect(preview).toContain('GMAIL_SEND_EMAIL — recipient_email: niranjan+test@gmail.com, subject: Digest');
+    expect(preview).not.toContain('xxxxxxxx');
+    expect(preview).toContain('Proposal text');
+  });
+
+  it('is unchanged when nothing was deferred', () => {
+    expect(approvalPreview('{"content":"hello"}', [])).toBe(approvalPreview('{"content":"hello"}'));
+  });
 });

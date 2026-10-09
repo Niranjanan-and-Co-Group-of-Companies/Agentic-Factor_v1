@@ -587,7 +587,52 @@ export function reportedFailure(output: unknown): string | null {
  * it (content / content_preview), otherwise the output itself. A 3000-character cut of the raw JSON hid
  * most of a long document — a FAQ's payment answers never reached the reviewer.
  */
-export function approvalPreview(output: unknown): string {
+export interface DeferredWrite { action: string; params: unknown }
+
+/** Writes the preview deferred, as reported by the sandbox SDK on stderr (`__AF_DEFERRED__:{json}`). */
+export function parseDeferredWrites(stderr: string): DeferredWrite[] {
+  const writes: DeferredWrite[] = [];
+  for (const line of stderr.split('\n')) {
+    const at = line.indexOf('__AF_DEFERRED__:');
+    if (at === -1) continue;
+    try {
+      const w = JSON.parse(line.slice(at + '__AF_DEFERRED__:'.length));
+      if (typeof w?.action === 'string') writes.push({ action: w.action, params: w.params });
+    } catch { /* truncated line */ }
+  }
+  return writes.slice(0, 20);
+}
+
+/**
+ * "Will run:" lines naming each deferred call and its short parameters (who, where, access), so the
+ * reviewer sees what the call itself does — not only what the agent's output says. Long text
+ * (bodies, document content) is left to the preview below.
+ */
+export function describeDeferredWrites(writes: DeferredWrite[]): string {
+  if (writes.length === 0) return '';
+  const fmt = (v: unknown) => {
+    const s = typeof v === 'string' ? v : JSON.stringify(v) ?? '';
+    return s.length > 80 ? `${s.slice(0, 80)}…` : s;
+  };
+  const lines = writes.slice(0, 8).map(w => {
+    const params = w.params && typeof w.params === 'object' && !Array.isArray(w.params)
+      ? Object.entries(w.params as Record<string, unknown>)
+        .filter(([, v]) => v !== null && v !== '' && !(typeof v === 'string' && v.length > 160))
+        .map(([k, v]) => `${k}: ${fmt(v)}`).join(', ')
+      : '';
+    return `• ${w.action}${params ? ` — ${params}` : ''}`;
+  });
+  if (writes.length > 8) lines.push(`• …and ${writes.length - 8} more`);
+  return `Will run:\n${lines.join('\n')}`;
+}
+
+export function approvalPreview(output: unknown, writes: DeferredWrite[] = []): string {
+  const calls = describeDeferredWrites(writes);
+  const body = previewText(output);
+  return calls ? `${calls}\n\n${body}`.slice(0, 12_000) : body;
+}
+
+function previewText(output: unknown): string {
   let parsed: any = output;
   if (typeof output === 'string') {
     try { parsed = JSON.parse(output); } catch { return output.slice(0, 12_000); }
@@ -1502,6 +1547,7 @@ ${pythonCode}`;
 
         const stdout = execution.logs.stdout.join('\n').trim();
         const stderr = execution.logs.stderr.join('\n').trim();
+        const deferredWrites = parseDeferredWrites(stderr);
 
         if (execution.error) {
           throw new Error(`E2B execution error: ${execution.error.name}: ${execution.error.value}\n${execution.error.traceback}`);
@@ -1951,7 +1997,8 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
             payload_redacted: {
               actions: [...new Set([...pythonCode.matchAll(/composio_execute\s*\(\s*["']([A-Z0-9_]+)["']/g)].map(m => m[1]))]
                 .filter(slug => classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps),
-              preview: approvalPreview(finalOutputJSON),
+              preview: approvalPreview(finalOutputJSON, deferredWrites),
+              writes: deferredWrites,
             },
             status: 'pending'
           });
