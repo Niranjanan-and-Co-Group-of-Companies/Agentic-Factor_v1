@@ -207,6 +207,13 @@ export default function ConnectorsPage() {
     fetchCustomConnectors();
   }, [loadCatalog, checkConnectionStatus, fetchCustomConnectors]);
 
+  // Command Center's "connect this app" card links here with ?search=<app>; the box ignored it, so
+  // a customer sent to connect Zoho Books landed on the unfiltered catalog.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("search");
+    if (requested) setSearch(requested);
+  }, []);
+
   // Server-side search — debounced 400ms
   useEffect(() => {
     if (!search.trim()) { setSearchResults(null); return; }
