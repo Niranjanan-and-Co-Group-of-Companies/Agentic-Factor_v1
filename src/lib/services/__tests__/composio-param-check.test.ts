@@ -56,4 +56,15 @@ describe('autoFixComposioParams', () => {
     expect(renames).toHaveLength(2);
     expect(fixed.match(/"markdown_text"/g)).toHaveLength(2);
   });
+
+  it('renames a well-known alias only when exactly one alias is valid', () => {
+    const gmail = new Map([['GMAIL_LIST_MESSAGES', { input_parameters: { properties: { q: {}, user_id: {}, max_results: {} } } }]]);
+    const { code: fixed, renames } = autoFixComposioParams(`composio_execute('GMAIL_LIST_MESSAGES', {'query': f'newer_than:7d', 'limit': 50})`, gmail);
+    expect(renames).toEqual(["GMAIL_LIST_MESSAGES: 'query' → 'q'", "GMAIL_LIST_MESSAGES: 'limit' → 'max_results'"]);
+    expect(checkComposioParams(fixed, gmail)).toEqual([]);
+    const both = new Map([['X_LIST', { input_parameters: { properties: { max_results: {}, per_page: {} } } }]]);
+    expect(autoFixComposioParams(`composio_execute("X_LIST", {"limit": 5})`, both).renames).toEqual([]);
+    const taken = new Map([['GMAIL_LIST_MESSAGES', { input_parameters: { properties: { q: {} } } }]]);
+    expect(autoFixComposioParams(`composio_execute("GMAIL_LIST_MESSAGES", {"q": a, "query": b})`, taken).renames).toEqual([]);
+  });
 });

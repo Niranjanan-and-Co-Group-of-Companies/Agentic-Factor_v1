@@ -82,10 +82,24 @@ export function checkComposioParams(code: string, schemas: Map<string, ActionSch
   return [...new Set(problems)];
 }
 
+// Names scripts reach for that Composio spells differently. A fixer swapped Gmail's 'q' for 'query'
+// and the step ran out of time before another fix — a well-known alias shouldn't cost a retry.
+const PARAM_ALIASES: Record<string, string[]> = {
+  query: ['q'],
+  search: ['q', 'query'],
+  limit: ['max_results', 'per_page', 'page_size'],
+  max: ['max_results'],
+  count: ['max_results', 'per_page'],
+  channel_id: ['channel'],
+  repo_name: ['repo'],
+  owner_name: ['owner'],
+};
+
 /**
  * Renames a parameter when the intended one is unambiguous: the unknown key and exactly one unused
- * valid parameter differ only by an underscore suffix ('markdown' → 'markdown_text'). Fixers kept
- * reintroducing that exact mistake, costing a full retry each time. Anything else is left for the fixer.
+ * valid parameter differ only by an underscore suffix ('markdown' → 'markdown_text'), or — when no
+ * name is that close — exactly one of its well-known aliases is valid ('query' → 'q'). Fixers kept
+ * reintroducing these exact mistakes, costing a full retry each time. Anything else is left for the fixer.
  */
 export function autoFixComposioParams(code: string, schemas: Map<string, ActionSchema>): { code: string; renames: string[] } {
   const edits: { start: number; end: number; text: string }[] = [];
@@ -96,8 +110,11 @@ export function autoFixComposioParams(code: string, schemas: Map<string, ActionS
     const present = new Set(call.spans.map(s => s.key));
     for (const span of call.spans) {
       if (props.includes(span.key)) continue;
-      const candidates = props.filter(p => !present.has(p) && Math.min(p.length, span.key.length) >= 4 &&
+      const suffixed = props.filter(p => !present.has(p) && Math.min(p.length, span.key.length) >= 4 &&
         (p.startsWith(`${span.key}_`) || span.key.startsWith(`${p}_`)));
+      const candidates = suffixed.length > 0
+        ? suffixed
+        : (PARAM_ALIASES[span.key] ?? []).filter(p => props.includes(p) && !present.has(p));
       if (candidates.length !== 1) continue;
       const quote = code[span.start];
       edits.push({ start: span.start, end: span.end, text: `${quote}${candidates[0]}${quote}` });
