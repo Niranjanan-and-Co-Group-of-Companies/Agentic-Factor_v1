@@ -864,6 +864,12 @@ export async function executeAgent(
       console.log(`[Agent ${agent.id}] Agent is currently paused pending approval.`);
       throw new Error('PausedForApproval');
     }
+    if (existingAction.status === 'rejected' && runId && existingAction.payload?.runId === runId) {
+      // Rejected during this very run — typically while its step was still retrying, before the run
+      // showed as paused. Retrying fresh here turned the rejection into a new pending approval of
+      // the same content (interview emails with wrong weekdays came back for approval a second time).
+      throw new Error('Stopped: the reviewer rejected the proposed action.');
+    }
     if (existingAction.status === 'rejected') {
       // A rejection used to hard-fail this agent permanently — even after the
       // human fixed the underlying issue (e.g. via a Chief of Staff
@@ -1937,7 +1943,7 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
             risk_level: writeRisk === 'write_irreversible' ? 'high' : writeRisk === 'write_reversible' ? 'medium' : 'low',
             reversible: writeRisk !== 'write_irreversible',
             // This payload is the Phase 1 PREVIEW — nothing real has happened yet.
-            payload: { output: finalOutputJSON, pythonCode, writeRisk, runNumber: isTrainingMode ? trainingRunNumber : undefined },
+            payload: { output: finalOutputJSON, pythonCode, writeRisk, runNumber: isTrainingMode ? trainingRunNumber : undefined, runId },
             // What the reviewer sees on /approvals: the write actions about to run and the prepared content.
             payload_redacted: {
               actions: [...new Set([...pythonCode.matchAll(/composio_execute\s*\(\s*["']([A-Z0-9_]+)["']/g)].map(m => m[1]))]
