@@ -372,6 +372,51 @@ class _DeferredResult(dict):
         return format(str(self), spec)
 
 
+# Composio returns lists inside a wrapper named for the resource ({"repositories": [...]},
+# {"commits": [...]}). Scripts often read them with a generic key (resp.get("data", []),
+# resp["items"]) and silently got an empty list — a digest reported "no commits" for a week that
+# had commits. A generic key missing from such a wrapper now resolves to the wrapper's one list.
+_GENERIC_LIST_KEYS = {"data", "items", "results", "result", "records", "details", "response_data", "list", "entries", "values"}
+
+
+class _WrappedList(list):
+    """The list inside a Composio wrapper. Still answers dict-style lookups on the wrapper, so
+    d = resp.get("data", resp); d.get("repositories", []) keeps working."""
+    def __init__(self, items=(), wrapper=None):
+        super().__init__(items)
+        self._wrapper = wrapper if wrapper is not None else {}
+
+    def get(self, key, default=None):
+        return self._wrapper.get(key, default)
+
+    def keys(self):
+        return self._wrapper.keys()
+
+    def __getitem__(self, key):
+        return self._wrapper[key] if isinstance(key, str) else list.__getitem__(self, key)
+
+
+class _ComposioData(dict):
+    def _wrapped_list(self, key):
+        if key not in _GENERIC_LIST_KEYS or len(self) > 4:
+            return None
+        lists = [v for v in self.values() if isinstance(v, list)]
+        scalars = all(isinstance(v, (list, str, int, float, bool)) or v is None for v in self.values())
+        return _WrappedList(lists[0], self) if len(lists) == 1 and scalars else None
+
+    def __missing__(self, key):
+        found = self._wrapped_list(key)
+        if found is None:
+            raise KeyError(key)
+        return found
+
+    def get(self, key, default=None):
+        if dict.__contains__(self, key):
+            return dict.__getitem__(self, key)
+        found = self._wrapped_list(key)
+        return default if found is None else found
+
+
 def ask_ai(prompt: str, system: str = "", max_tokens: int = 1500, json_mode: bool = False) -> str:
     """Use the platform's AI while the agent runs: summarise, write, classify or analyse data the
     script fetched. Returns the model's text (a JSON string when json_mode=True).
@@ -471,4 +516,5 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
         if "not found" in str(err_msg).lower() or "invalid action" in str(err_msg).lower():
             sys.stderr.write(f"[COMPOSIO] Action '{action_name}' rejected — {err_msg}\n")
         raise APIError(resp.status_code, err_msg, action_name)
-    return data.get("data", data)
+    result = data.get("data", data)
+    return _ComposioData(result) if isinstance(result, dict) else result
