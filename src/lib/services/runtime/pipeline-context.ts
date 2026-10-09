@@ -57,3 +57,28 @@ export function criticInputView(inputContext: string, perPart = 1200, total = 70
   }
   return parts.join('\n\n').slice(0, total);
 }
+
+/**
+ * A compact picture of the data a script receives, for the fixer. Without it the fixer could only
+ * guess field names: a weekly-update compiler was rewritten seven times and kept reporting
+ * "0 commits across 0 repos" while its input held github_summary.commits.count = 2.
+ */
+export function describeInputShape(inputContext: string, maxChars = 2500): string {
+  if (!inputContext.trim()) return '(empty — this is the first agent)';
+  let parsed: unknown;
+  try { parsed = JSON.parse(inputContext); } catch { return inputContext.slice(0, 600); }
+  const shrink = (v: unknown, depth: number): unknown => {
+    if (typeof v === 'string') return v.length > 80 ? `${v.slice(0, 80)}…` : v;
+    if (Array.isArray(v)) return depth > 3 ? `[${v.length} items]` : [...v.slice(0, 2).map(x => shrink(x, depth + 1)), ...(v.length > 2 ? [`…${v.length - 2} more`] : [])];
+    if (v && typeof v === 'object') {
+      if (depth > 3) return '{…}';
+      return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, shrink(x, depth + 1)]));
+    }
+    return v;
+  };
+  // _pipeline repeats fields that are already merged in at the top level.
+  const top = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(([k]) => k !== '_pipeline'))
+    : parsed;
+  return JSON.stringify(shrink(top, 0), null, 1).slice(0, maxChars);
+}

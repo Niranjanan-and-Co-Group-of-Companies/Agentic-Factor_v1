@@ -2,7 +2,7 @@ import { callLLM, generateEmbedding } from '../llm-router';
 import { createServiceClient } from '@/lib/supabase/server';
 import { Sandbox } from '@e2b/code-interpreter';
 import { robustJSONParse } from '@/lib/utils/json-parser';
-import { criticInputView } from './pipeline-context';
+import { criticInputView, describeInputShape } from './pipeline-context';
 import { createHash } from 'crypto';
 
 const scriptHash = (code: string) => createHash('sha256').update(code).digest('hex').slice(0, 16);
@@ -1018,6 +1018,9 @@ RUNTIME RULES:
 - If the error is a failed review, change what the script produces so the reviewer's reason no longer applies.
 - \`input_data["_pipeline"]\` holds every earlier agent's output keyed by role; if the review says data for some parts is missing, read those parts from there.
 
+THE INPUT THIS SCRIPT RECEIVES (input_data, shortened — read fields by these exact names):
+${describeInputShape(inputContext || '')}
+
 FAILED SCRIPT:
 \`\`\`python
 ${lastPythonCode}
@@ -1111,8 +1114,8 @@ Your task: ${agent.role}
 System Instructions: ${agent.systemPrompt}
 Available Tools/APIs: ${toolDescriptions || 'No tools available.'}
 
-INPUT CONTEXT FROM PREVIOUS STEPS:
-${inputContext || '{}'}
+INPUT CONTEXT FROM PREVIOUS STEPS (input_data, shortened — read fields by these exact names):
+${describeInputShape(inputContext || '', 6000)}
 
 AVAILABLE RESOURCES (Extracted from RAG Database):
 ${availableResources || 'None.'}

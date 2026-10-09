@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { criticInputView, withPipelineHistory } from '../pipeline-context';
+import { criticInputView, describeInputShape, withPipelineHistory } from '../pipeline-context';
 
 describe('withPipelineHistory', () => {
   it('keeps the previous output on top and adds every earlier output by role', () => {
@@ -62,5 +62,25 @@ describe('withPipelineHistory merges earlier fields', () => {
     expect(parsed.slack_summary.messages).toBe(0);
     expect(parsed.status).toBe('completed');
     expect(parsed._pipeline['GitHub Reader'].github_summary.commits).toBe(2);
+  });
+});
+
+describe('describeInputShape', () => {
+  it('shows nested field names and sample values, shortened', () => {
+    const shape = describeInputShape(JSON.stringify({
+      github_summary: { commits: { count: 2, summaries: ['a', 'b', 'c', 'd'] }, repos_found_total: 3 },
+      notes: 'x'.repeat(300),
+      _pipeline: { Reader: { big: 'y'.repeat(5000) } },
+    }));
+    expect(shape).toContain('"count": 2');
+    expect(shape).toContain('repos_found_total');
+    expect(shape).toContain('…2 more');
+    expect(shape).not.toContain('_pipeline');
+    expect(shape.length).toBeLessThanOrEqual(2500);
+  });
+
+  it('handles empty and non-JSON input', () => {
+    expect(describeInputShape('')).toContain('first agent');
+    expect(describeInputShape('plain text')).toBe('plain text');
   });
 });
