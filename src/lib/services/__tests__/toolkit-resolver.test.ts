@@ -49,6 +49,7 @@ describe('declareCalledToolkits', () => {
     expect(out).toHaveLength(1);
     expect(permissionCovers('google', 'googlesheets')).toBe(true);
     expect(permissionCovers('zoho', 'zoho_books')).toBe(false);
+    expect(permissionCovers('zoho_books', 'zohobooks')).toBe(true);
   });
 });
 

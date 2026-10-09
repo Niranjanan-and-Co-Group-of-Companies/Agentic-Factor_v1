@@ -52,9 +52,12 @@ const UMBRELLA: Record<string, string[]> = { google: ['gmail', 'googlesheets', '
 
 type Permission = { type: string; service: string; scope: string; confidentialityLevel: string; granted?: boolean };
 
+// "zohobooks" and "zoho_books" name the same toolkit.
+const bare = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+
 export function permissionCovers(service: string, toolkit: string): boolean {
   const s = service.toLowerCase().trim();
-  return s === toolkit || composioSlug(s) === toolkit || (UMBRELLA[s] ?? []).includes(toolkit);
+  return bare(s) === bare(toolkit) || bare(composioSlug(s)) === bare(toolkit) || (UMBRELLA[s] ?? []).map(bare).includes(bare(toolkit));
 }
 
 /**

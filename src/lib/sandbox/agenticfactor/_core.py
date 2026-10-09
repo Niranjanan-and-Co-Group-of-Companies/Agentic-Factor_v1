@@ -552,8 +552,21 @@ def _connected_account_id(toolkit: str) -> str:
         raise APIError(resp.status_code, resp.text[:500], f"composio_proxy:{toolkit}")
     items = (resp.json() or {}).get("items") or []
     if not items:
-        _signal_missing_permission(toolkit)
-        raise PermissionError(f"{toolkit} is not connected — connect it on the Connectors page.")
+        # A near-miss slug ("zohobooks" for zoho_books) resolves to the customer's matching connection.
+        every = requests.get(
+            "https://backend.composio.dev/api/v3.1/connected_accounts",
+            headers={"x-api-key": os.environ.get("COMPOSIO_API_KEY", "")},
+            params={"user_ids": entity_id, "statuses": "ACTIVE", "limit": 100},
+            timeout=30,
+        )
+        accounts = (every.json() or {}).get("items") or [] if every.status_code < 400 else []
+        slugs = {(a.get("toolkit") or {}).get("slug", ""): a.get("id") for a in accounts}
+        norm = lambda s: "".join(ch for ch in s.lower() if ch.isalnum())
+        match = next((sid for slug, sid in slugs.items() if slug and norm(slug) == norm(toolkit)), None)
+        if not match:
+            _signal_missing_permission(toolkit)
+            raise PermissionError(f"{toolkit} is not connected. Connected toolkits: {', '.join(sorted(s for s in slugs if s)) or 'none'}.")
+        items = [{"id": match}]
     _CONNECTED_ACCOUNTS[toolkit] = items[0]["id"]
     return items[0]["id"]
 
@@ -571,6 +584,8 @@ def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Di
     composio_execute writes. Kept in sync with CORE_FALLBACK."""
     method = method.upper()
     label = f"{toolkit.upper()} {method} {endpoint}"
+    # Resolved before a preview defers the write: a wrong toolkit fails here, where it can be fixed.
+    account_id = _connected_account_id(toolkit)
     if os.environ.get("AF_DRY_RUN", "0") == "1" and method not in ("GET", "HEAD"):
         sys.stderr.write(f"[DRY_RUN] Skipped composio_proxy({label}) — write op deferred\n")
         _record_deferred(label, body if body is not None else (params if binary is None else {**(params or {}), "file": f"{len(binary)} bytes ({content_type})"}))
@@ -581,7 +596,7 @@ def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Di
 
     parameters = [{"in": "query", "name": k, "value": value(v)} for k, v in (params or {}).items() if v is not None]
     parameters += [{"in": "header", "name": k, "value": str(v)} for k, v in (headers or {}).items()]
-    payload = {"endpoint": endpoint, "method": method, "connected_account_id": _connected_account_id(toolkit), "parameters": parameters}
+    payload = {"endpoint": endpoint, "method": method, "connected_account_id": account_id, "parameters": parameters}
     if body is not None:
         payload["body"] = body
     if binary is not None:
