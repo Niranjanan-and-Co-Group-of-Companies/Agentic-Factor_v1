@@ -600,8 +600,8 @@ export function approvalPreview(output: unknown): string {
   // For a message, who it goes to and its subject matter most — an email send showed only the
   // document text passed along from the previous agent, not the recipient.
   const header = [
-    pick('recipient', 'recipient_email', 'to', 'to_email', 'email_to') && `To: ${pick('recipient', 'recipient_email', 'to', 'to_email', 'email_to')}`,
-    pick('channel', 'channel_name') && `Channel: ${pick('channel', 'channel_name')}`,
+    pick('recipient', 'recipient_email', 'to', 'to_email', 'email_to', 'recipients') && `To: ${pick('recipient', 'recipient_email', 'to', 'to_email', 'email_to', 'recipients')}`,
+    pick('channel', 'channel_name', 'slack_channel') && `Channel: ${pick('channel', 'channel_name', 'slack_channel')}`,
     pick('subject', 'email_subject') && `Subject: ${pick('subject', 'email_subject')}`,
   ].filter(Boolean).join('\n');
   // Known names first, then the longest text field whose name says it holds the written content
