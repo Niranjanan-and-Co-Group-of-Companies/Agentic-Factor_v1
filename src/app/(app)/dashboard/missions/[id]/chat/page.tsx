@@ -1640,6 +1640,17 @@ export default function MissionChatPage() {
               }}>
                 {missionStatus}
               </span>
+              {/* A mission could only be started from a chat card or the "Run now" chip — there was no Run button. */}
+              <button
+                onClick={() => applyAction({ type: 'run_now', label: 'Run now' }, -1)}
+                disabled={applyingAction !== null || hasUnconnected}
+                title={hasUnconnected
+                  ? `Connect ${requiredConnectors.filter(c => !c.connected).map(c => c.service).join(', ')} first`
+                  : 'Start a run of this mission'}
+                className="btn btn-primary btn-sm"
+                style={{ fontSize: '0.78rem' }}>
+                {missionStatus === 'draft' ? '▶ Run' : '↺ Run again'}
+              </button>
               <button
                 onClick={() => setShareOpen(v => !v)}
                 className="btn btn-ghost btn-sm"

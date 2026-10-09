@@ -257,7 +257,8 @@ export default function MissionsPage() {
 
                 {/* Actions */}
                 <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
-                  {(mission.status === 'draft' || mission.status === 'paused' || mission.status === 'failed' || mission.status === 'completed') && (
+                  {/* New missions are saved as 'active', so a mission that had never run showed only Pause. */}
+                  {(mission.status === 'draft' || mission.status === 'active' || mission.status === 'paused' || mission.status === 'failed' || mission.status === 'completed') && (
                     <button
                       className="btn btn-primary btn-sm"
                       style={{ fontSize: '0.75rem', flex: 1 }}
