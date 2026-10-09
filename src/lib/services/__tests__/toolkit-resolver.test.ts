@@ -65,3 +65,17 @@ describe('matchesAlias', () => {
     expect(matchesAlias('zoho_books', 'zoho')).toBe(false);
   });
 });
+
+import { rankActions } from '../composio-actions';
+
+describe('rankActions', () => {
+  it('puts the actions matching most query words first and drops unrelated ones', () => {
+    const actions = [
+      { slug: 'ZOHO_BOOKS_CREATE_CONTACT', description: 'Create a contact' },
+      { slug: 'ZOHO_BOOKS_LIST_CONTACTS', description: 'List all contacts in the organization' },
+      { slug: 'ZOHO_BOOKS_LIST_INVOICES', description: 'List invoices' },
+      { slug: 'ZOHO_BOOKS_DELETE_ITEM', description: 'Delete an item' },
+    ];
+    expect(rankActions(actions, 'list contacts').map(a => a.slug)).toEqual(['ZOHO_BOOKS_LIST_CONTACTS', 'ZOHO_BOOKS_CREATE_CONTACT', 'ZOHO_BOOKS_LIST_INVOICES']);
+  });
+});

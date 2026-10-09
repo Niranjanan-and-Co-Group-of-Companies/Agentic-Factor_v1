@@ -178,6 +178,36 @@ export async function toolkitForAction(action: string): Promise<string | null> {
   }
 }
 
+/** Actions ranked by how many query words appear in their slug or description. */
+export function rankActions<T extends { slug: string; description?: string; name?: string }>(actions: T[], query: string, limit = 15): T[] {
+  // "contacts" should find CREATE_CONTACT too: compare without a plural s.
+  const words = query.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2).map(w => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w));
+  return actions
+    .map(a => {
+      const hay = `${a.slug} ${a.name ?? ''} ${a.description ?? ''}`.toLowerCase();
+      return { a, score: words.filter(w => hay.includes(w)).length + (words.some(w => a.slug.toLowerCase().includes(w)) ? 1 : 0) };
+    })
+    .filter(x => x.score > 0)
+    .sort((x, y) => y.score - x.score)
+    .slice(0, limit)
+    .map(x => x.a);
+}
+
+/**
+ * Searches every action of the given toolkits (all of them — mission chat's tool list only holds a
+ * few per app, so it could not read Zoho Books' 265 actions) and lists the best matches.
+ */
+export async function searchComposioActions(toolkits: string[], query: string, limit = 15): Promise<string> {
+  const apiKey = process.env.COMPOSIO_API_KEY;
+  if (!apiKey || toolkits.length === 0) return 'No connected apps to search.';
+  const apps = [...new Set(toolkits.map(t => AF_TO_COMPOSIO_APP[t] ?? t))];
+  const results = await Promise.allSettled(apps.map(app => fetchAllActionsForApp(app, apiKey)));
+  const actions = results.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
+  const ranked = rankActions(actions, query, limit);
+  if (ranked.length === 0) return `No actions matching "${query}" in: ${apps.join(', ')}.`;
+  return ranked.map(formatActionCompact).join('');
+}
+
 // Compact format: slug — description [req: param1:type, param2:type]
 // Includes type hints on required params so the LLM passes the right shape, not just the right name.
 function formatActionCompact(action: ComposioTool): string {

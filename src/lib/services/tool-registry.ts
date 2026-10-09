@@ -70,11 +70,42 @@ const SYSTEM_TOOLS: AnthropicTool[] = [
       required: ['query'],
     },
   },
+  {
+    name: 'find_app_actions',
+    description:
+      "Search EVERY action of the customer's connected apps (the tools listed here are only a few per app). " +
+      'Returns exact action slugs, descriptions and required parameters. Use it to find how to read data no listed tool covers ' +
+      '(e.g. "list contacts" in Zoho Books), then call read_app_data.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What you want to do, e.g. "list invoices", "get balance sheet"' },
+        toolkit: { type: 'string', description: 'Optional app slug to search, e.g. "zoho_books"' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'read_app_data',
+    description:
+      'Run a READ-ONLY action (list/get/search/fetch) found with find_app_actions, e.g. ZOHO_BOOKS_LIST_CONTACTS. ' +
+      'Writes are refused here — to change data, propose a mission update instead.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action_slug: { type: 'string', description: 'Exact action slug from find_app_actions' },
+        arguments: { type: 'object' as unknown as string, description: 'Arguments for the action' },
+      },
+      required: ['action_slug'],
+    },
+  },
 ];
 
 const SYSTEM_TOOL_META: ToolMeta[] = [
   { actionName: 'get_run_errors', providerSlug: 'system', displayName: 'Reading error logs', logoUrl: null },
   { actionName: 'search_connectors', providerSlug: 'system', displayName: 'Searching integrations', logoUrl: null },
+  { actionName: 'find_app_actions', providerSlug: 'system', displayName: 'Finding app actions', logoUrl: null },
+  { actionName: 'read_app_data', providerSlug: 'system', displayName: 'Reading app data', logoUrl: null },
 ];
 
 // Hardcoded tools for API-key-only providers that aren't in Composio
@@ -408,6 +439,27 @@ export async function executeTool(
     } catch (err) {
       return { content: `Connector search failed: ${err instanceof Error ? err.message : String(err)}`, summary: 'Search failed' };
     }
+  }
+
+  // ── Every action of the connected apps, read-only ─────────────────────
+  if (name === 'find_app_actions') {
+    const query = String(input.query ?? '').trim();
+    if (!query) return { content: 'No query provided.', summary: 'Missing query' };
+    let toolkits = input.toolkit ? [String(input.toolkit).toLowerCase()] : [];
+    if (toolkits.length === 0) {
+      const { data: perms } = await supabase.from('tenant_permissions').select('provider').eq('tenant_id', tenantId);
+      toolkits = (perms ?? []).map((p: { provider: string }) => p.provider);
+    }
+    const { searchComposioActions } = await import('./composio-actions');
+    return { content: await searchComposioActions(toolkits, query), summary: `Searched actions for "${query}"` };
+  }
+  if (name === 'read_app_data') {
+    const slug = String(input.action_slug ?? '').trim().toUpperCase();
+    const { isComposioRead } = await import('./runtime/agent-loop');
+    if (!slug || !isComposioRead(slug)) {
+      return { content: `read_app_data only runs read actions (list/get/search/fetch); "${slug}" changes data. Propose a mission update instead.`, summary: 'Refused a write' };
+    }
+    return executeComposioAction(slug, (input.arguments ?? {}) as Record<string, unknown>, tenantId);
   }
 
   // ── Legacy generic action (fallback when schemas not yet loaded) ───────
