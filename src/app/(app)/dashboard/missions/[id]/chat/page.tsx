@@ -1431,6 +1431,7 @@ export default function MissionChatPage() {
         ]);
 
         // Subscribe to Realtime for live step updates
+        let announcedUpdate = false;
         const supabase = getSupabase();
         const bpChannel = supabase
           .channel(`blueprint-update-${jobId}`)
@@ -1464,6 +1465,14 @@ export default function MissionChatPage() {
                   const completedSteps = m.blueprintUpdate.steps.map(s => ({ ...s, status: 'done' as const }));
                   return { ...m, blueprintUpdate: { ...m.blueprintUpdate!, steps: completedSteps, status: 'completed', versionNumber: row.payload.versionNumber } };
                 }));
+                // Updates run in the background now, so the completion event is what announces them.
+                if (!announcedUpdate) {
+                  announcedUpdate = true;
+                  setMessages(prev => [
+                    ...prev,
+                    { role: 'assistant', content: 'Mission updated! You can run it now or keep refining. To undo, say "revert to the previous version".', ts: Date.now() },
+                  ]);
+                }
               } else if (row.event_type === 'blueprint_error') {
                 setMessages(prev => prev.map(m => {
                   if (!m.blueprintUpdate || m.blueprintUpdate.jobId !== jobId) return m;
@@ -1482,7 +1491,9 @@ export default function MissionChatPage() {
             credentials: 'include',
             body: JSON.stringify({ request: action.summary ?? action.label, jobId }),
           });
-          if (res.ok) {
+          if (res.ok && res.status === 202) {
+            // Queued as a background job — the blueprint_completed / blueprint_error events finish the card.
+          } else if (res.ok) {
             const data = await res.json() as { title?: string; versionNumber?: number | null };
             if (data.title) setMissionTitle(sanitizeTitle(data.title));
             // Ensure final state is set (Realtime may have already done this)
@@ -1492,10 +1503,13 @@ export default function MissionChatPage() {
               const completedSteps = m.blueprintUpdate.steps.map(s => ({ ...s, status: 'done' as const }));
               return { ...m, blueprintUpdate: { ...m.blueprintUpdate!, steps: completedSteps, status: 'completed', versionNumber: data.versionNumber } };
             }));
-            setMessages(prev => [
-              ...prev,
-              { role: 'assistant', content: 'Mission updated! You can run it now or keep refining. To undo, say "revert to the previous version".', ts: Date.now() },
-            ]);
+            if (!announcedUpdate) {
+              announcedUpdate = true;
+              setMessages(prev => [
+                ...prev,
+                { role: 'assistant', content: 'Mission updated! You can run it now or keep refining. To undo, say "revert to the previous version".', ts: Date.now() },
+              ]);
+            }
           } else {
             const err = await res.json().catch(() => ({})) as { error?: string };
             const errMsg = err.error ?? 'Could not update mission. Please try again.';
@@ -1505,7 +1519,7 @@ export default function MissionChatPage() {
             }));
           }
         } finally {
-          setTimeout(() => supabase.removeChannel(bpChannel), 5 * 60 * 1000);
+          setTimeout(() => supabase.removeChannel(bpChannel), 20 * 60 * 1000);
         }
 
       } else if (action.type === 'revert_version' && action.versionNumber) {

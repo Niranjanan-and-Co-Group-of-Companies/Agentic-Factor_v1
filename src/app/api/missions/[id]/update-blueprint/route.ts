@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 export async function POST(
   request: NextRequest,
@@ -101,80 +101,16 @@ export async function POST(
       console.warn('[update-blueprint] Version snapshot failed (non-fatal):', vErr);
     }
 
-    // Run editBlueprint with the full validation pipeline + progress events
-    const { editBlueprint } = await import('@/lib/services/intake');
-    let updatedMission;
-    try {
-      updatedMission = await editBlueprint(
-        missionRow.mission_json as any,
-        changeRequest,
-        tenantId,
-        connectedProviders,
-        emitStep
-      );
-    } catch (editErr) {
-      await emitError((editErr as Error).message ?? 'Blueprint generation failed');
-      throw editErr;
-    }
-
-    await emitStep('saving', 'Saving updated blueprint…');
-
-    // Strip vendor names from customer-visible title
-    const { sanitizeTitle } = await import('@/lib/utils/sanitize-title');
-    const newTitle = sanitizeTitle(updatedMission.title || (missionRow.title as string));
-
-    // Persist updated blueprint
-    const { error: updateError } = await supabase
-      .from('missions')
-      .update({
-        mission_json: updatedMission as unknown as Record<string, unknown>,
-        title: newTitle,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', missionId)
-      .eq('tenant_id', tenantId);
-
-    if (updateError) {
-      console.error('[update-blueprint] DB update error:', updateError);
-      await emitError('Failed to save updated blueprint');
-      return NextResponse.json({ error: 'Failed to save updated blueprint' }, { status: 500 });
-    }
-
-    // Emit completion event
-    try {
-      await supabase.from('agent_execution_events').insert({
-        session_id: jobId,
-        tenant_id: tenantId,
-        mission_id: missionId,
-        chat_id: missionId,
-        event_type: 'blueprint_completed',
-        payload: { title: newTitle, versionNumber: savedVersionNumber },
-      });
-    } catch { /* non-fatal */ }
-
-    // Refresh tool cache in background
-    supabase
-      .from('tenant_permissions')
-      .select('provider')
-      .eq('tenant_id', tenantId)
-      .then(({ data: p }) => {
-        const connected = (p ?? []).map((r: { provider: string }) => r.provider);
-        import('@/lib/services/tool-registry').then(({ refreshMissionTools }) => {
-          refreshMissionTools(tenantId, missionId, connected).catch(() => {});
-        }).catch(() => {});
-      });
-
-    // Deduct credits (generate + validation rounds)
-    import('@/lib/middleware/billing').then(({ deductCredits, CREDIT_COSTS }) => {
-      deductCredits(tenantId, CREDIT_COSTS.llm_call_pro * 3, 'mission_update').catch(() => {});
-    }).catch(() => {});
-
-    return NextResponse.json({
-      success: true,
-      title: newTitle,
-      missionId,
-      versionNumber: savedVersionNumber,
+    // The edit runs as a background job (one step for the model's rewrite, one for validation):
+    // rewriting every agent in this request ran past the 300s limit and nothing was saved. The page
+    // follows it through the blueprint_step / blueprint_completed / blueprint_error events.
+    const { inngest } = await import('@/lib/inngest/client');
+    await inngest.send({
+      name: 'mission/blueprint.edit',
+      data: { missionId, tenantId, changeRequest, jobId, versionNumber: savedVersionNumber, connectedProviders },
     });
+
+    return NextResponse.json({ success: true, async: true, jobId, missionId, versionNumber: savedVersionNumber }, { status: 202 });
 
   } catch (err) {
     console.error('[POST /api/missions/[id]/update-blueprint]', err);

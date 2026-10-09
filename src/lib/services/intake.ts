@@ -1301,6 +1301,13 @@ Include ONLY agents whose scripts were changed. Change nothing else — not logi
 // ============================================================
 // Phase 4.2: Edit Blueprint via Chat
 // ============================================================
+export interface BlueprintEditDraft { llmOutput: LLMOutput; contextToolkits: string[] }
+
+/**
+ * A blueprint edit in two halves so each fits a 300s function: the model's rewrite (draft) and the
+ * validation passes (finalize). Rewriting all five agents of a mission in one request ran past the
+ * limit (504) and nothing was saved; the update route now runs the halves as background steps.
+ */
 export async function editBlueprint(
   currentBlueprint: Mission,
   instruction: string,
@@ -1308,6 +1315,17 @@ export async function editBlueprint(
   connectedProviders: string[] = [],
   onProgress?: (step: string, label: string) => Promise<void>
 ): Promise<Mission> {
+  const draft = await draftBlueprintEdit(currentBlueprint, instruction, tenantId, connectedProviders, onProgress);
+  return finalizeBlueprintEdit(currentBlueprint, draft, tenantId, connectedProviders, onProgress);
+}
+
+export async function draftBlueprintEdit(
+  currentBlueprint: Mission,
+  instruction: string,
+  tenantId: string = '',
+  connectedProviders: string[] = [],
+  onProgress?: (step: string, label: string) => Promise<void>
+): Promise<BlueprintEditDraft> {
   const emit = onProgress ?? (async () => {});
 
   // Build edit system prompt: reuse SYSTEM_PROMPT rules with edit-specific contract prepended
@@ -1374,6 +1392,19 @@ ${SYSTEM_PROMPT}`;
     llmOutput = LLMOutputSchema.parse(rawJSON);
   }
 
+  restoreUnchangedScripts(llmOutput.agents, currentBlueprint.agents);
+  return { llmOutput, contextToolkits };
+}
+
+export async function finalizeBlueprintEdit(
+  currentBlueprint: Mission,
+  draft: BlueprintEditDraft,
+  tenantId: string = '',
+  connectedProviders: string[] = [],
+  onProgress?: (step: string, label: string) => Promise<void>
+): Promise<Mission> {
+  const emit = onProgress ?? (async () => {});
+  const { llmOutput, contextToolkits } = draft;
   // Unchanged scripts were validated when they were written; only new or changed ones go through the fix passes.
   const changedScripts = restoreUnchangedScripts(llmOutput.agents, currentBlueprint.agents);
   const scriptsToValidate = () => llmOutput.agents.filter((a): a is typeof a & { pythonScript: string } => !!a.pythonScript && changedScripts.has(a.agentIndex));
