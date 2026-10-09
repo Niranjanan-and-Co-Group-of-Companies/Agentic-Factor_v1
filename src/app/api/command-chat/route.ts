@@ -187,7 +187,8 @@ Action types:
 - show_usage: { "type": "show_usage" }
 - open_mission: { "type": "open_mission", "missionId": "...", "missionTitle": "..." }
 - schedule_mission: { "type": "schedule_mission", "missionId": "...", "missionTitle": "...", "cron": "0 9 * * *", "timezone": "Asia/Kolkata", "label": "Daily at 9 AM IST" } — the cron is in that timezone's LOCAL time; never convert it to UTC (2:30 PM IST → "30 14 * * *" with "Asia/Kolkata")
-- pause_mission: { "type": "pause_mission", "missionId": "...", "missionTitle": "..." }
+- pause_mission: { "type": "pause_mission", "missionId": "...", "missionTitle": "..." } — pauses the schedule (it can be resumed)
+- unschedule_mission: { "type": "unschedule_mission", "missionId": "...", "missionTitle": "..." } — removes the schedule entirely; use this when the user asks to remove, delete or stop a schedule
 - resume_mission: { "type": "resume_mission", "missionId": "...", "missionTitle": "..." }
 - suggest_connector: { "type": "suggest_connector", "provider": "gmail", "reason": "needed to send emails" }
 - create_mission: { "type": "create_mission", "intent": "the user's full mission description with all details clarified" }
@@ -724,7 +725,7 @@ export async function POST(request: NextRequest) {
         // Fallback: detect raw action JSON even when LLM omits <action> tags or truncation cut the closing tag.
         // Walks character by character, balancing braces so nested objects/arrays don't confuse it.
         if (!actionPayload) {
-          const KNOWN_TYPES = new Set(['create_mission','run_mission','show_missions','show_usage','open_mission','schedule_mission','pause_mission','resume_mission','suggest_connector','key_connected','key_connection_failed']);
+          const KNOWN_TYPES = new Set(['create_mission','run_mission','show_missions','show_usage','open_mission','schedule_mission','pause_mission','resume_mission','unschedule_mission','suggest_connector','key_connected','key_connection_failed']);
           const jsonStart = fullText.indexOf('{"type":');
           if (jsonStart !== -1) {
             let depth = 0, inString = false, escaped = false, jsonEnd = -1;

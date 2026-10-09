@@ -539,6 +539,10 @@ function CommandCenterPageInner() {
         const res = await fetch(`/api/missions/${action.missionId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pause' }) });
         showToast(res.ok ? '⏸️ Mission paused.' : '❌ Could not pause.');
 
+      } else if (action.type === 'unschedule_mission' && action.missionId) {
+        const res = await fetch(`/api/missions/${action.missionId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unschedule' }) });
+        showToast(res.ok ? '🗑️ Schedule removed.' : '❌ Could not remove the schedule.');
+
       } else if (action.type === 'resume_mission' && action.missionId) {
         const res = await fetch(`/api/missions/${action.missionId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'resume' }) });
         showToast(res.ok ? '▶️ Mission resumed.' : '❌ Could not resume.');
@@ -620,6 +624,7 @@ function CommandCenterPageInner() {
       schedule_mission: { icon: '📅', title: 'Applying Schedule',     sub: 'Configuring run timing…' },
       pause_mission:    { icon: '⏸',  title: 'Pausing Mission',       sub: 'Halting scheduled runs…' },
       resume_mission:   { icon: '▶',  title: 'Resuming Mission',      sub: 'Re-enabling the schedule…' },
+      unschedule_mission:{ icon: '🗑', title: 'Removing Schedule',     sub: 'Stopping recurring runs…' },
       suggest_connector:{ icon: '🔗', title: 'Checking Connector',    sub: 'Looking up integration details…' },
       pending:          { icon: '⟳',  title: 'Processing',            sub: 'One moment…' },
     };
@@ -726,9 +731,9 @@ function CommandCenterPageInner() {
       </div>
     );
 
-    if (action.type === 'pause_mission' || action.type === 'resume_mission') return (
+    if (action.type === 'pause_mission' || action.type === 'resume_mission' || action.type === 'unschedule_mission') return (
       <div style={card}>
-        <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{action.type === 'pause_mission' ? '⏸ Pause' : '▶ Resume'} "{action.missionTitle}"</div>
+        <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{action.type === 'pause_mission' ? '⏸ Pause' : action.type === 'unschedule_mission' ? '🗑 Remove schedule for' : '▶ Resume'} "{action.missionTitle}"</div>
         <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => applyAction(action, msgIndex)} disabled={applying}>{applying ? 'Working…' : 'Confirm'}</button>
       </div>
     );
