@@ -91,7 +91,10 @@ export async function POST(
         'intercom', 'mailchimp', 'paypal', 'shopify', 'linear', 'zendesk', 'reddit',
         'trello', 'youtube', 'instagram', 'whatsapp',
       ];
-      const connectable = missingProviders.filter(p => oauthProviders.includes(p));
+      // Every Composio toolkit the mission declares is one the customer connects themselves.
+      const composioToolkits = new Set(((missionRow.mission_json?.permissions ?? []) as Array<{ type?: string; service?: string }>)
+        .filter(perm => perm.type === 'composio_oauth' && perm.service).map(perm => perm.service!.toLowerCase()));
+      const connectable = missingProviders.filter(p => oauthProviders.includes(p) || composioToolkits.has(p.toLowerCase()));
 
       if (connectable.length > 0) {
         // Notify customer by email to self-serve

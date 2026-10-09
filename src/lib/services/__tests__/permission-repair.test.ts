@@ -38,4 +38,12 @@ describe('repairMissionPermissions', () => {
     const out = repairMissionPermissions([{ role: 'Researcher', tools: [{ name: 'Google Search', type: 'web_search' }] }], []);
     expect(out).toEqual([]);
   });
+
+  it('does not add Zoho CRM next to a declared Zoho Books toolkit', () => {
+    const out = repairMissionPermissions(
+      [{ role: 'Books Reader', tools: [{ name: 'Zoho Books API', type: 'api' }] }],
+      [perm('zoho_books')],
+    );
+    expect(out.map(p => p.service)).toEqual(['zoho_books']);
+  });
 });

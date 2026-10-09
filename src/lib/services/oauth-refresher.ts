@@ -198,6 +198,12 @@ export const COMPOSIO_SLUG_ALIASES: Record<string, string[]> = {
  * Returns an array of providers that are completely missing or hopelessly expired.
  * If the array is empty, all required permissions are valid.
  */
+/** Whole-word alias match (a slug like zoho_books is one word): by substring, alias 'x' (X/Twitter) claimed any service containing an x ('xero'). */
+export function matchesAlias(service: string, alias: string): boolean {
+  const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9_])${escaped}($|[^a-z0-9_])`).test(service);
+}
+
 export async function verifyMissionPermissions(missionId: string, tenantId: string): Promise<string[]> {
   const supabase = createServiceClient();
 
@@ -347,7 +353,7 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
     } else if (p.type === 'oauth_token') {
       const serviceLower = p.service.toLowerCase();
       for (const [alias, dbKey] of Object.entries(PROVIDER_ALIASES)) {
-        if (serviceLower.includes(alias)) {
+        if (matchesAlias(serviceLower, alias)) {
           console.log(`[VerifyPermissions] Mapped service "${p.service}" → DB key "${dbKey}" (via alias "${alias}")`);
           requiredProviders.add(dbKey);
           return;
@@ -358,7 +364,7 @@ export async function verifyMissionPermissions(missionId: string, tenantId: stri
     } else if (p.type === 'api_key') {
       const serviceLower = p.service.toLowerCase();
       for (const [alias, dbKey] of Object.entries(API_KEY_ALIASES)) {
-        if (serviceLower.includes(alias)) {
+        if (matchesAlias(serviceLower, alias)) {
           console.log(`[VerifyPermissions] API key: mapped service "${p.service}" → DB key "${dbKey}"`);
           requiredProviders.add(dbKey);
           return;

@@ -611,6 +611,8 @@ export function repairMissionPermissions(
       const authType = API_KEY_PROVIDERS.has(canonical) ? 'api_key' : 'composio_oauth';
       const service = authType === 'composio_oauth' ? composioSlugFor(canonical, toolLower) : canonical;
       if (declared.has(service)) continue;
+      // A declared zoho_books covers a tool named "Zoho Books": don't add Zoho CRM ("zoho") next to it.
+      if (authType === 'composio_oauth' && [...declared].some(d => d.startsWith(`${service}_`))) continue;
       declared.add(service);
       repaired.push({
         type: authType,
@@ -853,8 +855,13 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
   ]);
 
   // Fetch Composio action schemas for connected providers (non-blocking — empty string on failure)
+  // Toolkits come from Composio's catalog: connected ones plus every product the request names,
+  // even before it is connected, so a "Zoho Books" mission is built with Zoho Books actions.
   const { buildComposioActionsContext } = await import('./composio-actions');
-  const composioActionsContext = await buildComposioActionsContext(connectedProviders).catch(() => '');
+  const { requestedToolkits, toolkitNotice, toolkitSlugs } = await import('./toolkit-resolver');
+  const requested = await requestedToolkits(intent, tenantId).catch(() => []);
+  const contextToolkits = [...new Set([...connectedProviders, ...toolkitSlugs(requested)])];
+  const composioActionsContext = `${await buildComposioActionsContext(contextToolkits).catch(() => '')}${toolkitNotice(requested, connectedProviders)}`;
 
   // Extract facts in the background (fire-and-forget)
   extractAndSaveTenantMemory(intent, tenantId).catch(console.error);
@@ -1077,10 +1084,10 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
   // If the LLM invented a name (e.g. "TRELLO_ADD_CARDS" instead of "TRELLO_CREATE_TRELLO_CARD"),
   // we catch it here and fix the script before the blueprint is saved — not at runtime after
   // credits are burned on 5 failed retries.
-  if (connectedProviders.length > 0) {
+  if (contextToolkits.length > 0) {
     try {
       const { getValidComposioActionNames } = await import('./composio-actions');
-      const validActions = await getValidComposioActionNames(connectedProviders);
+      const validActions = await getValidComposioActionNames(contextToolkits);
 
       if (validActions.size > 0) {
         const invalidActions = new Set<string>();
@@ -1145,10 +1152,10 @@ Include only agents whose scripts were changed. Change nothing else — not logi
   // This catches wrong PARAMETER names — e.g. passing {recipient: ...} when the
   // schema requires {recipient_email: ...}. Both errors fail silently at runtime,
   // burning credits. We fix both before the blueprint is ever saved.
-  if (connectedProviders.length > 0) {
+  if (contextToolkits.length > 0) {
     try {
       const { getComposioActionSchemas } = await import('./composio-actions');
-      const actionSchemas = await getComposioActionSchemas(connectedProviders);
+      const actionSchemas = await getComposioActionSchemas(contextToolkits);
 
       if (actionSchemas.size > 0) {
         // Collect every action name actually used in the generated scripts
@@ -1224,6 +1231,16 @@ Include ONLY agents whose scripts were changed. Change nothing else — not logi
     } catch (err) {
       console.warn('[intake] Parameter validation failed (non-fatal):', err);
     }
+  }
+
+  // Every toolkit the scripts call gets a permission, from the toolkit Composio records per action.
+  try {
+    const { declareCalledToolkits } = await import('./toolkit-resolver');
+    llmOutput.permissions = await declareCalledToolkits(
+      llmOutput.agents.map(a => a.pythonScript ?? ''), llmOutput.permissions as any, connectedProviders,
+    ) as typeof llmOutput.permissions;
+  } catch (err) {
+    console.warn('[intake] Toolkit permission check failed (non-fatal):', err);
   }
 
   // 4. Hydrate with IDs, tenantId, timestamps
@@ -1306,12 +1323,18 @@ EDITING CONTRACT:
 
 ${SYSTEM_PROMPT}`;
 
-  // Inject live Composio action schemas for connected providers
+  // Live Composio actions for the connected toolkits, the ones this mission already uses, and any
+  // product the change names — all resolved in Composio's catalog.
+  const { requestedToolkits, toolkitNotice, toolkitSlugs } = await import('./toolkit-resolver');
+  const requested = await requestedToolkits(instruction, tenantId || undefined).catch(() => []);
+  const declaredToolkits = (currentBlueprint.permissions ?? [])
+    .filter(p => p.type === 'composio_oauth').map(p => p.service.toLowerCase().trim());
+  const contextToolkits = [...new Set([...connectedProviders, ...declaredToolkits, ...toolkitSlugs(requested)])];
   let composioActionsContext = '';
-  if (connectedProviders.length > 0) {
+  if (contextToolkits.length > 0) {
     try {
       const { buildComposioActionsContext } = await import('./composio-actions');
-      composioActionsContext = await buildComposioActionsContext(connectedProviders).catch(() => '');
+      composioActionsContext = `${await buildComposioActionsContext(contextToolkits).catch(() => '')}${toolkitNotice(requested, connectedProviders)}`;
     } catch { /* non-fatal */ }
   }
 
@@ -1384,11 +1407,11 @@ ${SYSTEM_PROMPT}`;
   ) as typeof llmOutput.permissions;
 
   // 4.6: Validate Composio action names against live list
-  if (connectedProviders.length > 0) {
+  if (contextToolkits.length > 0) {
     await emit('validating_actions', 'Validating Composio action names…');
     try {
       const { getValidComposioActionNames } = await import('./composio-actions');
-      const validActions = await getValidComposioActionNames(connectedProviders);
+      const validActions = await getValidComposioActionNames(contextToolkits);
       if (validActions.size > 0) {
         const invalidActions = new Set<string>();
         const actionRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
@@ -1431,11 +1454,11 @@ Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected scrip
   }
 
   // 4.7: Validate Composio parameter names against live schemas
-  if (connectedProviders.length > 0) {
+  if (contextToolkits.length > 0) {
     await emit('validating_params', 'Validating parameter names…');
     try {
       const { getComposioActionSchemas } = await import('./composio-actions');
-      const actionSchemas = await getComposioActionSchemas(connectedProviders);
+      const actionSchemas = await getComposioActionSchemas(contextToolkits);
       if (actionSchemas.size > 0) {
         // Rename the unambiguous mistakes in place; only scripts that still have problems go to the LLM.
         const needsFix: Array<{ agentIndex: number; pythonScript: string; problems: string[] }> = [];
@@ -1467,6 +1490,15 @@ Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected scrip
     } catch (err) {
       console.warn('[intake/edit] Parameter validation failed (non-fatal):', err);
     }
+  }
+
+  try {
+    const { declareCalledToolkits } = await import('./toolkit-resolver');
+    llmOutput.permissions = await declareCalledToolkits(
+      llmOutput.agents.map(a => a.pythonScript ?? ''), llmOutput.permissions as any, connectedProviders,
+    ) as typeof llmOutput.permissions;
+  } catch (err) {
+    console.warn('[intake/edit] Toolkit permission check failed (non-fatal):', err);
   }
 
   // Preserve UUIDs from the current blueprint; map agent-N refs and new agents to new UUIDs

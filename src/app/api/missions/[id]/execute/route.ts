@@ -105,8 +105,13 @@ export async function POST(
           'intercom', 'mailchimp', 'paypal', 'shopify', 'linear', 'zendesk',
           'reddit', 'trello', 'youtube', 'whatsapp',
         ];
-        const customerConnectable = missingProviders.filter(p => oauthProviders.includes(p));
-        const platformOnly = missingProviders.filter(p => !oauthProviders.includes(p));
+        // Every Composio toolkit the mission declares is one the customer connects themselves —
+        // Zoho Books wasn't on the list above, so its customers were never told to connect it.
+        const composioToolkits = new Set(((missionJson?.permissions ?? []) as Array<{ type?: string; service?: string }>)
+          .filter(perm => perm.type === 'composio_oauth' && perm.service).map(perm => perm.service!.toLowerCase()));
+        const isConnectable = (p: string) => oauthProviders.includes(p) || composioToolkits.has(p.toLowerCase());
+        const customerConnectable = missingProviders.filter(isConnectable);
+        const platformOnly = missingProviders.filter(p => !isConnectable(p));
 
         if (customerConnectable.length > 0 && customerEmail) {
           const { sendEmail, displayName } = await import('@/lib/services/email-notifications');

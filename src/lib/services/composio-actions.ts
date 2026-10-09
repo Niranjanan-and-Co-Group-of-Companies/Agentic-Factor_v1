@@ -53,6 +53,7 @@ interface ComposioTool {
   slug: string;
   name: string;
   description: string;
+  toolkit?: { slug?: string; name?: string };
   input_parameters?: {
     properties?: Record<string, { type?: string; description?: string; title?: string }>;
     required?: string[];
@@ -114,6 +115,66 @@ async function fetchAllActionsForApp(appName: string, apiKey: string): Promise<C
   } catch (err) {
     console.warn(`[composio-actions] Error fetching ${appName}:`, err);
     return [];
+  }
+}
+
+// ── Toolkits straight from Composio's catalog ─────────────────────────────
+// Connectors used to be resolved through hand-kept maps, so "Zoho Books" became Zoho CRM (the only
+// Zoho entry): a financial-statements mission got CRM actions and CRM permissions and every Books
+// call failed on scope. Toolkits and the toolkit an action belongs to now come from Composio itself.
+
+export interface ToolkitMatch { slug: string; name: string }
+
+const toolkitSearchCache = new Map<string, { items: ToolkitMatch[]; expiresAt: number }>();
+
+/** Composio toolkits matching a product name, from Composio's own catalog. */
+export async function searchComposioToolkits(query: string, limit = 8): Promise<ToolkitMatch[]> {
+  const apiKey = process.env.COMPOSIO_API_KEY;
+  const q = query.trim().toLowerCase();
+  if (!apiKey || !q) return [];
+  const cached = toolkitSearchCache.get(q);
+  if (cached && cached.expiresAt > Date.now()) return cached.items;
+  try {
+    const res = await fetch(`${COMPOSIO_API_BASE}/api/v3.1/toolkits?search=${encodeURIComponent(q)}&limit=${limit}`, {
+      headers: { 'x-api-key': apiKey }, signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json() as { items?: Array<{ slug?: string; name?: string }> };
+    const items = (data.items ?? []).filter(t => t.slug).map(t => ({ slug: t.slug!, name: t.name ?? t.slug! }));
+    toolkitSearchCache.set(q, { items, expiresAt: Date.now() + 60 * 60 * 1000 });
+    return items;
+  } catch {
+    return [];
+  }
+}
+
+/** The toolkit a product name means — only an exact name or slug match, never a near miss (Zoho CRM is not Zoho Books). */
+export function pickToolkit(productName: string, candidates: ToolkitMatch[]): string | undefined {
+  const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const wanted = norm(productName);
+  return (candidates.find(c => norm(c.name) === wanted) ?? candidates.find(c => norm(c.slug) === wanted))?.slug;
+}
+
+const actionToolkitCache = new Map<string, string>();
+
+/** The toolkit an action belongs to, as Composio records it: ZOHO_BOOKS_* is zoho_books, not zoho. */
+export async function toolkitForAction(action: string): Promise<string | null> {
+  const key = action.toUpperCase();
+  const cached = actionToolkitCache.get(key);
+  if (cached) return cached;
+  const apiKey = process.env.COMPOSIO_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const res = await fetch(`${COMPOSIO_API_BASE}/api/v3.1/tools/${encodeURIComponent(key)}`, {
+      headers: { 'x-api-key': apiKey }, signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { toolkit?: { slug?: string } };
+    const slug = data.toolkit?.slug?.toLowerCase();
+    if (slug) actionToolkitCache.set(key, slug);
+    return slug ?? null;
+  } catch {
+    return null;
   }
 }
 
@@ -182,10 +243,12 @@ export async function buildComposioFixContext(usedSlugs: string[], detailedLimit
 
   const used = new Set(usedSlugs.map(s => s.toUpperCase()));
   const usedTokens = new Set([...used].flatMap(s => s.split('_').slice(1)));
-  const appNames = [...new Set([...used].map(s => {
+  // The toolkit each action belongs to, from Composio — guessing from the first word sent a Zoho
+  // Books script's fixer only Zoho CRM's actions.
+  const appNames = [...new Set(await Promise.all([...used].map(async s => {
     const prefix = s.split('_')[0].toLowerCase();
-    return AF_TO_COMPOSIO_APP[prefix] ?? prefix;
-  }))];
+    return (await toolkitForAction(s)) ?? AF_TO_COMPOSIO_APP[prefix] ?? prefix;
+  })))];
 
   const results = await Promise.allSettled(appNames.map(app => fetchAllActionsForApp(app, apiKey)));
   const actions = results.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
