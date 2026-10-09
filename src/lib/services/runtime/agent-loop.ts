@@ -806,7 +806,10 @@ export async function executeAgent(
       }
     }
     if (missionRow?.mission_json?.title) missionTitle = missionRow.mission_json.title;
-    if (typeof missionRow?.mission_json?.description === 'string') missionDescription = missionRow.mission_json.description;
+    // The customer's verbatim words when the mission kept them (quotes, figures, names); else the summary.
+    const sourceRequest = missionRow?.mission_json?.sourceRequest;
+    if (typeof sourceRequest === 'string' && sourceRequest.trim()) missionDescription = sourceRequest;
+    else if (typeof missionRow?.mission_json?.description === 'string') missionDescription = missionRow.mission_json.description;
     isTrainingMode = missionRow?.training_enabled === true;
     trainingRunNumber = (missionRow?.training_runs_completed ?? 0) + 1;
     tenantPlan = billingRow?.plan ?? 'free';
@@ -1824,7 +1827,7 @@ ${hasWriteOps ? `
 ⚠️ THIS IS A PREVIEW RUN. The platform deliberately did NOT execute this agent's write actions (send, post, create doc/sheet/page/record); they run only after a human approves this preview. So "dry_run", "dry-run-preview" IDs/URLs, "not sent", "not created", or a status like "error"/"failed" that only reflects the missing write result are EXPECTED and must NEVER be a reason to fail. Judge only the content the agent prepared for those actions.
 ` : ''}
 ${missionDescription ? `WHAT THE CUSTOMER ASKED FOR (the whole mission — for reference only):
-${missionDescription.slice(0, 2000)}
+${missionDescription.slice(0, 6000)}
 This agent is ONE step of that mission. Judge it only on its own task below; other steps handle the rest. Use the mission text only to check that specifics the customer gave (names, amounts, numbers, dates, recipients) are not replaced by different data.
 
 ` : ''}AGENT'S ROLE AND TASK:
@@ -1846,7 +1849,8 @@ FAIL if:
 - The output doesn't address what the agent was supposed to do at all
 - The output contradicts or ignores the input it was given. Exception: in a pipeline an agent's input can be an earlier agent's work on a different part of the job (e.g. research on another brand) — adding its own part, and passing earlier data through, is correct
 - The content is generic or placeholder-like instead of reflecting the specific task
-- Specifics the customer gave (names, amounts, invoice or order numbers, dates, recipients) are replaced by different or sample data such as "Acme Corp" or "John Doe" — this always fails, however polished the output${isFinalAgent && expectedOutputFormat ? `
+- Specifics the customer gave (names, amounts, invoice or order numbers, dates, recipients) are replaced by different or sample data such as "Acme Corp" or "John Doe" — this always fails, however polished the output
+- Text presented as a direct quote (in quotation marks or a blockquote) from material the customer supplied above, but worded differently from it — a reworded or invented quote always fails${isFinalAgent && expectedOutputFormat ? `
 - Required core fields from the expected format are completely missing or have the wrong type` : ''}
 
 PASS if:

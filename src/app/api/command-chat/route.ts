@@ -775,9 +775,10 @@ export async function POST(request: NextRequest) {
             // Questions the architect already asked in this conversation: it must not keep asking.
             const { architectQuestionsIn } = await import('@/lib/utils/architect-question');
             const priorQuestions = architectQuestionsIn(recentMessages);
+            const { customerWords } = await import('@/lib/utils/source-request');
             await inngest.send({
               name: 'mission/blueprint.generate',
-              data: { jobId, intent: actionPayload.intent as string, tenantId, priorQuestions },
+              data: { jobId, intent: actionPayload.intent as string, tenantId, priorQuestions, sourceRequest: customerWords(recentMessages) },
             });
             actionPayload = { type: 'building_blueprint', jobId };
           } catch (inngestErr) {

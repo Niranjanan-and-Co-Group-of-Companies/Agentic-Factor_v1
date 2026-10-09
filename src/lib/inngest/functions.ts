@@ -603,7 +603,7 @@ export const generateBlueprintBackground = inngest.createFunction(
     triggers: [{ event: 'mission/blueprint.generate' }],
   },
   async ({ event, step }) => {
-    const { jobId, intent, tenantId, files, priorQuestions } = event.data;
+    const { jobId, intent, tenantId, files, priorQuestions, sourceRequest } = event.data;
     const supabase = createServiceClient();
 
     const updateJobStatus = async (status: string, data: Record<string, any> = {}) => {
@@ -643,7 +643,8 @@ export const generateBlueprintBackground = inngest.createFunction(
         await updateJobStatus('processing', { step: '🤖 AI architect is designing your agent team...' });
 
         const { generateMissionJSON } = await import('@/lib/services/intake');
-        const result = await generateMissionJSON(intent, tenantId, files, { priorQuestions });
+        const { withCustomerWords } = await import('@/lib/utils/source-request');
+        const result = await generateMissionJSON(withCustomerWords(intent, sourceRequest), tenantId, files, { priorQuestions });
 
         if (result.isDiscovery && result.question) {
           return { type: 'discovery' as const, question: result.question };
@@ -685,7 +686,8 @@ export const generateBlueprintBackground = inngest.createFunction(
         await updateJobStatus('processing', { step: '✅ Validating blueprint structure...' });
         await new Promise<void>((r) => setTimeout(r, 1200));
 
-        const mission = discoveryResult.mission;
+        // The customer's own words stay with the mission for blueprint edits and the critic.
+        const mission = sourceRequest ? { ...discoveryResult.mission, sourceRequest } : discoveryResult.mission;
 
         // Persist mission to the database
         const { persistMission } = await import('@/lib/services/intake');

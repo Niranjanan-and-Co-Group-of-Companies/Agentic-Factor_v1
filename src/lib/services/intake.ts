@@ -1298,6 +1298,7 @@ export async function editBlueprint(
 EDITING CONTRACT:
 - Preserve ALL existing agent id fields EXACTLY — never generate new UUIDs for existing agents
 - Preserve the mission id and createdAt fields exactly
+- "sourceRequest", when present, is the customer's original message, verbatim. Take data, names, numbers and anything to quote from it exactly — never reword a quote. Leave the field itself unchanged
 - Change ONLY what the instruction specifies — leave everything else unchanged
 - If adding a new agent, use a placeholder id like "new-agent-0" (gets remapped to a real UUID after)
 - For every agent whose pythonScript the instruction does NOT require changing, set "pythonScript": "${UNCHANGED_SCRIPT}" — do not repeat it. Write a full script only for agents you change or add.
