@@ -29,7 +29,14 @@ export function withPipelineHistory(
     size += len;
   }
   const ordered = Object.fromEntries(earlier.filter(s => s.role in pipeline).map(s => [s.role, pipeline[s.role]]));
-  return JSON.stringify({ ...(top as Record<string, unknown>), _pipeline: ordered });
+  // Earlier agents' top-level fields are also merged in (oldest first, the previous agent's own
+  // fields win): a compiler that read input_data["github_summary"] found nothing — the GitHub
+  // results were only under _pipeline — and emailed "0 commits across 0 repos".
+  const merged: Record<string, unknown> = {};
+  for (const value of Object.values(ordered)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) Object.assign(merged, value);
+  }
+  return JSON.stringify({ ...merged, ...(top as Record<string, unknown>), _pipeline: ordered });
 }
 
 /**

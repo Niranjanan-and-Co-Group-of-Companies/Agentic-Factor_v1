@@ -52,3 +52,15 @@ describe('criticInputView', () => {
     expect(criticInputView('plain')).toBe('plain');
   });
 });
+
+describe('withPipelineHistory merges earlier fields', () => {
+  it('makes earlier agents\' top-level fields directly readable, previous agent winning on clashes', () => {
+    const parsed = JSON.parse(withPipelineHistory('{"slack_summary":{"messages":0},"status":"completed"}', [
+      { role: 'GitHub Reader', output: '{"github_summary":{"commits":2},"status":"done"}' },
+    ]));
+    expect(parsed.github_summary.commits).toBe(2);
+    expect(parsed.slack_summary.messages).toBe(0);
+    expect(parsed.status).toBe('completed');
+    expect(parsed._pipeline['GitHub Reader'].github_summary.commits).toBe(2);
+  });
+});
