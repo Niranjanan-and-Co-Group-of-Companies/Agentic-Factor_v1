@@ -457,10 +457,12 @@ async function runCommandLoop(params: {
   tenantId: string;
   supabase: ReturnType<typeof createServiceClient>;
   send: (obj: Record<string, unknown>) => void;
-}): Promise<{ fullText: string; inputTokens: number; outputTokens: number }> {
+}): Promise<{ fullText: string; inputTokens: number; outputTokens: number; provider: string; model: string }> {
   const { systemPrompt, apiKey, tenantId, supabase, send } = params;
   const messages = [...params.messages];
   let totalInputTokens = 0, totalOutputTokens = 0, fullText = '';
+  // Which model answered — recorded on the billing event so a fallback (e.g. Claude out of credit) shows up.
+  let servedBy = { provider: 'anthropic', model: 'claude-sonnet-4-6' };
   const MAX_ROUNDS = 8;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -491,6 +493,7 @@ async function runCommandLoop(params: {
             { tier: 1, jsonMode: false, maxTokens: 4096, temperature: 0.5 },
           );
           send({ type: 'delta', text: fallback.content });
+          servedBy = { provider: 'router-fallback', model: (fallback as { model?: string }).model ?? 'unknown' };
           fullText += fallback.content;
           totalInputTokens += fallback.inputTokens ?? 0;
           totalOutputTokens += fallback.outputTokens ?? 0;
@@ -546,7 +549,7 @@ async function runCommandLoop(params: {
     messages.push({ role: 'user', content: toolResults });
   }
 
-  return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
+  return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, ...servedBy };
 }
 
 async function ensureSession(
@@ -702,7 +705,7 @@ export async function POST(request: NextRequest) {
 
       try {
         const supabase = createServiceClient();
-        const { fullText, inputTokens, outputTokens } = await runCommandLoop({
+        const { fullText, inputTokens, outputTokens, provider, model } = await runCommandLoop({
           systemPrompt,
           messages: recentMessages,
           apiKey,
@@ -753,7 +756,7 @@ export async function POST(request: NextRequest) {
         // Deduct credits (awaited — failed deduction is logged, not silently swallowed)
         const credits = await calculateChatCreditCost(inputTokens, outputTokens, 'claude-sonnet-4-6');
         try {
-          await deductCredits(tenantId, credits, 'command_chat');
+          await deductCredits(tenantId, credits, 'command_chat', { provider, model, inputTokens, outputTokens });
         } catch (deductErr) {
           console.error('[CommandChat] Credit deduction failed:', deductErr);
         }
