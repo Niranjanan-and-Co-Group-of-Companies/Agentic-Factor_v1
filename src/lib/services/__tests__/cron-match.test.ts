@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cronMatches } from '../cron-match';
+import { alignCronToLabel, cronMatches } from '../cron-match';
 
 // 2026-10-09 is a Friday. 03:30 UTC = 09:00 IST.
 const at = (iso: string) => new Date(iso);
@@ -40,5 +40,25 @@ describe('cronMatches', () => {
   it('rejects malformed expressions and falls back to UTC on a bad timezone', () => {
     expect(cronMatches('0 9 * *', at('2026-10-09T09:00:00Z'))).toBe(false);
     expect(cronMatches('0 9 * * *', at('2026-10-09T09:00:00Z'), 'Not/AZone')).toBe(true);
+  });
+});
+
+describe('alignCronToLabel', () => {
+  it('fixes a cron that was converted to UTC while labelled in local time', () => {
+    expect(alignCronToLabel('0 9 * * *', 'Daily at 2:30 PM IST')).toBe('30 14 * * *');
+  });
+
+  it('keeps a cron that already matches, and the day fields', () => {
+    expect(alignCronToLabel('30 14 * * *', 'Daily at 2:30 PM IST')).toBe('30 14 * * *');
+    expect(alignCronToLabel('0 3 * * 1-5', 'Weekdays at 9 AM IST')).toBe('0 9 * * 1-5');
+    expect(alignCronToLabel('0 9 * * 1', 'Every Monday at 9am')).toBe('0 9 * * 1');
+  });
+
+  it('handles 24-hour labels, 12 AM/PM and leaves unparseable cases alone', () => {
+    expect(alignCronToLabel('0 0 * * *', 'Daily at 18:45')).toBe('45 18 * * *');
+    expect(alignCronToLabel('0 5 * * *', 'Daily at 12 AM')).toBe('0 0 * * *');
+    expect(alignCronToLabel('0 5 * * *', 'Daily at 12 PM')).toBe('0 12 * * *');
+    expect(alignCronToLabel('*/15 * * * *', 'Every 15 minutes')).toBe('*/15 * * * *');
+    expect(alignCronToLabel('0 9 * * *', 'Daily')).toBe('0 9 * * *');
   });
 });

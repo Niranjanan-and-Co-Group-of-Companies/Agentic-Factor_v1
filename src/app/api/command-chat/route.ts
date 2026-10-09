@@ -184,7 +184,7 @@ Action types:
 - show_missions: { "type": "show_missions" }
 - show_usage: { "type": "show_usage" }
 - open_mission: { "type": "open_mission", "missionId": "...", "missionTitle": "..." }
-- schedule_mission: { "type": "schedule_mission", "missionId": "...", "missionTitle": "...", "cron": "0 9 * * *", "timezone": "Asia/Kolkata", "label": "Daily at 9 AM IST" }
+- schedule_mission: { "type": "schedule_mission", "missionId": "...", "missionTitle": "...", "cron": "0 9 * * *", "timezone": "Asia/Kolkata", "label": "Daily at 9 AM IST" } — the cron is in that timezone's LOCAL time; never convert it to UTC (2:30 PM IST → "30 14 * * *" with "Asia/Kolkata")
 - pause_mission: { "type": "pause_mission", "missionId": "...", "missionTitle": "..." }
 - resume_mission: { "type": "resume_mission", "missionId": "...", "missionTitle": "..." }
 - suggest_connector: { "type": "suggest_connector", "provider": "gmail", "reason": "needed to send emails" }
@@ -759,6 +759,11 @@ export async function POST(request: NextRequest) {
         // Running it inline would hit the 120s serverless timeout — so we fire
         // an Inngest event and let the background function handle it. The client
         // polls /api/blueprint-status?jobId=... for progress and completion.
+        if (actionPayload?.type === 'schedule_mission' && typeof actionPayload.cron === 'string' && typeof actionPayload.label === 'string') {
+          const { alignCronToLabel } = await import('@/lib/services/cron-match');
+          actionPayload.cron = alignCronToLabel(actionPayload.cron, actionPayload.label);
+        }
+
         if (actionPayload?.type === 'create_mission' && actionPayload.intent) {
           const jobId = crypto.randomUUID();
           try {

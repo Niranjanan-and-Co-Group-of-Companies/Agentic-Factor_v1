@@ -43,3 +43,28 @@ export function cronMatches(expr: string, date: Date, timeZone = 'UTC'): boolean
   const dayOk = dom !== '*' && dow !== '*' ? domMatches || dowMatches : domMatches && dowMatches;
   return fieldMatches(m, t.minute, 0, 59) && fieldMatches(h, t.hour, 0, 23) && fieldMatches(mon, t.month, 1, 12) && dayOk;
 }
+
+/**
+ * Makes a schedule's cron agree with the time in its human label. Command Center replied "every day
+ * at 2:30 PM IST" but emitted cron "0 9 * * *" with timezone Asia/Kolkata — it converted to UTC and
+ * then labelled the result IST, so the mission would have run at 9:00 AM. The label carries the
+ * user's own words, so a fixed hour/minute that disagrees with it is replaced.
+ */
+export function alignCronToLabel(cron: string, label: string): string {
+  const fields = cron.trim().split(/\s+/);
+  if (fields.length !== 5 || !/^\d+$/.test(fields[0]) || !/^\d+$/.test(fields[1])) return cron;
+  const m12 = /\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s*m\b/i.exec(label);
+  const m24 = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(label);
+  let hour: number | null = null;
+  let minute = 0;
+  if (m12) {
+    hour = Number(m12[1]) % 12 + (m12[3].toLowerCase() === 'p' ? 12 : 0);
+    minute = m12[2] ? Number(m12[2]) : 0;
+  } else if (m24) {
+    hour = Number(m24[1]);
+    minute = Number(m24[2]);
+  }
+  if (hour === null || hour > 23 || minute > 59) return cron;
+  if (Number(fields[0]) === minute && Number(fields[1]) === hour) return cron;
+  return [String(minute), String(hour), ...fields.slice(2)].join(' ');
+}
