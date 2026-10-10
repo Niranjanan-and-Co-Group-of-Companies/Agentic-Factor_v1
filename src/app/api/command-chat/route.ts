@@ -526,6 +526,16 @@ async function runCommandLoop(params: {
     const toolBlocks = contentBlocks.filter(b => b.type === 'tool_use' && b.id && b.name);
     if (stopReason !== 'tool_use' || toolBlocks.length === 0) break;
 
+    // Newer models sometimes call an action (show_usage, create_mission…) as if it were a tool. That
+    // answered "Unknown tool", cost a second full round and repeated the reply — take it as the action.
+    const actionCall = toolBlocks.find(b => ACTION_TYPES.has(b.name!));
+    if (actionCall) {
+      let inp: Record<string, unknown> = {};
+      try { inp = JSON.parse(actionCall.inputJson ?? '{}'); } catch { /* empty */ }
+      fullText += `\n<action>${JSON.stringify({ ...inp, type: actionCall.name })}</action>`;
+      break;
+    }
+
     const toolResults: unknown[] = [];
     for (const block of toolBlocks) {
       let inp: Record<string, unknown> = {};
@@ -552,6 +562,8 @@ async function runCommandLoop(params: {
 
   return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, ...servedBy };
 }
+
+const ACTION_TYPES = new Set(['create_mission', 'run_mission', 'show_missions', 'show_usage', 'open_mission', 'schedule_mission', 'pause_mission', 'resume_mission', 'unschedule_mission', 'suggest_connector']);
 
 async function ensureSession(
   supabase: ReturnType<typeof createServiceClient>,
@@ -815,7 +827,8 @@ export async function POST(request: NextRequest) {
 
       } catch (err) {
         console.error('[command-chat/stream]', err);
-        send({ type: 'error', message: 'Something went wrong. Please try again.' });
+        // detail is not shown in the chat UI; it says what actually failed.
+        send({ type: 'error', message: 'Something went wrong. Please try again.', detail: String((err as Error)?.message ?? err).slice(0, 300) });
       }
       controller.close();
     },
