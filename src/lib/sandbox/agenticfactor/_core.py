@@ -505,6 +505,47 @@ def ask_ai_batch(prompts, system: str = "", max_tokens: int = 1500, json_mode: b
         return list(pool.map(lambda p: ask_ai(p, system=system, max_tokens=max_tokens, json_mode=json_mode), prompts))
 
 
+def generate_image(prompt: str, shape: str = "landscape", save_path: str = "") -> dict:
+    """Generate an image with the platform's image model (no API key needed; billed to credits).
+    shape: "landscape" (16:9, slides and banners), "square" (posts) or "portrait" (stories).
+    Saves the file and returns {"file_path", "mime_type", "model"}; read the bytes from file_path to
+    upload them (e.g. composio_proxy(..., binary=...)) or embed them (python-pptx, openpyxl).
+    Takes ~10-30s: for several images use generate_images. Kept in sync with CORE_FALLBACK."""
+    token = os.environ.get("AF_LLM_TOKEN", "")
+    base = os.environ.get("AF_API_BASE", "https://agenticfactor.io").rstrip("/")
+    if not token:
+        raise RuntimeError("generate_image is unavailable: AF_LLM_TOKEN is not set for this run.")
+    resp = requests.post(
+        f"{base}/api/sandbox/image",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        # The preview's image is kept and handed back to the live run: what was approved is what gets published.
+        json={"prompt": prompt, "shape": shape,
+              "phase": "preview" if os.environ.get("AF_DRY_RUN", "0") == "1" else "live"},
+        timeout=150,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"generate_image failed (HTTP {resp.status_code}): {resp.text[:300]}")
+    data = resp.json()
+    img = requests.get(data["url"], timeout=60)
+    img.raise_for_status()
+    mime = data.get("mime_type", "image/png")
+    ext = "jpg" if "jpeg" in mime else "webp" if "webp" in mime else "png"
+    path = save_path or f"/tmp/image_{next(_DEFERRED_SEQ)}_{int(time.time())}.{ext}"
+    with open(path, "wb") as f:
+        f.write(img.content)
+    return {"file_path": path, "mime_type": mime, "model": data.get("model", "")}
+
+
+def generate_images(prompts, shape: str = "landscape", max_workers: int = 4) -> list:
+    """generate_image for several prompts at the same time; results in the same order."""
+    from concurrent.futures import ThreadPoolExecutor
+    prompts = list(prompts)
+    if not prompts:
+        return []
+    with ThreadPoolExecutor(max_workers=max(1, min(max_workers, 4, len(prompts)))) as pool:
+        return list(pool.map(lambda p: generate_image(p, shape=shape), prompts))
+
+
 def _slack_ts_params(action_name: str, params: Any) -> Any:
     """Slack timestamps must have at most 6 decimals. str(time.time() - 7 * 86400) has 7, and
     Composio re-placed the decimal point 6 digits from the end ('1790946094.1895018' became

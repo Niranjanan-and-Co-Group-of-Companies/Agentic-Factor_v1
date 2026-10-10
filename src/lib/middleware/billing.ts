@@ -351,6 +351,12 @@ export async function calculateLLMCreditCost(
   return Math.max(1, Math.ceil(customerCostInr / INR_PER_CREDIT));
 }
 
+/** Credits for a provider charge priced per item (a generated image), with the agent markup. Min 1 credit. */
+export async function calculateUsdCreditCost(realCostUsd: number): Promise<number> {
+  const usdToInr = await getUsdToInr();
+  return Math.max(1, Math.ceil((realCostUsd * AGENT_LLM_MARKUP * usdToInr) / INR_PER_CREDIT));
+}
+
 /**
  * Calculate credits to charge for one chat exchange.
  * Proportional to actual token usage × 3× markup, converted via live USD/INR.
