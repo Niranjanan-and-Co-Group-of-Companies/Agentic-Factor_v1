@@ -26,6 +26,15 @@ export const editBlueprintBackground = inngest.createFunction(
     name: 'Edit Blueprint (Background)',
     retries: 0,
     triggers: [{ event: 'mission/blueprint.edit' }],
+    // A step killed by the platform's time limit never reaches the catch below; tell the page anyway.
+    onFailure: async ({ event, error }: { event: { data: { event?: EditEvent } }; error: Error }) => {
+      const d = event.data.event?.data;
+      if (!d) return;
+      await createServiceClient().from('agent_execution_events').insert({
+        session_id: d.jobId, tenant_id: d.tenantId, mission_id: d.missionId, chat_id: d.missionId,
+        event_type: 'blueprint_error', payload: { message: error?.message || 'Blueprint update failed — please try again.' },
+      });
+    },
   },
   async ({ event, step }: { event: EditEvent; step: any }) => {
     const { missionId, tenantId, changeRequest, jobId, versionNumber, connectedProviders } = event.data;
@@ -53,9 +62,15 @@ export const editBlueprintBackground = inngest.createFunction(
         return draftBlueprintEdit(current.mission_json, changeRequest, tenantId, connectedProviders, emitStep);
       });
 
+      // Each changed agent's script is written in its own call, all in parallel.
+      const rewritten = await step.run('rewrite-scripts', async () => {
+        const { rewriteAgentScripts } = await import('@/lib/services/intake');
+        return rewriteAgentScripts(current.mission_json, draft, changeRequest, tenantId, emitStep);
+      });
+
       const updated = await step.run('validate-edit', async () => {
         const { finalizeBlueprintEdit } = await import('@/lib/services/intake');
-        return finalizeBlueprintEdit(current.mission_json, draft, tenantId, connectedProviders, emitStep);
+        return finalizeBlueprintEdit(current.mission_json, rewritten, tenantId, connectedProviders, emitStep);
       });
 
       await step.run('save', async () => {

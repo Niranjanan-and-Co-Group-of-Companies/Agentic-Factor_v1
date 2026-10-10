@@ -41,3 +41,25 @@ describe('restoreUnchangedScripts', () => {
     expect(agents[1].pythonScript).toBeUndefined();
   });
 });
+
+import { collectRewrites, REWRITE_SCRIPT } from '../blueprint-edit';
+
+describe('collectRewrites', () => {
+  it('lists the agents marked for rewrite with their change notes', () => {
+    const raw = [
+      { agentIndex: 0, pythonScript: UNCHANGED_SCRIPT },
+      { agentIndex: 1, pythonScript: REWRITE_SCRIPT, scriptChange: 'Look contacts up by name before creating them.' },
+      { agentIndex: 2, pythonScript: REWRITE_SCRIPT },
+    ];
+    const agents = [
+      { agentIndex: 0, pythonScript: 'kept' },
+      { agentIndex: 1, pythonScript: REWRITE_SCRIPT },
+      { agentIndex: 2, pythonScript: ` ${REWRITE_SCRIPT} ` },
+    ];
+    expect(collectRewrites(raw, agents)).toEqual([
+      { agentIndex: 1, scriptChange: 'Look contacts up by name before creating them.' },
+      { agentIndex: 2, scriptChange: 'Apply the change instruction to this agent.' },
+    ]);
+    expect(collectRewrites(undefined, [{ agentIndex: 0, pythonScript: 'x' }])).toEqual([]);
+  });
+});

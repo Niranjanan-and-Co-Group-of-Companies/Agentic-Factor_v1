@@ -5,7 +5,7 @@ import { callLLM, generateEmbedding } from './llm-router';
 import { robustJSONParse, safeJSONParse } from '../utils/json-parser';
 import { readDecryptedToken } from './vault';
 import { MEMORY_EXTRACTION_PROMPT, cleanTenantFacts, formatTenantMemory } from './tenant-memory';
-import { restoreUnchangedScripts, UNCHANGED_SCRIPT } from './blueprint-edit';
+import { collectRewrites, REWRITE_SCRIPT, restoreUnchangedScripts, UNCHANGED_SCRIPT, type ScriptRewrite } from './blueprint-edit';
 import { autoFixComposioParams, checkComposioParams } from './composio-param-check';
 
 // ============================================================
@@ -1301,7 +1301,7 @@ Include ONLY agents whose scripts were changed. Change nothing else — not logi
 // ============================================================
 // Phase 4.2: Edit Blueprint via Chat
 // ============================================================
-export interface BlueprintEditDraft { llmOutput: LLMOutput; contextToolkits: string[] }
+export interface BlueprintEditDraft { llmOutput: LLMOutput; contextToolkits: string[]; rewrites?: ScriptRewrite[] }
 
 /**
  * A blueprint edit in two halves so each fits a 300s function: the model's rewrite (draft) and the
@@ -1316,7 +1316,8 @@ export async function editBlueprint(
   onProgress?: (step: string, label: string) => Promise<void>
 ): Promise<Mission> {
   const draft = await draftBlueprintEdit(currentBlueprint, instruction, tenantId, connectedProviders, onProgress);
-  return finalizeBlueprintEdit(currentBlueprint, draft, tenantId, connectedProviders, onProgress);
+  const rewritten = await rewriteAgentScripts(currentBlueprint, draft, instruction, tenantId, onProgress);
+  return finalizeBlueprintEdit(currentBlueprint, rewritten, tenantId, connectedProviders, onProgress);
 }
 
 export async function draftBlueprintEdit(
@@ -1337,7 +1338,8 @@ EDITING CONTRACT:
 - "sourceRequest", when present, is the customer's original message, verbatim. Take data, names, numbers and anything to quote from it exactly — never reword a quote. Leave the field itself unchanged
 - Change ONLY what the instruction specifies — leave everything else unchanged
 - If adding a new agent, use a placeholder id like "new-agent-0" (gets remapped to a real UUID after)
-- For every agent whose pythonScript the instruction does NOT require changing, set "pythonScript": "${UNCHANGED_SCRIPT}" — do not repeat it. Write a full script only for agents you change or add.
+- For every agent whose pythonScript the instruction does NOT require changing, set "pythonScript": "${UNCHANGED_SCRIPT}" — do not repeat it.
+- For every agent you change or add, do NOT write the script here: set "pythonScript": "${REWRITE_SCRIPT}" and add "scriptChange": a precise, self-contained description of everything the new script must do (what to change, what to keep, the input fields it reads and the output fields later agents need). Each script is then rewritten in its own call, in parallel.
 - Return ONLY valid JSON — no markdown, no explanation, no code fences
 
 ${SYSTEM_PROMPT}`;
@@ -1393,7 +1395,66 @@ ${SYSTEM_PROMPT}`;
   }
 
   restoreUnchangedScripts(llmOutput.agents, currentBlueprint.agents);
-  return { llmOutput, contextToolkits };
+  return { llmOutput, contextToolkits, rewrites: collectRewrites((rawJSON as { agents?: unknown }).agents, llmOutput.agents) };
+}
+
+const SCRIPT_REWRITE_PROMPT = `You are rewriting ONE agent's Python script inside an existing AgenticFactor mission. Apply the requested change and return ONLY JSON: {"pythonScript": "<the complete new script>"}.
+Keep everything the change does not touch — the input_data fields the agent reads from the previous agent and the output fields later agents read. Follow every script rule below.
+
+`;
+
+/**
+ * Writes each script the editor marked for rewrite, all in parallel. One call that re-typed five
+ * scripts took longer than a 300s function allows; one call per script finishes in about a minute.
+ */
+export async function rewriteAgentScripts(
+  currentBlueprint: Mission,
+  draft: BlueprintEditDraft,
+  instruction: string,
+  tenantId: string = '',
+  onProgress?: (step: string, label: string) => Promise<void>
+): Promise<BlueprintEditDraft> {
+  const rewrites = draft.rewrites ?? [];
+  if (rewrites.length === 0) return draft;
+  const emit = onProgress ?? (async () => {});
+  await emit('generating', `Rewriting ${rewrites.length} agent script${rewrites.length === 1 ? '' : 's'} in parallel…`);
+
+  let composioActionsContext = '';
+  if (draft.contextToolkits.length > 0) {
+    const { buildComposioActionsContext } = await import('./composio-actions');
+    composioActionsContext = await buildComposioActionsContext(draft.contextToolkits).catch(() => '');
+  }
+  // The other agents shortened: enough to see what flows in and out of the one being rewritten.
+  const missionView = JSON.stringify({
+    ...draft.llmOutput,
+    agents: draft.llmOutput.agents.map(a => ({ ...a, pythonScript: (a.pythonScript ?? '').slice(0, 1500) })),
+    sourceRequest: (currentBlueprint as { sourceRequest?: string }).sourceRequest,
+  }, null, 2);
+
+  const llmOutput = structuredClone(draft.llmOutput);
+  await Promise.all(rewrites.map(async ({ agentIndex, scriptChange }) => {
+    const agent = llmOutput.agents.find(a => a.agentIndex === agentIndex);
+    if (!agent) return;
+    const before = currentBlueprint.agents.find(a => a.id === agent.id || a.role === agent.role)?.pythonScript ?? '';
+    const messages = [
+      { role: 'system', content: `${SCRIPT_REWRITE_PROMPT}${SYSTEM_PROMPT}` },
+      ...(composioActionsContext ? [{ role: 'user', content: composioActionsContext }] : []),
+      {
+        role: 'user',
+        content: `THE MISSION (other agents' scripts shortened):\n${missionView}\n\nTHE CUSTOMER'S CHANGE REQUEST:\n${instruction}\n\nAGENT TO REWRITE — agentIndex ${agentIndex}, role "${agent.role}"\nInstructions: ${agent.systemPrompt ?? ''}\n\nCURRENT SCRIPT:\n${before ? '```python\n' + before + '\n```' : '(new agent — none yet)'}\n\nCHANGE TO MAKE:\n${scriptChange}`,
+      },
+    ];
+    const res = await callLLM(messages as any, {
+      jsonMode: true, temperature: 0.2, tier: 1,
+      ...(tenantId ? { budgetContext: { tenantId, missionId: currentBlueprint.id || 'blueprint_edit' } } : {}),
+    });
+    const script = robustJSONParse(res.content)?.pythonScript;
+    if (typeof script !== 'string' || !script.trim() || script.trim() === REWRITE_SCRIPT) {
+      throw new Error(`Could not rewrite the script for "${agent.role}"`);
+    }
+    agent.pythonScript = sanitizePlaceholders(script) as string;
+  }));
+  return { ...draft, llmOutput, rewrites: [] };
 }
 
 export async function finalizeBlueprintEdit(

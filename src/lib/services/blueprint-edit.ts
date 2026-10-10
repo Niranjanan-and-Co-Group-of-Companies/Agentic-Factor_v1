@@ -6,6 +6,20 @@
  */
 
 export const UNCHANGED_SCRIPT = '__UNCHANGED__';
+/** Marks an agent whose script is rewritten in its own call, from the editor's scriptChange note. */
+export const REWRITE_SCRIPT = '__REWRITE__';
+
+export interface ScriptRewrite { agentIndex: number; scriptChange: string }
+
+/** The agents the editor asked to rewrite, with their change notes (read from the raw output — the schema drops scriptChange). */
+export function collectRewrites(rawAgents: unknown, agents: Array<{ agentIndex: number; pythonScript?: string }>): ScriptRewrite[] {
+  const raw = Array.isArray(rawAgents) ? rawAgents as Array<Record<string, unknown>> : [];
+  return agents.flatMap((agent, i) => {
+    if (agent.pythonScript?.trim() !== REWRITE_SCRIPT) return [];
+    const note = raw.find(r => r?.agentIndex === agent.agentIndex)?.scriptChange ?? raw[i]?.scriptChange;
+    return [{ agentIndex: agent.agentIndex, scriptChange: typeof note === 'string' && note.trim() ? note.trim() : 'Apply the change instruction to this agent.' }];
+  });
+}
 
 interface EditedAgent { id?: string; role: string; agentIndex: number; pythonScript?: string; [k: string]: unknown }
 interface ExistingAgent { id: string; role: string; agentIndex: number; pythonScript?: string; pythonScriptDraft?: unknown }
