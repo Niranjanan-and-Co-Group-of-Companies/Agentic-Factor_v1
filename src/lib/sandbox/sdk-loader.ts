@@ -172,10 +172,11 @@ def _is_error_key(key):
     return isinstance(key, str) and key.lower() in _DEFERRED_ERROR_KEYS
 
 _DEFERRED_PLACEHOLDER = "dry-run-preview"
+_DEFERRED_COUNTER = [0]
 _SCALAR_KEY_SUFFIXES = ('id', 'url', 'uri', 'link', 'name', 'title', 'path', 'token', 'status',
                         'ts', 'timestamp', 'time', 'date', 'email', 'key', 'slug', 'href')
 
-def _deferred_for(key, default=None):
+def _deferred_for(key, default=None, seq=None):
     """Placeholder shaped like what the caller expects: the .get() default's type wins, then
     id/url/name-like keys become text and anything else a nested response object."""
     if _is_error_key(key):
@@ -185,38 +186,46 @@ def _deferred_for(key, default=None):
     if isinstance(default, list):
         return []
     if isinstance(default, str):
-        return _DeferredValue()
+        return _DeferredValue(seq)
     if default is not None:
         return default
     if isinstance(key, slice):
-        return _DeferredValue()
+        return _DeferredValue(seq)
     if isinstance(key, str) and key.lower().endswith(_SCALAR_KEY_SUFFIXES):
-        return _DeferredValue()
+        return _DeferredValue(seq)
     return _DeferredResult()
 
 class _DeferredValue(str):
     """A text field of a write deferred by the preview pass (an id, url, name...): reads as a
     placeholder, is truthy, and tolerates further lookups."""
-    def __new__(cls):
-        return super().__new__(cls, _DEFERRED_PLACEHOLDER)
+    def __new__(cls, seq=None):
+        value = super().__new__(cls, _DEFERRED_PLACEHOLDER if seq is None else f"{_DEFERRED_PLACEHOLDER}-{seq}")
+        value._af_seq = seq
+        return value
     def __getitem__(self, key):
-        return _DeferredValue() if isinstance(key, slice) else _deferred_for(key)
+        return _DeferredValue(self._af_seq) if isinstance(key, slice) else _deferred_for(key, seq=self._af_seq)
     def get(self, key, default=None):
-        return _deferred_for(key, default)
+        return _deferred_for(key, default, self._af_seq)
     def __contains__(self, key):
         return not _is_error_key(key)
 
 class _DeferredResult(dict):
     """Stand-in response for a write deferred by the preview pass. Missing fields resolve to a
     placeholder of the expected shape (error fields to None), so validation code keeps running."""
+    # Each deferred write gets its own placeholder ("dry-run-preview-3"): with one shared value, a
+    # preview that created 16 invoices saw them all as one, and its "already paid?" checks skipped 15.
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _DEFERRED_COUNTER[0] += 1
+        self._af_seq = _DEFERRED_COUNTER[0]
     def __missing__(self, key):
-        return _deferred_for(key)
+        return _deferred_for(key, seq=self._af_seq)
     def get(self, key, default=None):
-        return dict.__getitem__(self, key) if dict.__contains__(self, key) else _deferred_for(key, default)
+        return dict.__getitem__(self, key) if dict.__contains__(self, key) else _deferred_for(key, default, self._af_seq)
     def __contains__(self, key):
         return dict.__contains__(self, key) or not _is_error_key(key)
     def __str__(self):
-        return dict.__repr__(self) if len(self) else _DEFERRED_PLACEHOLDER
+        return dict.__repr__(self) if len(self) else f"{_DEFERRED_PLACEHOLDER}-{self._af_seq}"
     __format__ = lambda self, spec: format(str(self), spec)
 
 # Composio returns lists inside a wrapper named for the resource ({"repositories": [...]},
