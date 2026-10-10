@@ -738,14 +738,24 @@ export function compactWrites(writes: DeferredWrite[]): DeferredWrite[] {
   }));
 }
 
-export function approvalPreview(output: unknown, writes: DeferredWrite[] = []): string {
+export function approvalPreview(output: unknown, writes: DeferredWrite[] = [], input?: unknown): string {
   const calls = describeDeferredWrites(writes);
   // The text the call itself carries beats the agent's own summary of it, which is often cut short.
-  const body = deferredText(writes) ?? previewText(output);
+  const body = deferredText(writes) ?? previewText(output, input);
   return calls ? `${calls}\n\n${body}`.slice(0, 12_000) : body;
 }
 
-function previewText(output: unknown): string {
+/** The output's own fields: those an earlier agent passed through unchanged ({**input_data, ...}) are left out. */
+function ownFields(output: Record<string, unknown>, input: unknown): Record<string, unknown> {
+  let given: any = input;
+  if (typeof input === 'string') { try { given = JSON.parse(input); } catch { given = null; } }
+  if (!given || typeof given !== 'object' || Array.isArray(given)) return output;
+  const own = Object.fromEntries(Object.entries(output).filter(([k, v]) =>
+    k !== '_pipeline' && !(k in given && JSON.stringify(given[k]) === JSON.stringify(v))));
+  return Object.keys(own).length && Object.keys(own).length < Object.keys(output).length ? own : output;
+}
+
+function previewText(output: unknown, input?: unknown): string {
   let parsed: any = output;
   if (typeof output === 'string') {
     try { parsed = JSON.parse(output); } catch { return output.slice(0, 12_000); }
@@ -773,6 +783,11 @@ function previewText(output: unknown): string {
   const text = pick('body', 'email_body', 'body_preview', 'message', 'message_text', 'message_preview', 'slack_message', 'post_text', 'text', 'content', 'content_preview') ?? contentLike();
   if (header) return `${header}\n\n${text ?? ''}`.trim().slice(0, 12_000);
   if (text) return text.slice(0, 12_000);
+  // A workbook step's card opened with the Zoho reports it was handed, not the file it made.
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const own = ownFields(parsed, input);
+    if (own !== parsed) return JSON.stringify(own, null, 2).slice(0, 6_000);
+  }
   return (typeof output === 'string' ? output : JSON.stringify(output, null, 2)).slice(0, 6_000);
 }
 
@@ -1237,6 +1252,7 @@ RUNTIME RULES:
 - If the error is a failed review, change what the script produces so the reviewer's reason no longer applies.
 - \`input_data["_pipeline"]\` holds every earlier agent's output keyed by role; if the review says data for some parts is missing, read those parts from there.
 - If the script found nothing, its output must say what it checked (repos/channels/inboxes, date range, items scanned) next to the zero.
+- Previews: writes return placeholders (ids like "dry-run-preview-3"); never branch on dry_run or on placeholder ids to skip later calls — write the script exactly as for the real run. The preview defers every write (and reads of records it only pretended to create) and shows them to the customer for approval; a write the script skips in the preview is hidden from that approval.
 - This script may already have run partway (a retry after a partial failure): before creating a record, look it up by its natural key (name, number, title + date) and reuse it — never create a duplicate.
 - If the toolkit has no action for what the script needs (e.g. Zoho Books reports), call the app's REST API through the customer's connection: \`composio_proxy("<toolkit_slug>", "GET", "<full documented path, e.g. /books/v3/invoices>", params={...}, body=None)\` from agenticfactor._core — query parameters go in params, never in the path; never approximate the data from other actions.
 
@@ -1451,7 +1467,7 @@ INSTRUCTIONS:
 6. For Twitter threads: post each tweet individually using \`social.post_tweet(text=tweet)\` in a loop — Twitter has no native thread API.
 7. If the SDK doesn't have a specific wrapper, use \`api.call(provider, method, endpoint)\` for any connector.
 8. OAuth tokens are also available as environment variables if needed: ${envKeys || 'None'}
-9. **CRITICAL STRICT RULE**: NEVER output simulated, mocked, or placeholder data. You MUST execute real API requests using the SDK. (The platform itself may run your script once as a safety preview in which write calls — send, post, create — return {"status": "ok", "dry_run": True} instead of executing; read optional response fields with .get() and never treat a dry_run response as an error.)
+9. **CRITICAL STRICT RULE**: NEVER output simulated, mocked, or placeholder data. You MUST execute real API requests using the SDK. (The platform itself may run your script once as a safety preview in which write calls — send, post, create — return {"status": "ok", "dry_run": True} instead of executing; read optional response fields with .get() and never treat a dry_run response as an error; never branch on dry_run or on placeholder ids to skip later calls — write the script exactly as for the real run. The preview defers every write (and reads of records it only pretended to create) and shows them to the customer for approval; a write the script skips in the preview is hidden from that approval.)
 10. Enclose your Python code inside a triple-backtick block with 'python' as the language identifier.
 11. **DO NOT CATCH FATAL ERRORS**: Let the script crash naturally on errors.
 12. **READING INPUT**: Previous agent data is in \`_input_data\` (parsed JSON dict) and \`_input\` (raw string).
@@ -2218,7 +2234,7 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
                   .filter(slug => classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps),
                 ...proxyWriteLabels(pythonCode),
               ])],
-              preview: approvalPreview(finalOutputJSON, deferredWrites),
+              preview: approvalPreview(finalOutputJSON, deferredWrites, inputContext),
               writes: compactWrites(deferredWrites),
             },
             status: 'pending'

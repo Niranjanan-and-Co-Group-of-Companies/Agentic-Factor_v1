@@ -310,6 +310,19 @@ describe('approval gate contract', () => {
 });
 
 describe('approvalPreview', () => {
+  it("shows a step's own fields, not the data it passed through", () => {
+    const input = { reports: { pnl: { total: 1 } }, org: 'Co&Cu' };
+    const out = JSON.stringify({ ...input, drive_link: 'https://drive/x', sheets: { 'Profit & Loss': 12 } });
+    const shown = approvalPreview(out, [], JSON.stringify(input));
+    expect(shown).toContain('drive_link');
+    expect(shown).not.toContain('reports');
+  });
+
+  it('shows the whole output when every field was passed through', () => {
+    const input = { a: 1 };
+    expect(approvalPreview(JSON.stringify(input), [], input)).toBe('{"a":1}');
+  });
+
   it('shows the written text, not the JSON wrapper', () => {
     const out = JSON.stringify({ doc_id: 'dry-run-preview', content_preview: 'Q: Can I pay COD?\nA: Only under ₹2,000.' });
     expect(approvalPreview(out)).toBe('Q: Can I pay COD?\nA: Only under ₹2,000.');
