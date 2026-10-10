@@ -238,6 +238,34 @@ async function isPaidTenant(tenantId?: string): Promise<boolean> {
   }
 }
 
+/**
+ * Tells the admin once an hour that a provider is refusing every request — the Claude API ran out of
+ * credit twice and all chat, building and fixing silently moved to the fallback models.
+ */
+const lastProviderAlertAt = new Map<string, number>();
+
+async function alertProviderDown(provider: string, detail: string): Promise<void> {
+  try {
+    const supabase = createServiceClient();
+    const since = new Date(Date.now() - 60 * 60_000).toISOString();
+    const { count } = await supabase.from('events').select('*', { count: 'exact', head: true })
+      .eq('event_type', 'llm.provider_down').eq('payload->>provider', provider).gte('created_at', since);
+    if ((count ?? 0) > 0) return;
+    const { error } = await supabase.from('events').insert({ event_type: 'llm.provider_down', entity_type: 'system', payload: { provider, detail: detail.slice(0, 500) } });
+    // If the event can't be recorded, still send at most one alert an hour from this instance.
+    if (error && Date.now() - (lastProviderAlertAt.get(provider) ?? 0) < 60 * 60_000) return;
+    lastProviderAlertAt.set(provider, Date.now());
+    const { sendEmail, ADMIN_EMAIL } = await import('./email-notifications');
+    await sendEmail({
+      to: ADMIN_EMAIL,
+      subject: `⚠️ ${provider} is refusing requests — the platform is running on fallback models`,
+      htmlBody: `<div style="font-family: Inter, sans-serif; max-width: 600px;"><h2>⚠️ ${provider} is unavailable</h2><p>Every request to ${provider} is failing, so mission building, agent code and chat are running on the fallback models (lower quality).</p><pre style="white-space: pre-wrap; background: #f1f5f9; padding: 12px;">${detail.slice(0, 500).replace(/</g, '&lt;')}</pre><p>If this is a credit balance problem, top up and turn on auto-reload in the provider's billing settings.</p></div>`,
+    });
+  } catch (err) {
+    console.warn('[LLM] Provider-down alert failed:', err);
+  }
+}
+
 async function callAnthropicWithFallback(messages: LLMMessage[], temperature: number, tier: number, jsonMode: boolean, maxTokens: number, premium = false): Promise<LLMResponse> {
   const configured = await getModelChain('anthropic', tier);
   const preferred = PREFERRED_CLAUDE[premium ? 'premium' : 'standard'][tier] ?? [];
@@ -261,6 +289,12 @@ async function callAnthropicWithFallback(messages: LLMMessage[], temperature: nu
       return result;
     } catch (err) {
       const errMsg = (err as Error).message;
+      // Account-level failures (credit balance, bad key, no permission) fail every Claude model alike:
+      // alert the admin and go straight to the next provider instead of trying each model in turn.
+      if (/credit balance|invalid x-api-key|authentication_error|permission_error|\b40[13]\b/i.test(errMsg)) {
+        void alertProviderDown('anthropic', errMsg);
+        throw err;
+      }
       // Try next model on 404 (not found), 429 (rate limit), or 400 (deprecated param like temperature)
       if (errMsg.includes('404') || errMsg.includes('not_found') || errMsg.includes('not found') ||
           errMsg.includes('429') || errMsg.includes('rate_limit') || errMsg.includes('overloaded') ||
