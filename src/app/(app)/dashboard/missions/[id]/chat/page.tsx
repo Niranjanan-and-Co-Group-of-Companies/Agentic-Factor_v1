@@ -1008,9 +1008,17 @@ export default function MissionChatPage() {
       const decoder = new TextDecoder();
       let streamedText = '';
       let buf = '';
+      let finished = false;
+      // A stream can stall on its way to the browser after the server has saved the reply.
+      const STALL_MS = 90_000;
 
       while (true) {
-        const { done, value } = await reader.read();
+        let stallTimer: ReturnType<typeof setTimeout> | undefined;
+        const stalled = new Promise<'stalled'>(r => { stallTimer = setTimeout(() => r('stalled'), STALL_MS); });
+        const next = await Promise.race([reader.read(), stalled]);
+        clearTimeout(stallTimer);
+        if (next === 'stalled') { reader.cancel().catch(() => {}); break; }
+        const { done, value } = next;
         if (done) break;
         buf += decoder.decode(value, { stream: true });
         const lines = buf.split('\n');
@@ -1136,6 +1144,7 @@ export default function MissionChatPage() {
             }
 
             if (evt.type === 'done') {
+              finished = true;
               // Always strip action tags — even from server-provided cleanText,
               // in case the server missed secondary action blocks.
               const ft = stripActionTags(evt.cleanText ?? streamedText);
@@ -1162,6 +1171,7 @@ export default function MissionChatPage() {
             }
 
             if (evt.type === 'error') {
+              finished = true;
               setMessages(prev => {
                 const updated = [...prev];
                 updated[updated.length - 1] = { role: 'assistant', content: `⚠️ ${evt.message ?? 'Error'}` };
@@ -1170,6 +1180,40 @@ export default function MissionChatPage() {
               setToolStatusLines([]);
             }
           } catch { /* skip malformed */ }
+        }
+      }
+      if (!finished && !waitingForInngestRef.current) {
+        // Load the saved conversation once the reply is in it.
+        let recovered = false;
+        for (let attempt = 0; attempt < 8 && !recovered; attempt++) {
+          try {
+            let sessionId = activeSessionId;
+            if (!sessionId) {
+              const r = await fetch(`/api/missions/${missionId}/chat/sessions`, { credentials: 'include' });
+              sessionId = r.ok ? ((await r.json()) as { sessions: ChatSession[] }).sessions?.[0]?.id ?? null : null;
+            }
+            if (sessionId) {
+              const r = await fetch(`/api/missions/${missionId}/chat/sessions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+                body: JSON.stringify({ sessionId }),
+              });
+              const saved = r.ok ? ((await r.json()) as { messages: ChatMessage[] }).messages ?? [] : [];
+              const asked = saved.map(m => m.role === 'user' && m.content === userMsg.content).lastIndexOf(true);
+              if (asked >= 0 && saved.slice(asked + 1).some(m => m.role === 'assistant')) {
+                setActiveSessionId(sessionId);
+                setMessages(saved);
+                recovered = true;
+              }
+            }
+          } catch { /* try again */ }
+          if (!recovered) await new Promise(r => setTimeout(r, 5000));
+        }
+        if (!recovered) {
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1] = { role: 'assistant', content: '⚠️ The reply did not arrive. Please try again.' };
+            return updated;
+          });
         }
       }
     } catch (err) {

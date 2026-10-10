@@ -435,6 +435,33 @@ function CommandCenterPageInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The reply is saved before its stream ends, but a stream can stall on the way to the browser
+  // (the server had finished; the chat spun for minutes). Finds this message's saved reply instead.
+  const recoverSavedReply = async (sentText: string, sentAt: number): Promise<{ content: string; action: ActionPayload | null; sessionId: string } | null> => {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        let sessionId = activeSessionId;
+        if (!sessionId) {
+          const res = await fetch('/api/command-chat/sessions', { credentials: 'include' });
+          const d = res.ok ? await res.json() as { sessions: ChatSession[] } : { sessions: [] };
+          sessionId = d.sessions.find(x => new Date(x.updated_at ?? 0).getTime() >= sentAt - 120_000)?.id ?? null;
+        }
+        if (sessionId) {
+          const res = await fetch('/api/command-chat/sessions', {
+            method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId }),
+          });
+          const d = res.ok ? await res.json() as { messages: Array<{ role: string; content: string; action_payload: ActionPayload | null }> } : { messages: [] };
+          const asked = d.messages.map(m => m.role === 'user' && m.content === sentText).lastIndexOf(true);
+          const reply = asked >= 0 ? d.messages.slice(asked + 1).find(m => m.role === 'assistant') : undefined;
+          if (reply) return { content: reply.content ?? '', action: reply.action_payload ?? null, sessionId };
+        }
+      } catch { /* try again */ }
+      await new Promise(r => setTimeout(r, 5000));
+    }
+    return null;
+  };
+
   // ── Send message ───────────────────────────────────────────────────────────
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
@@ -445,7 +472,8 @@ function CommandCenterPageInner() {
     const finalText = attachment ? `[Attached: ${attachment.name}]\n\n${trimmed}` : trimmed;
     if (attachment) setPendingFile(null);
 
-    const userMsg: ChatMessage = { role: 'user', content: finalText, ts: Date.now() };
+    const sentAt = Date.now();
+    const userMsg: ChatMessage = { role: 'user', content: finalText, ts: sentAt };
     const newMessages = [...messages, userMsg];
     setMessages([...newMessages, { role: 'assistant', content: '', isStreaming: true }]);
     setIsStreaming(true);
@@ -466,16 +494,23 @@ function CommandCenterPageInner() {
 
       const reader = res.body!.getReader(); const dec = new TextDecoder();
       let streamed = ''; let buf = '';
+      let finished = false;
+      const STALL_MS = 45_000;
 
       while (true) {
-        const { done, value } = await reader.read(); if (done) break;
+        let stallTimer: ReturnType<typeof setTimeout> | undefined;
+        const stalled = new Promise<'stalled'>(r => { stallTimer = setTimeout(() => r('stalled'), STALL_MS); });
+        const next = await Promise.race([reader.read(), stalled]);
+        clearTimeout(stallTimer);
+        if (next === 'stalled') { reader.cancel().catch(() => {}); break; }
+        const { done, value } = next; if (done) break;
         buf += dec.decode(value, { stream: true });
         const lines = buf.split('\n'); buf = lines.pop() ?? '';
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           try {
             const evt = JSON.parse(line.slice(6)) as {
-              type: string; text?: string; cleanText?: string;
+              type: string; text?: string; message?: string; cleanText?: string;
               action?: ActionPayload; sessionId?: string;
               credits?: number; inputTokens?: number; outputTokens?: number;
             };
@@ -495,6 +530,7 @@ function CommandCenterPageInner() {
               setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: displayText, isStreaming: true, processingAction }; return u; });
             }
             if (evt.type === 'done') {
+              finished = true;
               const final = evt.cleanText ?? streamed;
               const action = evt.action ?? null;
               setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: final, action_payload: action, isStreaming: false, ts: Date.now() }; return u; });
@@ -505,9 +541,20 @@ function CommandCenterPageInner() {
               if (evt.sessionId && !activeSessionId) { setActiveSessionId(evt.sessionId); loadSessions(); }
             }
             if (evt.type === 'error') {
-              setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: `⚠️ ${evt.text ?? 'Error'}` }; return u; });
+              finished = true;
+              setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: `⚠️ ${evt.message ?? evt.text ?? 'Error'}` }; return u; });
             }
           } catch { /* skip */ }
+        }
+      }
+      if (!finished) {
+        const saved = await recoverSavedReply(finalText, sentAt);
+        if (saved) {
+          setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: saved.content, action_payload: saved.action, isStreaming: false, ts: Date.now() }; return u; });
+          if (saved.action?.type === 'building_blueprint' && saved.action.jobId) startBlueprintPolling(saved.action.jobId);
+          if (!activeSessionId) { setActiveSessionId(saved.sessionId); loadSessions(); }
+        } else {
+          setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: '⚠️ The reply did not arrive. Please try again.' }; return u; });
         }
       }
     } catch { setMessages([...newMessages, { role: 'assistant', content: '⚠️ Connection error. Please try again.' }]); }
