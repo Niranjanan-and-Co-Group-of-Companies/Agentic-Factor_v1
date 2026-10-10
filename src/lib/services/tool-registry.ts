@@ -99,6 +99,21 @@ const SYSTEM_TOOLS: AnthropicTool[] = [
       required: ['action_slug'],
     },
   },
+  {
+    name: 'read_app_api',
+    description:
+      "GET an endpoint of a connected app's own REST API through the customer's connection — for data no action covers " +
+      '(e.g. Zoho Books reports such as /reports/profitandloss). Read-only: GET requests only.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        toolkit: { type: 'string', description: 'App slug, e.g. "zoho_books"' },
+        path: { type: 'string', description: "Path relative to the app's API base (or an absolute URL)" },
+        params: { type: 'object' as unknown as string, description: 'Query parameters' },
+      },
+      required: ['toolkit', 'path'],
+    },
+  },
 ];
 
 const SYSTEM_TOOL_META: ToolMeta[] = [
@@ -106,6 +121,7 @@ const SYSTEM_TOOL_META: ToolMeta[] = [
   { actionName: 'search_connectors', providerSlug: 'system', displayName: 'Searching integrations', logoUrl: null },
   { actionName: 'find_app_actions', providerSlug: 'system', displayName: 'Finding app actions', logoUrl: null },
   { actionName: 'read_app_data', providerSlug: 'system', displayName: 'Reading app data', logoUrl: null },
+  { actionName: 'read_app_api', providerSlug: 'system', displayName: 'Reading app API', logoUrl: null },
 ];
 
 // Hardcoded tools for API-key-only providers that aren't in Composio
@@ -462,6 +478,10 @@ export async function executeTool(
     return executeComposioAction(slug, (input.arguments ?? {}) as Record<string, unknown>, tenantId);
   }
 
+  if (name === 'read_app_api') {
+    return readAppApi(String(input.toolkit ?? ''), String(input.path ?? ''), (input.params ?? {}) as Record<string, unknown>, tenantId);
+  }
+
   // ── Legacy generic action (fallback when schemas not yet loaded) ───────
   if (name === 'execute_composio_action') {
     return executeComposioAction(input.action_slug as string, (input.arguments ?? {}) as Record<string, unknown>, tenantId);
@@ -479,6 +499,41 @@ export async function executeTool(
   }
 
   return { content: `Unknown tool: ${name}`, summary: 'Unknown tool' };
+}
+
+/** GET through Composio's proxy with the customer's connection for that toolkit (read-only). */
+async function readAppApi(
+  toolkit: string,
+  path: string,
+  params: Record<string, unknown>,
+  tenantId: string,
+): Promise<{ content: string; summary: string }> {
+  const apiKey = process.env.COMPOSIO_API_KEY;
+  if (!apiKey) return { content: 'Composio not configured.', summary: 'Not configured' };
+  if (!toolkit || !path) return { content: 'toolkit and path are required.', summary: 'Invalid call' };
+  try {
+    const headers = { 'x-api-key': apiKey, 'Content-Type': 'application/json' };
+    const q = new URLSearchParams({ user_ids: tenantId, toolkit_slugs: toolkit.toLowerCase(), statuses: 'ACTIVE', limit: '1' });
+    const accounts = await fetch(`https://backend.composio.dev/api/v3.1/connected_accounts?${q}`, { headers, signal: AbortSignal.timeout(15_000) })
+      .then(r => r.json()) as { items?: Array<{ id: string }> };
+    const accountId = accounts.items?.[0]?.id;
+    if (!accountId) return { content: `${toolkit} is not connected.`, summary: 'Not connected' };
+    const [route, query] = path.split('?');
+    const all = { ...Object.fromEntries(new URLSearchParams(query ?? '')), ...params };
+    const res = await fetch('https://backend.composio.dev/api/v3.1/tools/execute/proxy', {
+      method: 'POST', headers, signal: AbortSignal.timeout(30_000),
+      body: JSON.stringify({
+        endpoint: route, method: 'GET', connected_account_id: accountId,
+        parameters: Object.entries(all).filter(([, v]) => v !== undefined && v !== null)
+          .map(([name, v]) => ({ name, type: 'query', value: String(v) })),
+      }),
+    });
+    const text = await res.text();
+    const out = text.length > 12_000 ? `${text.slice(0, 12_000)}\n…(truncated)` : text;
+    return { content: `GET ${route} → HTTP ${res.status}\n${out}`, summary: `GET ${route} (${res.status})` };
+  } catch (err) {
+    return { content: `GET ${path} failed: ${err instanceof Error ? err.message : String(err)}`, summary: 'Request failed' };
+  }
 }
 
 async function executeComposioAction(
@@ -501,7 +556,7 @@ async function executeComposioAction(
     );
 
     const resultStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-    const truncated = resultStr.length > 4000 ? resultStr.slice(0, 4000) + '\n…(truncated)' : resultStr;
+    const truncated = resultStr.length > 12000 ? resultStr.slice(0, 12000) + '\n…(truncated)' : resultStr;
 
     return {
       content: `Action "${actionSlug}" completed.\n\nResult:\n${truncated}`,
