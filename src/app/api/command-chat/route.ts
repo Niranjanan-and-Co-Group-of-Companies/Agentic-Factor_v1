@@ -491,7 +491,10 @@ async function runCommandLoop(params: {
             { tier: 1, jsonMode: false, maxTokens: 4096, temperature: 0.5 },
           );
           send({ type: 'delta', text: fallback.content });
-          servedBy = { provider: 'router-fallback', model: (fallback as { model?: string }).model ?? 'unknown' };
+          // Why Claude did not answer, kept on the billing event (status + Anthropic's error type/message).
+          let why = body.slice(0, 160);
+          try { const e = (JSON.parse(body) as { error?: { type?: string; message?: string } }).error; if (e) why = `${e.type}: ${e.message}`.slice(0, 160); } catch { /* raw */ }
+          servedBy = { provider: `router-fallback (anthropic ${res.status} ${why})`, model: (fallback as { model?: string }).model ?? 'unknown' };
           fullText += fallback.content;
           totalInputTokens += fallback.inputTokens ?? 0;
           totalOutputTokens += fallback.outputTokens ?? 0;
