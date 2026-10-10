@@ -566,6 +566,11 @@ ${pythonCode}`.replace(/\x00/g, '');
 
       if (finalExec.error) {
         throw new Error(`Phase 2 real execution failed: ${finalExec.error.value}`);
+      }
+      // Writes that failed even though the script caught the error and carried on.
+      const failedWrites = parseWriteFailures(finalExec.logs.stderr.join('\n'));
+      if (failedWrites.length > 0) {
+        throw new Error(`Phase 2: ${failedWrites.length} write(s) failed — ${failedWrites.slice(0, 5).map(f => `${f.action}: ${f.error}`).join(' | ')}`);
       } else {
         console.log(`[Agent ${agentId}] Phase 2: Side effects executed successfully.`);
         const cleanFinalStdout = finalStdout.split('\n').filter(line => !line.startsWith('__SIGNAL__:')).join('\n').trim();
@@ -595,6 +600,23 @@ ${pythonCode}`.replace(/\x00/g, '');
     throw phase2Err;
   }
   return finalOutputJSON;
+}
+
+/**
+ * Live writes the SDK reported as failed (`__AF_WRITE_FAILED__:{json}` on stderr). Scripts often catch
+ * the error and carry on: a bookkeeping step 404'd on every invoice and bill and still showed as complete.
+ */
+export function parseWriteFailures(stderr: string): Array<{ action: string; error: string }> {
+  const failures: Array<{ action: string; error: string }> = [];
+  for (const line of stderr.split('\n')) {
+    const at = line.indexOf('__AF_WRITE_FAILED__:');
+    if (at === -1) continue;
+    try {
+      const f = JSON.parse(line.slice(at + '__AF_WRITE_FAILED__:'.length));
+      if (typeof f?.action === 'string') failures.push({ action: f.action, error: String(f.error ?? '') });
+    } catch { /* truncated line */ }
+  }
+  return failures;
 }
 
 // A top-level status of exactly "failed"/"error" means the script caught an API error itself.

@@ -55,6 +55,15 @@ class APIError(Exception):
         super().__init__(f"[{provider}] HTTP {status_code}: {message}")
 
 
+def _record_write_failure(action: str, error: Any) -> None:
+    """Report a failed live write even when the script catches the exception: a bookkeeping script
+    logged 404s for every invoice and bill, carried on, and its step showed as complete."""
+    try:
+        sys.stderr.write("__AF_WRITE_FAILED__:" + json.dumps({"action": action, "error": str(error)[:300]}) + "\n")
+    except Exception:
+        pass
+
+
 def _record_deferred(action: str, params: Any) -> None:
     """Report a write the preview deferred, with its parameters shortened, so the approval screen
     shows the exact call — an approval card once showed a document's text but not that the call
@@ -597,6 +606,11 @@ def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Di
     composio_execute writes. Kept in sync with CORE_FALLBACK."""
     method = method.upper()
     label = f"{toolkit.upper()} {method} {endpoint}"
+    # Composio's proxy rejects a query string in the path ("Invalid URL Passed"): send it as parameters.
+    if "?" in endpoint:
+        from urllib.parse import parse_qsl
+        endpoint, _, query = endpoint.partition("?")
+        params = {**dict(parse_qsl(query)), **(params or {})}
     # Resolved before a preview defers the write: a wrong toolkit fails here, where it can be fixed.
     account_id = _connected_account_id(toolkit)
     if os.environ.get("AF_DRY_RUN", "0") == "1" and method not in ("GET", "HEAD"):
@@ -639,11 +653,18 @@ def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Di
         # The connection's API base usually ends in a version ("/books/v3"), so "/books/v3/invoices"
         # doubles it and 404s. Retry once with the part up to the version segment removed.
         retry = _without_version_prefix(endpoint) if e.status_code == 404 else None
+        if not retry and method not in ("GET", "HEAD"):
+            _record_write_failure(label, e)
         if not retry:
             if e.status_code == 404 and not endpoint.startswith("http"):
                 raise APIError(404, f"{e} — paths are relative to the app's API base, which already includes its version (e.g. '/invoices', not '/books/v3/invoices')", f"composio_proxy:{label}")
             raise
-        result = send(retry)
+        try:
+            result = send(retry)
+        except APIError as retry_error:
+            if method not in ("GET", "HEAD"):
+                _record_write_failure(label, retry_error)
+            raise
     _record_shape(f"PROXY {label}", result)
     return _ComposioData(result) if isinstance(result, dict) else result
 
@@ -702,6 +723,8 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
         if resp.status_code == 404:
             sys.stderr.write(f"[COMPOSIO] Action '{action_name}' not found — verify the exact name (ALL_CAPS_WITH_UNDERSCORES).\n")
             raise APIError(404, f"Composio action '{action_name}' does not exist. Use only action names listed in the mission blueprint.", action_name)
+        if not _is_composio_read(action_name):
+            _record_write_failure(action_name, err_body)
         raise APIError(resp.status_code, str(err_body), action_name)
 
     data = resp.json()
@@ -710,6 +733,8 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
         err_msg = data.get("error") or "Tool execution failed"
         if "not found" in str(err_msg).lower() or "invalid action" in str(err_msg).lower():
             sys.stderr.write(f"[COMPOSIO] Action '{action_name}' rejected — {err_msg}\n")
+        if not _is_composio_read(action_name):
+            _record_write_failure(action_name, err_msg)
         raise APIError(resp.status_code, err_msg, action_name)
     result = data.get("data", data)
     _record_shape(action_name, result)
