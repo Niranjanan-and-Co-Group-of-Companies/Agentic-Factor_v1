@@ -534,8 +534,29 @@ async function readAppApi(
       walk(acct, 0);
       return Object.keys(found).length ? `\nConnection region/domain: ${JSON.stringify(found)}` : '';
     };
-    const [route, query] = path.split('?');
+    const [rawRoute, query] = path.split('?');
     const all = { ...Object.fromEntries(new URLSearchParams(query ?? '')), ...params };
+    // Join the app's documented path with the connection's own base (region-aware, e.g. zohoapis.in/books).
+    let route = rawRoute;
+    if (!route.startsWith('http')) {
+      const acct = await fetch(`https://backend.composio.dev/api/v3.1/connected_accounts/${accountId}`, { headers, signal: AbortSignal.timeout(15_000) })
+        .then(r => r.json()).catch(() => ({})) as Record<string, unknown>;
+      const findBase = (v: unknown, depth: number): string | undefined => {
+        if (!v || typeof v !== 'object' || depth > 4) return undefined;
+        const o = v as Record<string, unknown>;
+        for (const k of ['base_url', 'api_url', 'instanceEndpoint', 'instance_url']) {
+          if (typeof o[k] === 'string' && (o[k] as string).startsWith('http')) return (o[k] as string).replace(/\/+$/, '');
+        }
+        for (const x of Object.values(o)) { const f = findBase(x, depth + 1); if (f) return f; }
+        return undefined;
+      };
+      const base = findBase(acct, 0);
+      if (base) {
+        const basePath = new URL(base).pathname.replace(/\/+$/, '');
+        const rel = basePath && (route === basePath || route.startsWith(`${basePath}/`)) ? route.slice(basePath.length) : route;
+        route = `${base}${rel.startsWith('/') ? rel : `/${rel}`}`;
+      }
+    }
     const res = await fetch('https://backend.composio.dev/api/v3.1/tools/execute/proxy', {
       method: 'POST', headers, signal: AbortSignal.timeout(30_000),
       body: JSON.stringify({
