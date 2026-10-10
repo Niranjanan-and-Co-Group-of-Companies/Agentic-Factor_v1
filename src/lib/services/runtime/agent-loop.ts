@@ -237,12 +237,21 @@ function friendlyAgentError(error: string, agentRole: string): string {
       `Check that your credentials are valid and the service is online.`
     );
   }
+  // The interpreter died mid-script (E2B restarts its context): a crash, not an API problem.
+  if (/ContextRestarting|Context was restarted/i.test(error)) {
+    return (
+      `Script crashed in agent "${agentRole}": the Python process was killed mid-run. Usually the script ran out of ` +
+      `memory, or it exits the interpreter (sys.exit/os._exit), sets signal handlers (signal.alarm) or uses ` +
+      `multiprocessing — don't; for parallel calls use concurrent.futures.ThreadPoolExecutor.`
+    );
+  }
   // E2B timeout
   if (error.toLowerCase().includes('timed out') || error.toLowerCase().includes('timeout')) {
     return (
       `Timeout (${SCRIPT_TIMEOUT_MS / 1000}s) in agent "${agentRole}": The script ran too long. ` +
-      `The external API may be slow or unresponsive. ` +
-      `Try reducing the data fetch scope in the mission description.`
+      `When it makes many API calls: read each list once and check for existing records locally instead of one ` +
+      `lookup per record, and run independent calls in parallel with concurrent.futures.ThreadPoolExecutor(max_workers=5). ` +
+      `Otherwise the external API may be slow — try reducing the data fetch scope in the mission description.`
     );
   }
   // No output
@@ -1273,7 +1282,10 @@ ${fixByEdits ? `\n${EDIT_FORMAT}` : '- Return the COMPLETE corrected Python scri
               const { deductCredits, calculateLLMCreditCost } = await import('@/lib/middleware/billing');
               const fixCostBase = await calculateLLMCreditCost(composioFixResponse.model, composioFixResponse.inputTokens ?? 0, composioFixResponse.outputTokens ?? 0);
               const fixCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(fixCostBase / 2) : fixCostBase;
-              await deductCredits(tenantId, fixCost, `llm_composio_fix:${agent.role}`);
+              await deductCredits(tenantId, fixCost, `llm_composio_fix:${agent.role}`, {
+                provider: composioFixResponse.provider, model: composioFixResponse.model,
+                inputTokens: composioFixResponse.inputTokens, outputTokens: composioFixResponse.outputTokens,
+              });
             } catch { /* non-fatal */ }
           }
         } catch (composioFixErr) {

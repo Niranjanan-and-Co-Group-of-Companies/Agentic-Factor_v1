@@ -24,7 +24,7 @@ function readSDKFile(filename: string, fallback: string): string {
 
 // Minimal embedded fallbacks for Vercel (these are the critical core files)
 const CORE_FALLBACK = `
-import os, json, sys, time, requests
+import os, json, sys, time, itertools, requests
 from typing import Optional, Dict, Any, List
 from urllib.parse import urlencode
 
@@ -172,7 +172,7 @@ def _is_error_key(key):
     return isinstance(key, str) and key.lower() in _DEFERRED_ERROR_KEYS
 
 _DEFERRED_PLACEHOLDER = "dry-run-preview"
-_DEFERRED_COUNTER = [0]
+_DEFERRED_SEQ = itertools.count(1)  # next() is atomic: safe when a script writes from threads
 _SCALAR_KEY_SUFFIXES = ('id', 'url', 'uri', 'link', 'name', 'title', 'path', 'token', 'status',
                         'ts', 'timestamp', 'time', 'date', 'email', 'key', 'slug', 'href')
 
@@ -216,8 +216,7 @@ class _DeferredResult(dict):
     # preview that created 16 invoices saw them all as one, and its "already paid?" checks skipped 15.
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        _DEFERRED_COUNTER[0] += 1
-        self._af_seq = _DEFERRED_COUNTER[0]
+        self._af_seq = next(_DEFERRED_SEQ)
     def __missing__(self, key):
         return _deferred_for(key, seq=self._af_seq)
     def get(self, key, default=None):
