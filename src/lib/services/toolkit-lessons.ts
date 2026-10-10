@@ -13,6 +13,14 @@ import { toolkitForAction } from './composio-actions';
 
 const API_ERROR = /HTTP \d{3}|write\(s\) failed|not allowed|required|invalid|cannot be empty|unknown parameter|does not exist|not authorized|validation/i;
 
+/**
+ * An error the app's API gave (or Composio's schema check). A failed review is about the mission's own
+ * logic — "every bill must get a payment" learned from one became a rule for every Zoho Books mission.
+ */
+export function isApiError(error: string): boolean {
+  return !!error && !/failed critic review/i.test(error) && API_ERROR.test(error);
+}
+
 /** The Composio toolkits a script calls: composio_execute actions (via Composio) and composio_proxy slugs. */
 export async function toolkitsOf(code: string): Promise<string[]> {
   const actions = [...new Set([...code.matchAll(/composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g)].map(m => m[1]))];
@@ -31,9 +39,11 @@ export async function lessonsFor(toolkits: string[], perToolkit = 12): Promise<s
       .in('payload->>toolkit', wanted)
       .order('created_at', { ascending: false }).limit(300);
     const byToolkit = new Map<string, string[]>();
-    for (const row of (data ?? []) as Array<{ payload: { toolkit?: string; lesson?: string } }>) {
-      const { toolkit, lesson } = row.payload ?? {};
+    for (const row of (data ?? []) as Array<{ payload: { toolkit?: string; lesson?: string; from?: string } }>) {
+      const { toolkit, lesson, from } = row.payload ?? {};
       if (!toolkit || !lesson) continue;
+      if (from && !isApiError(from)) continue; // learned from a failed review: the mission's logic, not the app's
+
       const list = byToolkit.get(toolkit) ?? [];
       const key = lesson.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
       if (list.length < perToolkit && !list.some(l => l.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() === key)) list.push(lesson);
@@ -55,14 +65,13 @@ export async function learnFromFix(opts: {
   tenantId: string; missionId: string; agentId: string; workingCode: string; recentError?: string;
 }): Promise<void> {
   const supabase = createServiceClient();
-  let error = opts.recentError && API_ERROR.test(opts.recentError) ? opts.recentError : '';
-  if (!error) {
-    const since = new Date(Date.now() - 48 * 3600_000).toISOString();
-    const { data } = await supabase.from('events').select('payload, created_at')
-      .eq('event_type', 'agent.attempt_failed').eq('entity_id', opts.agentId).gte('created_at', since)
-      .order('created_at', { ascending: false }).limit(5);
-    error = ((data ?? []) as Array<{ payload: { error?: string } }>).map(r => r.payload?.error ?? '').find(e => API_ERROR.test(e)) ?? '';
-  }
+  const since = new Date(Date.now() - 48 * 3600_000).toISOString();
+  const { data } = await supabase.from('events').select('payload, created_at')
+    .eq('event_type', 'agent.attempt_failed').eq('entity_id', opts.agentId).gte('created_at', since)
+    .order('created_at', { ascending: false }).limit(10);
+  const errors = [opts.recentError ?? '', ...((data ?? []) as Array<{ payload: { error?: string } }>).map(r => r.payload?.error ?? '')]
+    .filter(isApiError);
+  const error = [...new Set(errors)].slice(0, 3).join('\n---\n');
   if (!error) return;
 
   const toolkits = await toolkitsOf(opts.workingCode);
@@ -72,7 +81,7 @@ export async function learnFromFix(opts: {
   const res = await callLLM([
     {
       role: 'system',
-      content: `A script calling these apps' APIs failed with the error below and now works. State what the error teaches about the app's API as general rules for future scripts — e.g. "Zoho Books: POST /bills needs a unique bill_number and an account_id on every line item". Rules about the app only: no customer data (no names, amounts, ids, emails, dates), nothing about Python bugs or this mission's logic. Skip any rule already in the known list. Return JSON {"rules": [{"toolkit": "<one of: ${toolkits.join(', ')}>", "rule": "<one sentence>"}]} — an empty list when there is nothing new.`,
+      content: `A script calling these apps' APIs failed with the error(s) below and now works. State what the error teaches about the app's API as general rules for future scripts — e.g. "Zoho Books: POST /bills needs a unique bill_number and an account_id on every line item". Rules about how the app's API behaves only: no customer data (no names, amounts, ids, emails, dates), nothing about Python bugs, and never this mission's own requirements (what to create, which records to pay or match) — another customer's mission may want the opposite. Skip any rule already in the known list. Return JSON {"rules": [{"toolkit": "<one of: ${toolkits.join(', ')}>", "rule": "<one sentence>"}]} — an empty list when there is nothing new.`,
     },
     {
       role: 'user',
