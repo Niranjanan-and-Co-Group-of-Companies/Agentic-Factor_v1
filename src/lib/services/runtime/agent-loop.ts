@@ -1006,6 +1006,15 @@ export async function executeAgent(
       await supabase.from('proposed_actions').delete().eq('id', existingAction.id);
     } else if (existingAction.status === 'approved' && existingAction.payload && existingAction.payload.output !== undefined) {
       const approvedCode = existingAction.payload.pythonCode || agent.pythonScript || '';
+      // Steps that finished after an approval left no agent.completed event, so a resume could not
+      // reuse them and ran them (and their writes) again. Training previews are not recorded: their
+      // placeholder output must never feed a live run.
+      const recordApprovedCompletion = async (output: string) => {
+        await supabase.from('events').insert({
+          tenant_id: tenantId, event_type: 'agent.completed', entity_type: 'agent', entity_id: agent.id,
+          run_id: runId ?? null, payload: { missionId, output, approvedAction: existingAction.id },
+        });
+      };
       const { hasWriteOps: approvedHasWriteOps } = classifyAgentActions(approvedCode);
 
       if (existingAction.action_type === 'training_review') {
@@ -1046,10 +1055,12 @@ export async function executeAgent(
         await supabase.from('proposed_actions')
           .update({ payload: { ...existingAction.payload, executedAt: new Date().toISOString(), realOutput } })
           .eq('id', existingAction.id);
+        await recordApprovedCompletion(realOutput);
         return { output: realOutput, finalCode: approvedCode };
       }
 
       console.log(`[Agent ${agent.id}] Resuming execution with approved payload.`);
+      await recordApprovedCompletion(existingAction.payload.output);
       return { output: existingAction.payload.output, finalCode: approvedCode };
     } else if (existingAction.status === 'approved') {
       // Approved, but payload/output is missing — a malformed or
