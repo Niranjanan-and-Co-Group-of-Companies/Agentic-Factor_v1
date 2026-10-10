@@ -1560,25 +1560,23 @@ Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected scrip
           const problems = checkComposioParams(agent.pythonScript, actionSchemas);
           if (problems.length > 0) needsFix.push({ agentIndex: agent.agentIndex, pythonScript: agent.pythonScript, problems });
         }
-        if (needsFix.length > 0) {
-          const paramResp = await callLLM([
-            {
-              role: 'system',
-              content: `Fix the listed composio_execute() parameter problems. Change nothing else.
-Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected script"}]}`,
-            },
-            { role: 'user', content: JSON.stringify(needsFix) },
-          ], { temperature: 0, jsonMode: true, tier: 2 });
+        // One call per script, in parallel: one call for every flagged script of a five-agent edit
+        // took three minutes of a step's 300s.
+        await Promise.all(needsFix.map(async fix => {
           try {
-            const paramFixes = robustJSONParse(paramResp.content);
-            if (Array.isArray(paramFixes?.agents) && paramFixes.agents.length > 0) {
-              for (const fix of paramFixes.agents) {
-                const agent = llmOutput.agents.find(a => a.agentIndex === fix.agentIndex);
-                if (agent && fix.pythonScript) agent.pythonScript = fix.pythonScript;
-              }
-            }
-          } catch { /* non-fatal */ }
-        }
+            const paramResp = await callLLM([
+              {
+                role: 'system',
+                content: `Fix the listed composio_execute() parameter problems. Change nothing else.
+Return JSON: {"pythonScript": "corrected script"}`,
+              },
+              { role: 'user', content: JSON.stringify(fix) },
+            ], { temperature: 0, jsonMode: true, tier: 2 });
+            const corrected = robustJSONParse(paramResp.content)?.pythonScript;
+            const agent = llmOutput.agents.find(a => a.agentIndex === fix.agentIndex);
+            if (agent && typeof corrected === 'string' && corrected.trim()) agent.pythonScript = corrected;
+          } catch { /* non-fatal — the runtime fixer catches what's left */ }
+        }));
       }
     } catch (err) {
       console.warn('[intake/edit] Parameter validation failed (non-fatal):', err);
