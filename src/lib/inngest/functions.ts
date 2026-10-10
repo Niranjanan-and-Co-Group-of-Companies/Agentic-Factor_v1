@@ -296,7 +296,8 @@ export const executeMissionBackground = inngest.createFunction(
         });
 
         // ── Each agent runs as its own Inngest step (own 5-min timeout) ──
-        const agentResult = await step.run(`agent-${agentToRun.role.replace(/\s+/g, '-').toLowerCase()}`, async () => {
+        const stepBase = `agent-${agentToRun.role.replace(/\s+/g, '-').toLowerCase()}`;
+        const runAgentStep = async () => {
           console.log(`[Inngest] Starting agent: ${agentToRun.role} (${agentToRun.id})`);
 
           const supabase = createServiceClient();
@@ -358,7 +359,26 @@ export const executeMissionBackground = inngest.createFunction(
           }
 
           return { ...result, resumed: false };
-        });
+        };
+
+        // A heavy agent (dozens of API calls per attempt) can use up its step's time with a fix saved
+        // ("ran out of time … its latest fix is saved"). Continue it in a fresh step — each has its own
+        // time limit — instead of failing the run and leaving the customer to resume it by hand.
+        const MAX_PASSES = 4;
+        let agentResult: Awaited<ReturnType<typeof runAgentStep>> | undefined;
+        for (let pass = 0; pass < MAX_PASSES; pass++) {
+          try {
+            agentResult = await step.run(pass === 0 ? stepBase : `${stepBase}-continue-${pass}`, runAgentStep);
+            break;
+          } catch (err) {
+            if (pass < MAX_PASSES - 1 && /ran out of time/i.test((err as Error)?.message ?? '')) {
+              console.log(`[Inngest] ${agentToRun.role} ran out of step time with a fix saved — continuing (pass ${pass + 2}/${MAX_PASSES}).`);
+              continue;
+            }
+            throw err;
+          }
+        }
+        if (!agentResult) throw new Error(`Agent "${agentToRun.role}" did not finish.`);
 
         if (agentResult.resumed) agentsDone++;
         else agentsDone++;
