@@ -484,6 +484,11 @@ def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Di
         sys.stderr.write(f"[DRY_RUN] Skipped composio_proxy({label}) — write op deferred\\n")
         _record_deferred(label, body if body is not None else (params if binary is None else {**(params or {}), "file": f"{len(binary)} bytes ({content_type})"}))
         return _DeferredResult({"status": "ok", "dry_run": True, "action": label})
+    # A read of something a deferred write "created" (its id is the placeholder, e.g. a Drive file
+    # read back after its upload) can't reach the real API — answer it with a placeholder too.
+    if os.environ.get("AF_DRY_RUN", "0") == "1" and _DEFERRED_PLACEHOLDER in endpoint + json.dumps(params or {}, default=str):
+        sys.stderr.write(f"[DRY_RUN] Deferred composio_proxy({label}) — reads a resource created in this preview\\n")
+        return _DeferredResult({"status": "ok", "dry_run": True, "action": label})
 
     def value(v):
         return str(v).lower() if isinstance(v, bool) else str(v)
