@@ -518,6 +518,22 @@ async function readAppApi(
       .then(r => r.json()) as { items?: Array<{ id: string }> };
     const accountId = accounts.items?.[0]?.id;
     if (!accountId) return { content: `${toolkit} is not connected.`, summary: 'Not connected' };
+    // Region/domain of this connection (never tokens): explains "wrong data centre" failures.
+    const regionInfo = async () => {
+      const acct = await fetch(`https://backend.composio.dev/api/v3.1/connected_accounts/${accountId}`, { headers, signal: AbortSignal.timeout(15_000) })
+        .then(r => r.json()).catch(() => ({})) as Record<string, unknown>;
+      const keep = /^(base_url|api_url|api_domain|domain|dc|region|extension|server_location|instanceEndpoint|instance_url|subdomain|your-domain|site_name|shop|COMPANYDOMAIN|account_url|location|accounts-server)$/i;
+      const found: Record<string, unknown> = {};
+      const walk = (v: unknown, depth: number) => {
+        if (!v || typeof v !== 'object' || depth > 4) return;
+        for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+          if (keep.test(k) && (typeof x === 'string' || typeof x === 'number')) found[k] = x;
+          else walk(x, depth + 1);
+        }
+      };
+      walk(acct, 0);
+      return Object.keys(found).length ? `\nConnection region/domain: ${JSON.stringify(found)}` : '';
+    };
     const [route, query] = path.split('?');
     const all = { ...Object.fromEntries(new URLSearchParams(query ?? '')), ...params };
     const res = await fetch('https://backend.composio.dev/api/v3.1/tools/execute/proxy', {
@@ -530,7 +546,8 @@ async function readAppApi(
     });
     const text = await res.text();
     const out = text.length > 12_000 ? `${text.slice(0, 12_000)}\n…(truncated)` : text;
-    return { content: `GET ${route} → HTTP ${res.status}\n${out}`, summary: `GET ${route} (${res.status})` };
+    const failed = !res.ok || /"status"\s*:\s*(4|5)\d\d/.test(text.slice(0, 200));
+    return { content: `GET ${route} → HTTP ${res.status}\n${out}${failed ? await regionInfo() : ''}`, summary: `GET ${route} (${res.status})` };
   } catch (err) {
     return { content: `GET ${path} failed: ${err instanceof Error ? err.message : String(err)}`, summary: 'Request failed' };
   }
