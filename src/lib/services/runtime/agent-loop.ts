@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { Sandbox } from '@e2b/code-interpreter';
 import { robustJSONParse } from '@/lib/utils/json-parser';
 import { criticInputView, describeInputShape } from './pipeline-context';
+import { applyScriptEdits, hasEditBlocks, EDIT_FORMAT, EDIT_MIN_CHARS } from './script-edits';
 import { createHash } from 'crypto';
 
 const scriptHash = (code: string) => createHash('sha256').update(code).digest('hex').slice(0, 16);
@@ -59,6 +60,15 @@ export function extractPythonBlock(reply: string): string | null {
   if (fenced) return fenced[1];
   const loose = reply.match(/```(?:python|py)?\s*\n([\s\S]*?)```/);
   return loose ? loose[1] : null;
+}
+
+/** The fixed script in a fixer's reply: its edit blocks applied to the failing script, or a complete script. */
+export function codeFromFix(reply: string, failing: string): { code: string | null; problem?: string } {
+  if (hasEditBlocks(reply)) {
+    const edited = applyScriptEdits(failing, reply);
+    return 'code' in edited ? { code: edited.code } : { code: null, problem: edited.error };
+  }
+  return { code: extractPythonBlock(reply) };
 }
 
 /** Where a single-quoted or double-quoted string opened on this line is still open at its end, if any. */
@@ -998,6 +1008,8 @@ export async function executeAgent(
   let lastPythonCode = '';
   // Whether this agent's first script was read-only; a retry may not turn it into a writer.
   let firstScriptReadOnly: boolean | null = null;
+  // Why the last edit-style fix could not be applied; the next fix then returns the whole script.
+  let editFailure = '';
   if (pendingFixError) {
     // Picks up where the last pass stopped: its failing script and error go straight to the fixer.
     console.log(`[Agent ${agent.id}] The last pass ran out of time before fixing its failure — fixing it first.`);
@@ -1168,6 +1180,8 @@ export async function executeAgent(
       );
       pythonCode = startingScript;
     } else {
+      // Long scripts are fixed with edits — unless the last edits did not apply.
+      const fixByEdits = !!lastError && lastPythonCode.length >= EDIT_MIN_CHARS && !editFailure;
       // Composio actions that do what the script's raw API calls do — the fixer should prefer them.
       let proxyAlternatives = '';
       if (lastError && lastPythonCode.includes('composio_proxy(')) {
@@ -1239,14 +1253,18 @@ Fix the script. Rules:
 - If the action name was wrong, use the exact name from the list above
 - If the parameters were wrong, use the exact parameter names from [req: ...] hints above
 - If the script only reads data, it MUST stay read-only: NEVER use an action that creates, updates, sends or deletes anything to work around a missing read action. If no suitable read action exists, print a JSON object with "status": "error" explaining that.
-- Return the COMPLETE corrected Python script in a \`\`\`python block`;
+${fixByEdits ? `\n${EDIT_FORMAT}` : '- Return the COMPLETE corrected Python script in a \`\`\`python block'}`;
 
           const composioFixResponse = await callLLM(
             [{ role: 'system', content: composioFixPrompt }],
             { temperature: 0.0, jsonMode: false, tier: 1, planTenantId: tenantId }
           );
 
-          const composioFixCode = extractPythonBlock(composioFixResponse.content);
+          const { code: composioFixCode, problem: editProblem } = codeFromFix(composioFixResponse.content, lastPythonCode);
+          if (editProblem) {
+            console.warn(`[Agent ${agent.id}] Fix edits did not apply (${editProblem}) — asking for the whole script.`);
+            editFailure = editProblem;
+          }
           if (composioFixCode) {
             pythonCode = sanitizePythonCode(composioFixCode);
             console.log(`[Agent ${agent.id}] Composio-aware correction applied (attempt ${attempts})`);
@@ -1272,7 +1290,7 @@ Fix the script. Rules:
 
       let errorContext = '';
       if (lastError) {
-        errorContext = `THE PREVIOUS SCRIPT FAILED WITH THIS ERROR:\n${lastError}\n\nBROKEN SCRIPT:\n\`\`\`python\n${lastPythonCode}\n\`\`\`\nPlease fix the bug and write the corrected code.`;
+        errorContext = `THE PREVIOUS SCRIPT FAILED WITH THIS ERROR:\n${lastError}\n\nBROKEN SCRIPT:\n\`\`\`python\n${lastPythonCode}\n\`\`\`\nPlease fix the bug and write the corrected code.${editFailure ? `\n(Your last edits to it could not be applied — ${editFailure}. Return the complete corrected script.)` : ''}`;
       }
       
       // Phase 6.3: RAG Injection — Query mission's knowledge base for relevant context
@@ -1434,9 +1452,16 @@ INSTRUCTIONS:
 17. **STRING SAFETY**: Never mix quote types carelessly. If a string contains single quotes, wrap it in double quotes. If it contains double quotes, wrap it in single quotes. For strings with both, use triple double-quotes (""" only).`;
 
 
+      // A fix to a long script comes back as edits to it, not as the whole script — unless edits
+      // just failed to apply (here, from the Composio-aware fix above).
+      const regenByEdits = fixByEdits && !editFailure;
+      const regenPrompt = regenByEdits
+        ? `${systemPrompt}\n\nTHIS IS A FIX TO THE BROKEN SCRIPT ABOVE — keep everything that works. In place of instructions 1 and 10:\n${EDIT_FORMAT}`
+        : systemPrompt;
+
       // Writing the agent's code is tier 1: paid plans get the strongest model.
       const response = await callLLM(
-        [{ role: 'system', content: systemPrompt }],
+        [{ role: 'system', content: regenPrompt }],
         { temperature: 0.1, jsonMode: false, tier: 1, planTenantId: tenantId }
       );
 
@@ -1458,15 +1483,20 @@ INSTRUCTIONS:
       }
       
       // More flexible regex: handles ```python, ``` python, and variations
-      const extracted = extractPythonBlock(response.content);
+      const { code: extracted, problem: regenEditProblem } = regenByEdits
+        ? codeFromFix(response.content, lastPythonCode)
+        : { code: extractPythonBlock(response.content), problem: undefined };
       if (!extracted) {
-        lastError = "Failed to extract Python code from LLM response. Make sure to use triple-backtick python blocks.";
-        console.warn(`[Agent ${agent.id} attempt ${attempts}] LLM returned no python block.`);
+        if (regenEditProblem) editFailure = regenEditProblem;
+        console.warn(`[Agent ${agent.id} attempt ${attempts}] LLM returned no usable code${regenEditProblem ? ` (${regenEditProblem})` : ''}.`);
+        // The script's own error stays the one to fix: a reply without usable code says nothing about it.
+        if (!lastError) lastError = "Failed to extract Python code from LLM response. Make sure to use triple-backtick python blocks.";
         continue;
       }
       
       pythonCode = extracted;
       } // end inner else (full AF SDK regeneration)
+      editFailure = '';
     } // end outer else (composio-aware + full regeneration)
 
     // Sanitize LLM-generated code: fix unterminated strings, etc.
