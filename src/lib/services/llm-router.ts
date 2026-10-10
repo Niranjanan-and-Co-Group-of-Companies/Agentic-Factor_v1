@@ -36,8 +36,8 @@ interface LLMResponse {
 const MODEL_CHAINS: Record<string, Record<number, string[]>> = {
   anthropic: {
     // Claude Sonnet = Priority 1 in Tier 1
-    1: ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5-20251001'],
-    2: ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+    1: ['claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+    2: ['claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
     3: ['claude-haiku-4-5-20251001'],
   },
   gemini: {
@@ -155,9 +155,11 @@ export { getModelCreditCost } from '@/lib/middleware/billing';
  */
 export async function callLLM(
   messages: LLMMessage[],
-  options: { temperature?: number; jsonMode?: boolean; tier?: 1 | 2 | 3; budgetContext?: { tenantId: string; missionId: string }; maxTokens?: number } = {}
+  options: { temperature?: number; jsonMode?: boolean; tier?: 1 | 2 | 3; budgetContext?: { tenantId: string; missionId: string }; maxTokens?: number; planTenantId?: string } = {}
 ): Promise<LLMResponse> {
   const { temperature = 0.3, jsonMode = true, tier = 2, budgetContext, maxTokens = 16384 } = options;
+  // Paid plans get the best Claude model for code and blueprint generation; free plans the standard one.
+  const premium = await isPaidTenant(options.planTenantId ?? budgetContext?.tenantId);
 
   let result: LLMResponse | null = null;
 
@@ -169,7 +171,7 @@ export async function callLLM(
   // ── 1st: Try Anthropic Claude ──
   if (!result && process.env.ANTHROPIC_API_KEY) {
     try {
-      result = await callAnthropicWithFallback(messages, temperature, tier, jsonMode, maxTokens);
+      result = await callAnthropicWithFallback(messages, temperature, tier, jsonMode, maxTokens, premium);
     } catch (err) {
       console.warn('[LLM] All Anthropic models failed, trying Gemini:', (err as Error).message);
     }
@@ -212,9 +214,37 @@ export async function callLLM(
 // ═══════════════════════════════════════════════════════════
 
 // ── Anthropic with Fallback Chain ──
-async function callAnthropicWithFallback(messages: LLMMessage[], temperature: number, tier: number, jsonMode: boolean, maxTokens: number): Promise<LLMResponse> {
-  const chain = await getModelChain('anthropic', tier);
-  const cachedModel = getCachedModel('anthropic', tier);
+// Claude's latest models lead each chain; the configured chain (and then Gemini, then OpenAI) stays
+// as the fallback. Tier 1 is code and blueprint generation: paid plans get the strongest model.
+const PREFERRED_CLAUDE: Record<'premium' | 'standard', Record<number, string[]>> = {
+  premium:  { 1: ['claude-opus-5-5', 'claude-sonnet-5'], 2: ['claude-sonnet-5'], 3: [] },
+  standard: { 1: ['claude-sonnet-5'], 2: ['claude-sonnet-5'], 3: [] },
+};
+
+const planCache = new Map<string, { paid: boolean; at: number }>();
+
+/** Whether the tenant is on a paid plan (cached for 5 minutes). */
+async function isPaidTenant(tenantId?: string): Promise<boolean> {
+  if (!tenantId) return false;
+  const hit = planCache.get(tenantId);
+  if (hit && Date.now() - hit.at < 5 * 60_000) return hit.paid;
+  try {
+    const { data } = await createServiceClient().from('tenant_billing').select('plan').eq('tenant_id', tenantId).maybeSingle();
+    const paid = !!data?.plan && data.plan !== 'free';
+    planCache.set(tenantId, { paid, at: Date.now() });
+    return paid;
+  } catch {
+    return false;
+  }
+}
+
+async function callAnthropicWithFallback(messages: LLMMessage[], temperature: number, tier: number, jsonMode: boolean, maxTokens: number, premium = false): Promise<LLMResponse> {
+  const configured = await getModelChain('anthropic', tier);
+  const preferred = PREFERRED_CLAUDE[premium ? 'premium' : 'standard'][tier] ?? [];
+  const chain = [...preferred, ...configured.filter(m => !preferred.includes(m))];
+  // Cached per plan class, so a free-plan call never demotes paid-plan calls to its model.
+  const cacheTier = premium ? tier + 10 : tier;
+  const cachedModel = getCachedModel('anthropic', cacheTier);
   
   // Reorder chain: put cached model first if it exists
   const modelsToTry = cachedModel 
@@ -226,7 +256,7 @@ async function callAnthropicWithFallback(messages: LLMMessage[], temperature: nu
   for (const modelName of modelsToTry) {
     try {
       const result = await callAnthropicDirect(messages, temperature, modelName, jsonMode, maxTokens);
-      setCachedModel('anthropic', tier, modelName);
+      setCachedModel('anthropic', cacheTier, modelName);
       console.log(`[LLM] Anthropic model ${modelName} succeeded`);
       return result;
     } catch (err) {
@@ -423,9 +453,9 @@ async function callAnthropicDirect(messages: LLMMessage[], temperature: number, 
     userMessages.push({ role: 'user', content: 'Please proceed with the system instructions.' });
   }
 
-  // Claude 4.x models (opus-4, sonnet-4, haiku-4) deprecated the temperature parameter.
+  // Claude 4 and later (opus/sonnet/haiku/fable 4, 5, ...) deprecated the temperature parameter.
   // Only include temperature for older models that still support it.
-  const isClaudeV4 = modelName.includes('claude-opus-4') || modelName.includes('claude-sonnet-4') || modelName.includes('claude-haiku-4');
+  const isClaudeV4 = /^claude-(opus|sonnet|haiku|fable)-([4-9]|\d{2,})/.test(modelName);
 
   const requestBody: Record<string, unknown> = {
     model: modelName,

@@ -1207,7 +1207,7 @@ Fix the script. Rules:
 
           const composioFixResponse = await callLLM(
             [{ role: 'system', content: composioFixPrompt }],
-            { temperature: 0.0, jsonMode: false, tier: 2 }
+            { temperature: 0.0, jsonMode: false, tier: 1, planTenantId: tenantId }
           );
 
           const composioFixCode = extractPythonBlock(composioFixResponse.content);
@@ -1397,9 +1397,10 @@ INSTRUCTIONS:
 17. **STRING SAFETY**: Never mix quote types carelessly. If a string contains single quotes, wrap it in double quotes. If it contains double quotes, wrap it in single quotes. For strings with both, use triple double-quotes (""" only).`;
 
 
+      // Writing the agent's code is tier 1: paid plans get the strongest model.
       const response = await callLLM(
-        [{ role: 'system', content: systemPrompt }], 
-        { temperature: 0.1, jsonMode: false, tier: 2 }
+        [{ role: 'system', content: systemPrompt }],
+        { temperature: 0.1, jsonMode: false, tier: 1, planTenantId: tenantId }
       );
 
       // ── Deduct LLM credit: token-proportional at 4× real cost via live USD/INR ──

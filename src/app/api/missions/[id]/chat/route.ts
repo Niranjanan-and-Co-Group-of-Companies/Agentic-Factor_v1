@@ -1,3 +1,4 @@
+import { CHAT_MODELS, fetchClaudeMessages } from '@/lib/services/claude-chat';
 import { NextRequest } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
@@ -219,7 +220,7 @@ export async function POST(
     return new Response(JSON.stringify({ error: 'LLM not configured' }), { status: 500 });
   }
 
-  const model = 'claude-sonnet-4-6';
+  let model = CHAT_MODELS[0];
   // Sanitize history: strip action tags from prior assistant messages so they
   // never appear as raw JSON in Claude's context window.
   const recentMessages = messages.slice(-20).map(m => ({
@@ -235,22 +236,14 @@ export async function POST(
 
       try {
         // ── First (and only Vercel) LLM call — streaming ─────────────────
-        const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-          },
-          body: JSON.stringify({
-            model,
-            max_tokens: 4096,
-            stream: true,
-            system: systemPrompt,
-            tools,
-            messages: recentMessages,
-          }),
-        });
+        const { res: anthropicRes, model: servedModel } = await fetchClaudeMessages({
+          max_tokens: 4096,
+          stream: true,
+          system: systemPrompt,
+          tools,
+          messages: recentMessages,
+        }, apiKey);
+        model = servedModel;
 
         let streamed: Awaited<ReturnType<typeof parseAnthropicStream>>;
         if (!anthropicRes.ok) {

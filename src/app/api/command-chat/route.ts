@@ -1,3 +1,4 @@
+import { CHAT_MODELS, fetchClaudeMessages } from '@/lib/services/claude-chat';
 import { NextRequest } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
@@ -462,20 +463,17 @@ async function runCommandLoop(params: {
   const messages = [...params.messages];
   let totalInputTokens = 0, totalOutputTokens = 0, fullText = '';
   // Which model answered — recorded on the billing event so a fallback (e.g. Claude out of credit) shows up.
-  let servedBy = { provider: 'anthropic', model: 'claude-sonnet-4-6' };
+  let servedBy = { provider: 'anthropic', model: CHAT_MODELS[0] };
   const MAX_ROUNDS = 8;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      // On the last round, forbid further tool calls so the customer always gets an answer
-      // (otherwise a search-hungry turn ends at MAX_ROUNDS with credits spent and no reply).
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6', max_tokens: 4096, stream: true, system: systemPrompt, tools: CC_TOOLS, messages,
-        ...(round === MAX_ROUNDS - 1 ? { tool_choice: { type: 'none' } } : {}),
-      }),
-    });
+    // On the last round, forbid further tool calls so the customer always gets an answer
+    // (otherwise a search-hungry turn ends at MAX_ROUNDS with credits spent and no reply).
+    const { res, model: servedModel } = await fetchClaudeMessages({
+      max_tokens: 4096, stream: true, system: systemPrompt, tools: CC_TOOLS, messages,
+      ...(round === MAX_ROUNDS - 1 ? { tool_choice: { type: 'none' } } : {}),
+    }, apiKey);
+    if (res.ok) servedBy = { provider: 'anthropic', model: servedModel };
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -754,7 +752,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Deduct credits (awaited — failed deduction is logged, not silently swallowed)
-        const credits = await calculateChatCreditCost(inputTokens, outputTokens, 'claude-sonnet-4-6');
+        const credits = await calculateChatCreditCost(inputTokens, outputTokens, model);
         try {
           await deductCredits(tenantId, credits, 'command_chat', { provider, model, inputTokens, outputTokens });
         } catch (deductErr) {

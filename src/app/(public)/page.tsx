@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
 
 const FEATURES = [
   { icon: "🤖", title: "AI Agent Teams", desc: "Autonomous multi-agent systems that decompose and execute complex goals" },
-  { icon: "🧠", title: "Powered by Claude", desc: "Claude Sonnet 4.6 for best code generation, with Gemini & GPT fallback" },
+  { icon: "🧠", title: "Powered by Claude", desc: "Claude writes and repairs your agents' code — its most capable model on paid plans — with Gemini & GPT as fallback" },
   { icon: "🔌", title: "850+ Integrations", desc: "Google, Slack, GitHub, Notion, HubSpot, Salesforce and 844 more — OAuth or API key, no code required" },
   { icon: "📚", title: "RAG Memory", desc: "Vector-powered knowledge base with PDF/DOCX ingestion" },
   { icon: "⚡", title: "Secure Sandbox Execution", desc: "Every agent runs in an isolated, ephemeral cloud environment — no cross-tenant access, no residual data" },
@@ -22,10 +22,10 @@ const FEATURES = [
 ];
 
 const PLANS = [
-  { name: "Free Trial", price: "₹0", period: "", credits: "30 credits", features: ["1 active mission", "Flash models (Gemini Flash, Claude Haiku)", "100 MB storage", "2 discovery questions", "No scheduling", "No multi-role agents"], cta: "Start Free", href: "/login", highlight: false },
-  { name: "Individual", price: "₹2,499", period: "/month", credits: "1,000 credits", features: ["5 active missions", "Pro models (Claude Sonnet, GPT-4o)", "10 GB storage", "3-4 discovery questions", "Agent email inbox", "Up to 2 parallel roles"], cta: "Upgrade", href: "/pricing", highlight: true },
-  { name: "Pro", price: "From ₹2,999", period: "/seat/mo", credits: "2,500 credits/seat", features: ["50 active missions", "All models (Claude Sonnet 4, Gemini, GPT)", "100 GB storage", "5-6 discovery questions", "Unlimited multi-role agents", "Credit top-ups available"], cta: "Configure", href: "/pricing", highlight: false },
-  { name: "Enterprise", price: "Custom", period: "", credits: "Unlimited credits", features: ["Unlimited missions", "All + custom fine-tuned models", "1 TB storage", "8-10 discovery questions", "Dedicated support"], cta: "Contact Sales", href: "/contact", highlight: false },
+  { name: "Free Trial", price: "₹0", period: "", credits: "30 credits", features: ["1 active mission", "Claude for code generation (Gemini & GPT fallback)", "100 MB storage", "2 discovery questions", "No scheduling", "No multi-role agents"], cta: "Start Free", href: "/login", highlight: false },
+  { name: "Individual", price: "₹2,499", period: "/month", credits: "1,000 credits", features: ["5 active missions", "Claude's most capable model for code generation", "10 GB storage", "3-4 discovery questions", "Agent email inbox", "Up to 2 parallel roles"], cta: "Upgrade", href: "/pricing", highlight: true },
+  { name: "Pro", price: "From ₹2,999", period: "/seat/mo", credits: "2,500 credits/seat", features: ["50 active missions", "Claude's most capable model for code generation", "100 GB storage", "5-6 discovery questions", "Unlimited multi-role agents", "Credit top-ups available"], cta: "Configure", href: "/pricing", highlight: false },
+  { name: "Enterprise", price: "Custom", period: "", credits: "Unlimited credits", features: ["Unlimited missions", "Claude's most capable model + custom models", "1 TB storage", "8-10 discovery questions", "Dedicated support"], cta: "Contact Sales", href: "/contact", highlight: false },
 ];
 
 const TESTIMONIALS = [
@@ -176,7 +176,7 @@ export default function WelcomePage() {
       {/* ═══════ SECTION 6: PRICING ═══════ */}
       <ScrollSection id="pricing">
         <h2 className="welcome-section-title">Simple, Credit-Based Pricing</h2>
-        <p className="welcome-section-subtitle">Powered by Claude, Gemini & GPT. Pay for what your agents consume.</p>
+        <p className="welcome-section-subtitle">Powered by Claude, with Gemini & GPT as fallback. Pay for what your agents consume.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 20 }}>
           {PLANS.map(p => (
             <div key={p.name} className="card" style={{ padding: 28, position: "relative", border: p.highlight ? "1px solid hsl(217,91%,60%)" : undefined, boxShadow: p.highlight ? "0 0 30px hsla(217,91%,60%,0.15)" : undefined }}>
