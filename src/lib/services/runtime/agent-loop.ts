@@ -1989,7 +1989,10 @@ PASS if:
 Be a real critic, not a rubber stamp — but don't be pedantic about minor formatting choices.
 
 Respond: {"valid": boolean, "reason": "string if invalid"}`;
-          const criticResult = await callLLM([{ role: 'user', content: criticPrompt }], { temperature: 0, jsonMode: true, tier: 3 });
+          // Tier 2 (Sonnet, Haiku as fallback): on Haiku the critic rejected sound work again and again
+          // (undocumented service assignments, reused records, "too prompt" payments), and every false
+          // rejection costs a full sandbox retry plus a fixer call.
+          const criticResult = await callLLM([{ role: 'user', content: criticPrompt }], { temperature: 0, jsonMode: true, tier: 2 });
           const { deductCredits: deductCritic, calculateLLMCreditCost: calcCriticCost } = await import('@/lib/middleware/billing');
           const criticCostBase = await calcCriticCost(criticResult.model, criticResult.inputTokens ?? 0, criticResult.outputTokens ?? 0);
           const criticCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(criticCostBase / 2) : criticCostBase;
