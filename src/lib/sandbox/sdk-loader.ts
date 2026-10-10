@@ -387,6 +387,19 @@ def _connected_account_id(toolkit: str) -> str:
     return items[0]["id"]
 
 
+def _without_version_prefix(path: str) -> Optional[str]:
+    """'/books/v3/invoices?x=1' -> '/invoices?x=1'; None when there is no version segment to drop."""
+    import re
+    if path.startswith("http"):
+        return None
+    route, _, query = path.partition("?")
+    segments = [seg for seg in route.split("/") if seg]
+    for i, seg in enumerate(segments[:-1]):
+        if re.fullmatch(r"v\\d+(\\.\\d+)?", seg):
+            return "/" + "/".join(segments[i + 1:]) + (f"?{query}" if query else "")
+    return None
+
+
 def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Dict] = None, body: Any = None, headers: Optional[Dict] = None, binary: Optional[bytes] = None, content_type: str = "application/octet-stream") -> Any:
     """Call an app's own REST API through the customer's Composio connection, for anything the
     toolkit has no action for. Zoho Books has no report actions, so a P&L is:
@@ -419,19 +432,34 @@ def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Di
     if binary is not None:
         import base64
         payload["binary_body"] = {"base64": base64.b64encode(binary).decode(), "content_type": content_type}
-    resp = requests.post(
-        "https://backend.composio.dev/api/v3.1/tools/execute/proxy",
-        headers={"x-api-key": os.environ.get("COMPOSIO_API_KEY", ""), "Content-Type": "application/json"},
-        json=payload,
-        timeout=60,
-    )
-    if resp.status_code >= 400:
-        raise APIError(resp.status_code, resp.text[:800], f"composio_proxy:{label}")
-    data = resp.json()
-    status = data.get("status", 200) if isinstance(data, dict) else 200
-    result = data.get("data", data) if isinstance(data, dict) else data
-    if isinstance(status, int) and status >= 400:
-        raise APIError(status, json.dumps(result, default=str)[:800], f"composio_proxy:{label}")
+    def send(path):
+        body_payload = {**payload, "endpoint": path}
+        r = requests.post(
+            "https://backend.composio.dev/api/v3.1/tools/execute/proxy",
+            headers={"x-api-key": os.environ.get("COMPOSIO_API_KEY", ""), "Content-Type": "application/json"},
+            json=body_payload,
+            timeout=60,
+        )
+        if r.status_code >= 400:
+            raise APIError(r.status_code, r.text[:800], f"composio_proxy:{label}")
+        data = r.json()
+        status = data.get("status", 200) if isinstance(data, dict) else 200
+        result = data.get("data", data) if isinstance(data, dict) else data
+        if isinstance(status, int) and status >= 400:
+            raise APIError(status, json.dumps(result, default=str)[:800], f"composio_proxy:{label}")
+        return result
+
+    try:
+        result = send(endpoint)
+    except APIError as e:
+        # The connection's API base usually ends in a version ("/books/v3"), so "/books/v3/invoices"
+        # doubles it and 404s. Retry once with the part up to the version segment removed.
+        retry = _without_version_prefix(endpoint) if e.status_code == 404 else None
+        if not retry:
+            if e.status_code == 404 and not endpoint.startswith("http"):
+                raise APIError(404, f"{e} — paths are relative to the app's API base, which already includes its version (e.g. '/invoices', not '/books/v3/invoices')", f"composio_proxy:{label}")
+            raise
+        result = send(retry)
     _record_shape(f"PROXY {label}", result)
     return _ComposioData(result) if isinstance(result, dict) else result
 
