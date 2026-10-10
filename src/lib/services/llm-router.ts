@@ -468,6 +468,11 @@ async function callOpenAIDirect(messages: LLMMessage[], temperature: number, jso
 }
 
 // ── Anthropic Direct ──
+/** The answer of a Messages API response: its text blocks in order, skipping thinking and other blocks. */
+export function anthropicText(data: { content?: Array<{ type?: string; text?: unknown }> }): string {
+  return (data.content ?? []).filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text as string).join('');
+}
+
 async function callAnthropicDirect(messages: LLMMessage[], temperature: number, modelName: string, jsonMode: boolean = false, maxTokens: number = 16384): Promise<LLMResponse> {
   const apiKey = process.env.ANTHROPIC_API_KEY!;
   let systemMsg = messages.find(m => m.role === 'system')?.content || '';
@@ -519,7 +524,10 @@ async function callAnthropicDirect(messages: LLMMessage[], temperature: number, 
   }
 
   const data = await res.json();
-  let content = data.content?.[0]?.text || '';
+  // Claude 5 models can answer with a thinking block first: the answer is the text blocks, not block 0.
+  // Reading block 0 gave the code writer and fixer empty replies and the critic an empty verdict.
+  let content = anthropicText(data);
+  if (data.stop_reason === 'max_tokens') console.warn(`[LLM Router] ${modelName} hit max_tokens (${maxTokens}) — its answer is cut off.`);
   const inputTokens = data.usage?.input_tokens || 0;
   const outputTokens = data.usage?.output_tokens || 0;
   const tokensUsed = inputTokens + outputTokens;
