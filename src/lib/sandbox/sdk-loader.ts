@@ -365,6 +365,48 @@ def _record_shape(action: str, result: Any) -> None:
 
 
 _CONNECTED_ACCOUNTS: Dict[str, str] = {}
+# Each connection's own API base, e.g. "https://www.zohoapis.in/books" for a Zoho Books account on the
+# India data centre: Composio's proxy did not resolve relative paths for it ("Invalid URL Passed").
+_CONNECTION_BASES: Dict[str, Optional[str]] = {}
+
+
+def _base_url_of(account: Any) -> Optional[str]:
+    """The base_url / api_url / instance endpoint stored on a Composio connected account, if any."""
+    def walk(v, depth=0):
+        if not isinstance(v, dict) or depth > 4:
+            return None
+        for key in ("base_url", "api_url", "instanceEndpoint", "instance_url"):
+            x = v.get(key)
+            if isinstance(x, str) and x.startswith("http"):
+                return x.rstrip("/")
+        for x in v.values():
+            found = walk(x, depth + 1)
+            if found:
+                return found
+        return None
+    return walk(account)
+
+
+def _account_details(account_id: str) -> Dict:
+    try:
+        r = requests.get(
+            f"https://backend.composio.dev/api/v3.1/connected_accounts/{account_id}",
+            headers={"x-api-key": os.environ.get("COMPOSIO_API_KEY", "")},
+            timeout=30,
+        )
+        return r.json() if r.status_code < 400 else {}
+    except Exception:
+        return {}
+
+
+def _join_base(base: str, path: str) -> str:
+    """'https://www.zohoapis.in/books' + '/books/v3/invoices' -> 'https://www.zohoapis.in/books/v3/invoices'
+    (the app's documented path, with the part the base already has merged)."""
+    from urllib.parse import urlparse
+    base_path = urlparse(base).path.rstrip("/")
+    if base_path and (path == base_path or path.startswith(base_path + "/")):
+        path = path[len(base_path):]
+    return base + (path if path.startswith("/") else "/" + path)
 
 
 def _connected_account_id(toolkit: str) -> str:
@@ -402,6 +444,7 @@ def _connected_account_id(toolkit: str) -> str:
             raise PermissionError(f"{toolkit} is not connected. Connected toolkits: {', '.join(sorted(s for s in slugs if s)) or 'none'}.")
         items = [{"id": match}]
     _CONNECTED_ACCOUNTS[toolkit] = items[0]["id"]
+    _CONNECTION_BASES[toolkit] = _base_url_of(items[0]) or _base_url_of(_account_details(items[0]["id"]))
     return items[0]["id"]
 
 
@@ -472,6 +515,10 @@ def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Di
             raise APIError(status, json.dumps(result, default=str)[:800], f"composio_proxy:{label}")
         return result
 
+    was_relative = not endpoint.startswith("http")
+    base = _CONNECTION_BASES.get(toolkit.lower())
+    if base and was_relative:
+        endpoint = _join_base(base, endpoint)
     try:
         result = send(endpoint)
     except APIError as e:
@@ -481,8 +528,8 @@ def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Di
         if not retry and method not in ("GET", "HEAD"):
             _record_write_failure(label, e)
         if not retry:
-            if e.status_code == 404 and not endpoint.startswith("http"):
-                raise APIError(404, f"{e} — paths are relative to the app's API base, which already includes its version (e.g. '/invoices', not '/books/v3/invoices')", f"composio_proxy:{label}")
+            if e.status_code == 404 and was_relative:
+                raise APIError(404, f"{e} — use the app's full documented REST path (e.g. Zoho Books '/books/v3/invoices'); it is joined with this connection's own base URL", f"composio_proxy:{label}")
             raise
         try:
             result = send(retry)

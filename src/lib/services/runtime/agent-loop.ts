@@ -1180,7 +1180,7 @@ RUNTIME RULES:
 - \`input_data["_pipeline"]\` holds every earlier agent's output keyed by role; if the review says data for some parts is missing, read those parts from there.
 - If the script found nothing, its output must say what it checked (repos/channels/inboxes, date range, items scanned) next to the zero.
 - This script may already have run partway (a retry after a partial failure): before creating a record, look it up by its natural key (name, number, title + date) and reuse it — never create a duplicate.
-- If the toolkit has no action for what the script needs (e.g. Zoho Books reports), call the app's REST API through the customer's connection: \`composio_proxy("<toolkit_slug>", "GET", "/path", params={...}, body=None)\` from agenticfactor._core — never approximate the data from other actions.
+- If the toolkit has no action for what the script needs (e.g. Zoho Books reports), call the app's REST API through the customer's connection: \`composio_proxy("<toolkit_slug>", "GET", "<full documented path, e.g. /books/v3/invoices>", params={...}, body=None)\` from agenticfactor._core — query parameters go in params, never in the path; never approximate the data from other actions.
 
 THE INPUT THIS SCRIPT RECEIVES (input_data, shortened — read fields by these exact names):
 ${describeInputShape(inputContext || '')}
