@@ -1151,6 +1151,19 @@ export async function executeAgent(
       );
       pythonCode = startingScript;
     } else {
+      // Composio actions that do what the script's raw API calls do — the fixer should prefer them.
+      let proxyAlternatives = '';
+      if (lastError && lastPythonCode.includes('composio_proxy(')) {
+        const { actionsForProxyCall } = await import('../composio-actions');
+        const calls = [...new Set([...lastPythonCode.matchAll(/composio_proxy\(\s*["']([A-Za-z0-9_]+)["']\s*,\s*["']([A-Za-z]+)["']\s*,\s*f?["']([^"']+)["']/g)]
+          .map(m => `${m[1].toLowerCase()}|${m[2].toUpperCase()}|${m[3]}`))].slice(0, 8);
+        const found = (await Promise.all(calls.map(async c => {
+          const [tk, method, path] = c.split('|');
+          const matches = await actionsForProxyCall(tk, method, path).catch(() => [] as string[]);
+          return matches.length ? `${method} ${path} → ${matches.join(' | ')}` : '';
+        }))).filter(Boolean);
+        if (found.length) proxyAlternatives = `\n\nCOMPOSIO ACTIONS FOR THE SCRIPT'S RAW API CALLS — when one fits, call it with composio_execute instead of composio_proxy (its parameters are checked against the app's schema):\n${found.join('\n')}\n`;
+      }
       // ── COMPOSIO-AWARE RETRY: if the failing script used composio_execute(),
       // regenerate with a targeted Composio correction prompt + live action schema
       // rather than the generic AF SDK prompt. This prevents retries from
@@ -1189,7 +1202,7 @@ RUNTIME RULES:
 
 THE INPUT THIS SCRIPT RECEIVES (input_data, shortened — read fields by these exact names):
 ${describeInputShape(inputContext || '')}
-${knownApiRules}
+${knownApiRules}${proxyAlternatives}
 
 ${lastResponseShapes ? `WHAT THE COMPOSIO CALLS RETURNED on the last attempt (field names and types — read values by exactly these names, never guess others):
 ${lastResponseShapes}
@@ -1289,7 +1302,7 @@ Available Tools/APIs: ${toolDescriptions || 'No tools available.'}
 
 INPUT CONTEXT FROM PREVIOUS STEPS (input_data, shortened — read fields by these exact names):
 ${describeInputShape(inputContext || '', 6000)}
-${knownApiRules}
+${knownApiRules}${proxyAlternatives}
 
 ${lastResponseShapes ? `WHAT THE COMPOSIO CALLS RETURNED on the last attempt (field names and types — read values by exactly these names, never guess others):
 ${lastResponseShapes}

@@ -23,6 +23,13 @@ export const maxDuration = 30;
 // Used when a mission doesn't specify its own orchestration.timeoutSeconds
 const DEFAULT_MAX_RUNTIME_SECONDS = 25 * 60;
 
+// The idle limit for crash detection. A blueprint's orchestration.timeoutSeconds (300 by default,
+// set freely by the architect) killed a Zoho Books run mid-work: a heavy agent retrying and
+// continuing its steps goes quiet for longer than five minutes. Never declare a crash sooner than this.
+function idleLimitSeconds(mission: { mission_json?: { orchestration?: { timeoutSeconds?: number } } }): number {
+  return Math.max(mission.mission_json?.orchestration?.timeoutSeconds || 0, DEFAULT_MAX_RUNTIME_SECONDS);
+}
+
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
   const cronSecret = process.env.CRON_SECRET;
@@ -47,7 +54,7 @@ export async function GET(request: NextRequest) {
 
   const now = Date.now();
   const overdue = (activeMissions || []).filter((mission) => {
-    const timeoutSeconds = mission.mission_json?.orchestration?.timeoutSeconds || DEFAULT_MAX_RUNTIME_SECONDS;
+    const timeoutSeconds = idleLimitSeconds(mission);
     const idleMs = now - new Date(mission.updated_at).getTime();
     return idleMs > timeoutSeconds * 1000;
   });
@@ -74,7 +81,7 @@ export async function GET(request: NextRequest) {
       .in('run_id', runIds)
       .order('created_at', { ascending: false })
       .limit(1);
-    const timeoutSeconds = mission.mission_json?.orchestration?.timeoutSeconds || DEFAULT_MAX_RUNTIME_SECONDS;
+    const timeoutSeconds = idleLimitSeconds(mission);
     const lastActivity = Math.max(
       new Date(mission.updated_at).getTime(),
       latest?.[0] ? new Date(latest[0].created_at).getTime() : 0,
@@ -97,7 +104,7 @@ export async function GET(request: NextRequest) {
 
   for (const mission of stuckMissions) {
     try {
-      const timeoutSeconds = mission.mission_json?.orchestration?.timeoutSeconds || DEFAULT_MAX_RUNTIME_SECONDS;
+      const timeoutSeconds = idleLimitSeconds(mission);
       const report = {
         failedAt: 'Watchdog',
         errorType: 'timeout',

@@ -194,6 +194,33 @@ export function rankActions<T extends { slug: string; description?: string; name
 }
 
 /**
+ * Composio actions that do what a raw API call does — "POST /books/v3/vendorpayments" finds
+ * ZOHO_BOOKS_CREATE_VENDOR_PAYMENT. A rewritten script sent vendor payments through the raw API and
+ * failed ("Invalid value passed for JSONString") where the earlier script's Composio action worked.
+ */
+export async function actionsForProxyCall(toolkit: string, method: string, path: string, limit = 4): Promise<string[]> {
+  const apiKey = process.env.COMPOSIO_API_KEY;
+  if (!apiKey) return [];
+  const words = path.split('?')[0].split('/')
+    .filter(seg => seg && !/^v\d/i.test(seg) && !seg.startsWith('{') && !/^\d+$/.test(seg) && !/^(api|books|rest)$/i.test(seg))
+    .map(seg => seg.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/s$/, ''))
+    .filter(Boolean);
+  if (words.length === 0) return [];
+  const verb = ({ POST: 'create', PUT: 'update', PATCH: 'update', DELETE: 'delete', GET: 'list' } as Record<string, string>)[method.toUpperCase()] ?? '';
+  const actions = await fetchAllActionsForApp(AF_TO_COMPOSIO_APP[toolkit] ?? toolkit, apiKey);
+  return actions
+    .map(a => {
+      const compact = a.slug.toLowerCase().replace(/_/g, '');
+      const score = words.filter(w => compact.includes(w)).length * 2 + (verb && a.slug.toLowerCase().includes(verb) ? 1 : 0);
+      return { a, score };
+    })
+    .filter(x => x.score >= 2)
+    .sort((x, y) => y.score - x.score)
+    .slice(0, limit)
+    .map(x => formatActionCompact(x.a).trim());
+}
+
+/**
  * Searches every action of the given toolkits (all of them — mission chat's tool list only holds a
  * few per app, so it could not read Zoho Books' 265 actions) and lists the best matches.
  */
