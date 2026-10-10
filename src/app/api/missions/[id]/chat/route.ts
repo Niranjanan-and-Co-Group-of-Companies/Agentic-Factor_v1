@@ -16,11 +16,12 @@ export const maxDuration = 300; // 5-minute safety buffer for the first LLM stre
 // ── Streaming parser (for the first Vercel LLM call only) ─────────────────
 
 interface ContentBlock {
-  type: 'text' | 'tool_use';
+  type: string;
   text?: string;
   id?: string;
   name?: string;
   inputJson?: string;
+  raw?: Record<string, unknown>;
 }
 
 interface StreamResult {
@@ -59,7 +60,7 @@ async function parseAnthropicStream(
         const evt = JSON.parse(raw) as {
           type: string;
           index?: number;
-          content_block?: { type: string; id?: string; name?: string };
+          content_block?: { type: string; id?: string; name?: string; [k: string]: unknown };
           delta?: { type: string; text?: string; partial_json?: string; stop_reason?: string };
           usage?: { output_tokens?: number };
           message?: { usage?: { input_tokens?: number; output_tokens?: number } };
@@ -73,11 +74,16 @@ async function parseAnthropicStream(
           const cb = evt.content_block;
           if (cb.type === 'text') contentBlocks[idx] = { type: 'text', text: '' };
           else if (cb.type === 'tool_use') contentBlocks[idx] = { type: 'tool_use', id: cb.id, name: cb.name, inputJson: '' };
+          // Any other block (e.g. thinking from newer models) is kept as sent — it must go back unchanged
+          // on the next tool round. Dropping it left a gap that crashed on block.type.
+          else contentBlocks[idx] = { type: cb.type, raw: { ...cb } };
         }
         if (evt.type === 'content_block_delta' && evt.delta) {
           const idx = evt.index ?? contentBlocks.length - 1;
           const block = contentBlocks[idx];
           if (!block) continue;
+          if (block.raw && evt.delta.type === 'thinking_delta') block.raw.thinking = String(block.raw.thinking ?? '') + String((evt.delta as Record<string, unknown>).thinking ?? '');
+          if (block.raw && evt.delta.type === 'signature_delta') block.raw.signature = (evt.delta as Record<string, unknown>).signature;
           if (evt.delta.type === 'text_delta' && evt.delta.text && block.type === 'text') {
             block.text = (block.text ?? '') + evt.delta.text;
             fullText += evt.delta.text;
@@ -95,7 +101,7 @@ async function parseAnthropicStream(
     }
   }
 
-  return { textContent: fullText, contentBlocks, stopReason, inputTokens, outputTokens };
+  return { textContent: fullText, contentBlocks: contentBlocks.filter(Boolean), stopReason, inputTokens, outputTokens };
 }
 
 // Strips ALL <action>...</action> blocks from text — used server-side to
@@ -328,8 +334,9 @@ export async function POST(
 
         // Serialize contentBlocks for the Inngest event (parse inputJson → input)
         const firstAssistantContent = contentBlocks
-          .filter(b => (b.type === 'text' && b.text) || (b.type === 'tool_use' && b.id))
+          .filter(b => b.raw || (b.type === 'text' && b.text) || (b.type === 'tool_use' && b.id))
           .map(b => {
+            if (b.raw) return b.raw as unknown as { type: 'text'; text: string };
             if (b.type === 'text') return { type: 'text', text: b.text! };
             let input: Record<string, unknown> = {};
             try { input = JSON.parse(b.inputJson ?? '{}'); } catch { /* leave empty */ }
