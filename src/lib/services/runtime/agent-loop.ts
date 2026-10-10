@@ -889,6 +889,7 @@ export async function executeAgent(
   // repeating the same failures. Editing the blueprint changes the locked script and retires the draft.
   let lockedScript = agent.pythonScript ?? '';
   let startingScript = lockedScript;
+  let pendingFixError = '';
   try {
     const [{ data: missionRow }, { data: billingRow }] = await Promise.all([
       supabase.from('missions').select('mission_json, training_enabled, training_runs_completed').eq('id', missionId).single(),
@@ -910,22 +911,28 @@ export async function executeAgent(
     const dbAgent = ((missionRow?.mission_json?.agents ?? []) as any[]).find(a => a.id === agent.id);
     if (typeof dbAgent?.pythonScript === 'string' && dbAgent.pythonScript.trim()) lockedScript = dbAgent.pythonScript;
     startingScript = lockedScript;
-    const draft = dbAgent?.pythonScriptDraft as { code?: string; basedOn?: string } | undefined;
+    const draft = dbAgent?.pythonScriptDraft as { code?: string; basedOn?: string; pendingError?: string } | undefined;
     if (draft?.code && draft.basedOn === scriptHash(lockedScript)) {
       console.log(`[Agent ${agent.id}] Starting from the draft left by the last failed execution.`);
       startingScript = draft.code;
+      // The last pass ran out of time before it could fix this failure: fix first, don't re-run it.
+      if (draft.pendingError) pendingFixError = draft.pendingError;
     }
   } catch { /* non-fatal — falls back to 'Mission', training mode off, free plan */ }
 
   // Latest script that passed the syntax and Composio checks — saved as the draft on failure.
   let lastCheckedCode = '';
-  const saveDraft = async () => {
-    if (!lastCheckedCode || lastCheckedCode === startingScript) return;
+  const saveDraft = async (extra: { code?: string; pendingError?: string } = {}) => {
+    const code = extra.code ?? lastCheckedCode;
+    if (!code || (code === startingScript && !extra.pendingError)) return;
     try {
       const { data } = await supabase.from('missions').select('mission_json').eq('id', missionId).single();
       const node = (data?.mission_json?.agents ?? []).find((a: any) => a.id === agent.id);
       if (!node) return;
-      node.pythonScriptDraft = { code: lastCheckedCode, basedOn: scriptHash(node.pythonScript ?? '') };
+      node.pythonScriptDraft = {
+        code, basedOn: scriptHash(node.pythonScript ?? ''),
+        ...(extra.pendingError ? { pendingError: extra.pendingError.slice(0, 4000) } : {}),
+      };
       await supabase.from('missions').update({ mission_json: data!.mission_json }).eq('id', missionId);
     } catch (e) {
       console.warn(`[Agent ${agent.id}] Could not save script draft:`, (e as Error).message);
@@ -991,6 +998,12 @@ export async function executeAgent(
   let lastPythonCode = '';
   // Whether this agent's first script was read-only; a retry may not turn it into a writer.
   let firstScriptReadOnly: boolean | null = null;
+  if (pendingFixError) {
+    // Picks up where the last pass stopped: its failing script and error go straight to the fixer.
+    console.log(`[Agent ${agent.id}] The last pass ran out of time before fixing its failure — fixing it first.`);
+    lastError = pendingFixError;
+    lastPythonCode = startingScript;
+  }
 
   // Check if we are resuming an approved manual action
   const { data: existingAction } = await supabase
@@ -1103,7 +1116,10 @@ export async function executeAgent(
   // Phase 1 attempts must leave room for the critic and a full-length Phase 2 (~30s setup + script),
   // so each attempt's script timeout shrinks to the time left before that deadline.
   const loopStartedAt = Date.now();
-  const PHASE1_DEADLINE_MS = STEP_BUDGET_MS - SCRIPT_TIMEOUT_MS - 30_000;
+  // Leaves room for the review (~45s on the review model) and a full live run (~30s setup + script).
+  const CRITIC_BUDGET_MS = 45_000;
+  const FIXER_BUDGET_MS = 100_000;
+  const PHASE1_DEADLINE_MS = STEP_BUDGET_MS - SCRIPT_TIMEOUT_MS - 30_000 - CRITIC_BUDGET_MS;
   const SANDBOX_SETUP_MS = 15_000;
   const MIN_ATTEMPT_MS = 20_000;
   let attemptTimeoutMs = SCRIPT_TIMEOUT_MS;
@@ -1115,9 +1131,10 @@ export async function executeAgent(
 
   while (attempts < maxAttempts) {
     // Hard stop well inside the step even if fixes keep failing their static checks.
-    if (attempts > 0 && Date.now() - loopStartedAt > PHASE1_DEADLINE_MS) {
-      await saveDraft();
-      throw new Error(`Agent "${agent.role}" ran out of time after ${attempts} attempt(s). ${lastError}`);
+    if (attempts > 0 && Date.now() - loopStartedAt > STEP_BUDGET_MS - FIXER_BUDGET_MS - 10_000) {
+      // No time left to fix this failure here: save it so the next pass starts by fixing it.
+      await saveDraft(lastPythonCode && lastError ? { code: lastPythonCode, pendingError: lastError } : {});
+      throw new Error(`Agent "${agent.role}" ran out of time after ${attempts} attempt(s); its latest fix is saved and will run first next time. ${lastError}`);
     }
     attempts++;
     
@@ -1140,7 +1157,7 @@ export async function executeAgent(
     } else if (
       startingScript.trim() !== '' &&
       // A script that ran past its own time limit is deterministic (too much work), not transient.
-      (attempts === 1 || (attempts === 2 && isTransientError(lastError) && !/^Timeout \(\d+s\) in agent/.test(lastError)))
+      ((attempts === 1 && !pendingFixError) || (attempts === 2 && isTransientError(lastError) && !/^Timeout \(\d+s\) in agent/.test(lastError)))
     ) {
       // Attempt 1: always use the locked script from the blueprint.
       // Attempt 2: if the failure was transient (timeout, network, rate limit) retry the same
