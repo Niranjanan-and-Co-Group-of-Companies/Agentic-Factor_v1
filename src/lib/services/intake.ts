@@ -862,7 +862,8 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
   const { requestedToolkits, toolkitNotice, toolkitSlugs } = await import('./toolkit-resolver');
   const requested = await requestedToolkits(intent, tenantId).catch(() => []);
   const contextToolkits = [...new Set([...connectedProviders, ...toolkitSlugs(requested)])];
-  const composioActionsContext = `${await buildComposioActionsContext(contextToolkits).catch(() => '')}${toolkitNotice(requested, connectedProviders)}`;
+  const { lessonsFor } = await import('./toolkit-lessons');
+  const composioActionsContext = `${await buildComposioActionsContext(contextToolkits).catch(() => '')}${toolkitNotice(requested, connectedProviders)}${await lessonsFor(contextToolkits).catch(() => '')}`;
 
   // Extract facts in the background (fire-and-forget)
   extractAndSaveTenantMemory(intent, tenantId).catch(console.error);
@@ -1355,7 +1356,8 @@ ${SYSTEM_PROMPT}`;
   if (contextToolkits.length > 0) {
     try {
       const { buildComposioActionsContext } = await import('./composio-actions');
-      composioActionsContext = `${await buildComposioActionsContext(contextToolkits).catch(() => '')}${toolkitNotice(requested, connectedProviders)}`;
+      const { lessonsFor } = await import('./toolkit-lessons');
+      composioActionsContext = `${await buildComposioActionsContext(contextToolkits).catch(() => '')}${toolkitNotice(requested, connectedProviders)}${await lessonsFor(contextToolkits).catch(() => '')}`;
     } catch { /* non-fatal */ }
   }
 
@@ -1422,7 +1424,8 @@ export async function rewriteAgentScripts(
   let composioActionsContext = '';
   if (draft.contextToolkits.length > 0) {
     const { buildComposioActionsContext } = await import('./composio-actions');
-    composioActionsContext = await buildComposioActionsContext(draft.contextToolkits).catch(() => '');
+    const { lessonsFor } = await import('./toolkit-lessons');
+    composioActionsContext = `${await buildComposioActionsContext(draft.contextToolkits).catch(() => '')}${await lessonsFor(draft.contextToolkits).catch(() => '')}`;
   }
   // The other agents shortened: enough to see what flows in and out of the one being rewritten.
   const missionView = JSON.stringify({

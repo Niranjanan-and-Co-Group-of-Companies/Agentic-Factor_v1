@@ -1108,6 +1108,11 @@ export async function executeAgent(
   const MIN_ATTEMPT_MS = 20_000;
   let attemptTimeoutMs = SCRIPT_TIMEOUT_MS;
 
+  // API rules learned from earlier runs for the apps this agent's script calls.
+  const knownApiRules = await import('../toolkit-lessons')
+    .then(async ({ lessonsFor, toolkitsOf }) => lessonsFor(await toolkitsOf(startingScript || agent.pythonScript || '')))
+    .catch(() => '');
+
   while (attempts < maxAttempts) {
     // Hard stop well inside the step even if fixes keep failing their static checks.
     if (attempts > 0 && Date.now() - loopStartedAt > PHASE1_DEADLINE_MS) {
@@ -1184,6 +1189,7 @@ RUNTIME RULES:
 
 THE INPUT THIS SCRIPT RECEIVES (input_data, shortened — read fields by these exact names):
 ${describeInputShape(inputContext || '')}
+${knownApiRules}
 
 ${lastResponseShapes ? `WHAT THE COMPOSIO CALLS RETURNED on the last attempt (field names and types — read values by exactly these names, never guess others):
 ${lastResponseShapes}
@@ -1283,6 +1289,7 @@ Available Tools/APIs: ${toolDescriptions || 'No tools available.'}
 
 INPUT CONTEXT FROM PREVIOUS STEPS (input_data, shortened — read fields by these exact names):
 ${describeInputShape(inputContext || '', 6000)}
+${knownApiRules}
 
 ${lastResponseShapes ? `WHAT THE COMPOSIO CALLS RETURNED on the last attempt (field names and types — read values by exactly these names, never guess others):
 ${lastResponseShapes}
@@ -2165,6 +2172,12 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
           run_id: runId ?? null,
           payload: { missionId, output: finalOutputJSON },
         });
+
+        // Rules this success teaches about the apps' APIs, for every later agent (bounded, best-effort).
+        await Promise.race([
+          import('../toolkit-lessons').then(({ learnFromFix }) => learnFromFix({ tenantId, missionId, agentId: agent.id, workingCode: pythonCode, recentError: lastError })),
+          new Promise(resolve => setTimeout(resolve, 20_000)),
+        ]).catch(() => {});
 
         return { output: finalOutputJSON, finalCode: pythonCode, signal: detectedSignal };
 
