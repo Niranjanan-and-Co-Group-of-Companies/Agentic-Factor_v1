@@ -690,7 +690,8 @@ export function parseDeferredWrites(stderr: string): DeferredWrite[] {
       if (typeof w?.action === 'string') writes.push({ action: w.action, params: w.params });
     } catch { /* truncated line */ }
   }
-  return writes.slice(0, 20);
+  // Every write is kept: a cleanup's card listed its first 20 deletes and none of its invoice updates.
+  return writes.slice(0, 500);
 }
 
 /**
@@ -704,16 +705,22 @@ export function describeDeferredWrites(writes: DeferredWrite[]): string {
     const s = typeof v === 'string' ? v : JSON.stringify(v) ?? '';
     return s.length > 80 ? `${s.slice(0, 80)}…` : s;
   };
-  const lines = writes.slice(0, 8).map(w => {
+  const line = (w: DeferredWrite) => {
     const params = w.params && typeof w.params === 'object' && !Array.isArray(w.params)
       ? Object.entries(w.params as Record<string, unknown>)
         .filter(([, v]) => v !== null && v !== '' && !(typeof v === 'string' && v.length > 160))
         .map(([k, v]) => `${k}: ${fmt(v)}`).join(', ')
       : '';
     return `• ${w.action}${params ? ` — ${params}` : ''}`;
-  });
-  if (writes.length > 8) lines.push(`• …and ${writes.length - 8} more`);
-  return `Will run:\n${lines.join('\n')}`;
+  };
+  if (writes.length <= 8) return `Will run:\n${writes.map(line).join('\n')}`;
+  // Many calls: how many of each kind first, then a few of each — every kind of change stays visible.
+  const byAction = new Map<string, DeferredWrite[]>();
+  for (const w of writes) byAction.set(w.action, [...(byAction.get(w.action) ?? []), w]);
+  const perAction = Math.max(1, Math.floor(8 / byAction.size));
+  const shown = [...byAction.values()].flatMap(ws => ws.slice(0, perAction));
+  const counts = [...byAction].map(([action, ws]) => `${action} ×${ws.length}`).join(', ');
+  return `Will run ${writes.length} calls: ${counts}\n${shown.map(line).join('\n')}\n• …and ${writes.length - shown.length} more`;
 }
 
 /** The longest text a deferred call will write (email body, message, document) — exactly what gets sent. */

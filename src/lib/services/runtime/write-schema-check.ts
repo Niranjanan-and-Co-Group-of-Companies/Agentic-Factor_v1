@@ -40,7 +40,8 @@ export function schemaProblems(action: string, params: unknown, schema: ActionSc
 export async function checkDeferredWrites(writes: DeferredWrite[]): Promise<string[]> {
   const calls = writes.filter(w => /^[A-Z][A-Z0-9_]+$/.test(w.action));
   if (calls.length === 0) return [];
-  const toolkits = [...new Set((await Promise.all(calls.map(w => toolkitForAction(w.action)))).filter((t): t is string => !!t))];
+  const actions = [...new Set(calls.map(w => w.action))];
+  const toolkits = [...new Set((await Promise.all(actions.map(a => toolkitForAction(a)))).filter((t): t is string => !!t))];
   if (toolkits.length === 0) return [];
   const schemas = await getComposioActionSchemas(toolkits);
   const problems = calls.flatMap(w => {

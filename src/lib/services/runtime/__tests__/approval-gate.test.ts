@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { approvalPreview, classifyAgentActions, compactWrites, inferActionTarget, parseDeferredWrites, proxyWriteLabels, type ActionRisk } from '../agent-loop';
+import { approvalPreview, classifyAgentActions, compactWrites, describeDeferredWrites, inferActionTarget, parseDeferredWrites, proxyWriteLabels, type ActionRisk } from '../agent-loop';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -431,5 +431,22 @@ describe('composio_proxy calls', () => {
 
   it('lists proxy writes for the approval card', () => {
     expect(proxyWriteLabels(`composio_proxy("zoho_books", "GET", "/reports/x")\ncomposio_proxy('zoho_books', 'post', '/bills', body=b)`)).toEqual(['ZOHO_BOOKS POST /bills']);
+  });
+});
+
+describe('bulk writes on the approval card', () => {
+  const deletes = Array.from({ length: 35 }, (_, i) => ({ action: 'ZOHO_BOOKS_DELETE_EXPENSE', params: { expense_id: `e${i}` } }));
+  const sends = Array.from({ length: 5 }, (_, i) => ({ action: 'ZOHO_BOOKS_MARK_INVOICE_AS_SENT', params: { invoice_id: `i${i}` } }));
+
+  it('keeps every deferred write, not the first 20', () => {
+    const stderr = [...deletes, ...sends].map(w => `__AF_DEFERRED__:${JSON.stringify(w)}`).join('\n');
+    expect(parseDeferredWrites(stderr)).toHaveLength(40);
+  });
+
+  it('counts each kind of call and shows examples of every kind', () => {
+    const card = describeDeferredWrites([...deletes, ...sends]);
+    expect(card).toContain('Will run 40 calls: ZOHO_BOOKS_DELETE_EXPENSE ×35, ZOHO_BOOKS_MARK_INVOICE_AS_SENT ×5');
+    expect(card).toContain('invoice_id: i0');
+    expect(card).toContain('…and 32 more');
   });
 });
