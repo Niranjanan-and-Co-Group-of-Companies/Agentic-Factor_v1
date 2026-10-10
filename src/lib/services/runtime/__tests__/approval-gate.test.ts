@@ -413,6 +413,7 @@ describe('composio_proxy calls', () => {
     expect(classifyAgentActions(`composio_proxy("zoho_books", "POST", f"/invoices/{iid}/email", body={})`).writeRisk).toBe('write_irreversible');
     expect(classifyAgentActions(`composio_proxy("zoho_books", "DELETE", f"/invoices/{iid}")`).writeRisk).toBe('write_irreversible');
     expect(classifyAgentActions(`composio_proxy(tk, method, path)`).writeRisk).toBe('write_reversible');
+    expect(classifyAgentActions(`composio_proxy('zoho_books', 'POST', f'/invoices?organization_id={org_id}&send=false', body=b)`).writeRisk).toBe('write_reversible');
   });
 
   it('lists proxy writes for the approval card', () => {

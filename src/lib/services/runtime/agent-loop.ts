@@ -429,7 +429,8 @@ function classifyProxyCalls(code: string): ActionRisk[] {
   for (const m of code.matchAll(PROXY_CALL)) {
     literalCalls++;
     const method = m[2].toUpperCase();
-    const path = (m[3] ?? '').toLowerCase();
+    // The path only — a query like ?send=false says the call does NOT send.
+    const path = (m[3] ?? '').toLowerCase().split('?')[0];
     if (method === 'GET' || method === 'HEAD') risks.push('read');
     else if (method === 'DELETE' || PROXY_SEND_KEYWORDS.some(k => path.includes(k)) || COMMUNICATION_PROVIDERS.has(m[1].toLowerCase())) risks.push('write_irreversible');
     else risks.push('write_reversible');
