@@ -1675,6 +1675,15 @@ ${pythonCode}`;
           throw new Error(`E2B execution error: ${execution.error.name}: ${execution.error.value}\n${execution.error.traceback}`);
         }
 
+        // The writes this preview deferred, checked against Composio's own schemas before any runs for real.
+        if (deferredWrites.length > 0) {
+          const { checkDeferredWrites } = await import('./write-schema-check');
+          const problems = await checkDeferredWrites(deferredWrites).catch(() => [] as string[]);
+          if (problems.length > 0) {
+            throw new Error(`These writes don't match the app's API — fix them before anything runs:\n${problems.slice(0, 8).join('\n')}`);
+          }
+        }
+
         if (stderr && !stdout) {
           console.warn(`[Agent ${agent.id} stderr]:`, stderr);
         }
