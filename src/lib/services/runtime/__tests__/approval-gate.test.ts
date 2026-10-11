@@ -373,10 +373,10 @@ describe('approvalPreview with freely named content fields', () => {
 });
 
 describe('isComposioRead — write words used as nouns', () => {
-  it.each(['NOTION_FETCH_ALL_BLOCK_CONTENTS', 'NOTION_FETCH_BLOCK_CONTENTS', 'GITHUB_GET_A_WORKFLOW_RUN', 'NOTION_BLOCK_CHILDREN_LIST'])(
+  it.each(['NOTION_FETCH_ALL_BLOCK_CONTENTS', 'NOTION_FETCH_BLOCK_CONTENTS', 'GITHUB_GET_A_WORKFLOW_RUN', 'NOTION_BLOCK_CHILDREN_LIST', 'CANVA_RETRIEVE_DESIGN_IMPORT_JOB_STATUS', 'CANVA_GET_DESIGN_EXPORT_JOB_RESULT'])(
     '%s is a read', (slug) => { expect(classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps).toBe(false); });
 
-  it.each(['GITHUB_BLOCK_A_USER', 'NOTION_APPEND_BLOCK_CHILDREN', 'NOTION_DELETE_BLOCK', 'GITHUB_GET_OR_CREATE_LABEL', 'GITHUB_RERUN_A_WORKFLOW'])(
+  it.each(['GITHUB_BLOCK_A_USER', 'NOTION_APPEND_BLOCK_CHILDREN', 'NOTION_DELETE_BLOCK', 'GITHUB_GET_OR_CREATE_LABEL', 'GITHUB_RERUN_A_WORKFLOW', 'CANVA_CREATE_DESIGN_IMPORT_JOB', 'SLACK_SET_USER_STATUS', 'JENKINS_RUN_JOB'])(
     '%s still needs approval', (slug) => { expect(classifyAgentActions(`composio_execute("${slug}", {})`).hasWriteOps).toBe(true); });
 });
 

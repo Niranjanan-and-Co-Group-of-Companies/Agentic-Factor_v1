@@ -415,7 +415,7 @@ const COMPOSIO_WRITE_VERBS = new Set([
 
 // Write words that are nouns in context: Notion's "block", a workflow "run". Kept narrow — this
 // decides what needs approval — so only a following noun, or a determiner after a leading read verb.
-const COMPOSIO_NOUN_FOLLOWERS = new Set(['CONTENTS', 'CONTENT', 'CHILDREN', 'CHILD', 'ID', 'IDS', 'INFO', 'DETAILS', 'LOGS', 'HISTORY', 'ARTIFACTS', 'JOBS']);
+const COMPOSIO_NOUN_FOLLOWERS = new Set(['CONTENTS', 'CONTENT', 'CHILDREN', 'CHILD', 'ID', 'IDS', 'INFO', 'DETAILS', 'LOGS', 'HISTORY', 'ARTIFACTS', 'JOBS', 'JOB', 'STATUS', 'RESULT', 'RESULTS']);
 const COMPOSIO_DETERMINERS = new Set(['A', 'AN', 'THE', 'ALL', 'EACH', 'WORKFLOW']);
 export function isComposioRead(slug: string): boolean {
   const words = slug.toUpperCase().split('_').slice(1);

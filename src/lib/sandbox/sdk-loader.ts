@@ -150,7 +150,7 @@ _WRITE_VERBS = frozenset({
     'DECLINE', 'JOIN', 'LEAVE', 'KICK', 'BAN', 'RESTORE', 'RESET', 'REVOKE', 'GRANT', 'SYNC',
 })
 
-_NOUN_FOLLOWERS = frozenset({'CONTENTS', 'CONTENT', 'CHILDREN', 'CHILD', 'ID', 'IDS', 'INFO', 'DETAILS', 'LOGS', 'HISTORY', 'ARTIFACTS', 'JOBS'})
+_NOUN_FOLLOWERS = frozenset({'CONTENTS', 'CONTENT', 'CHILDREN', 'CHILD', 'ID', 'IDS', 'INFO', 'DETAILS', 'LOGS', 'HISTORY', 'ARTIFACTS', 'JOBS', 'JOB', 'STATUS', 'RESULT', 'RESULTS'})
 _DETERMINERS = frozenset({'A', 'AN', 'THE', 'ALL', 'EACH', 'WORKFLOW'})
 
 def _is_composio_read(action_name: str) -> bool:
