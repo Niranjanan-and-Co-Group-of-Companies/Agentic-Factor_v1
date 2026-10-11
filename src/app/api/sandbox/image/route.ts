@@ -12,8 +12,8 @@ import { generatePlatformImage, imageShape } from '@/lib/services/image-gen';
 // Body: { prompt: string, shape?: 'landscape' | 'square' | 'portrait', phase?: 'preview' | 'live' }
 // Returns { url, mime_type, model, credits }: a short-lived link the SDK downloads.
 //
-// The preview's image is kept, and the live run gets the same image back for the same request —
-// what the customer approved is what gets published, and it is paid for once.
+// The preview's image is kept, and the live run (and any retry in the same run) gets the same image
+// back for the same request — what the customer approved is what gets published, paid for once.
 // ============================================================
 
 export const maxDuration = 120;
@@ -45,8 +45,9 @@ export async function POST(request: NextRequest) {
 
   const supabase = createServiceClient();
 
-  // Live run: the preview's image for an identical request.
-  if (phase === 'live' && claims.runId) {
+  // An identical request earlier in this run (the preview, or a retry's preview) gets the same image:
+  // a deck whose script was retried six times generated its three images six times over.
+  if (claims.runId) {
     const { data: previews } = await supabase
       .from('events')
       .select('payload')
