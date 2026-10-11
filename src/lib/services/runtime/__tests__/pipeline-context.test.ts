@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { criticInputView, describeInputShape, withPipelineHistory } from '../pipeline-context';
+import { criticInputView, criticOutputView, describeInputShape, withPipelineHistory } from '../pipeline-context';
 
 describe('withPipelineHistory', () => {
   it('keeps the previous output on top and adds every earlier output by role', () => {
@@ -82,5 +82,30 @@ describe('describeInputShape', () => {
   it('handles empty and non-JSON input', () => {
     expect(describeInputShape('')).toContain('first agent');
     expect(describeInputShape('plain text')).toBe('plain text');
+  });
+});
+
+describe('criticOutputView', () => {
+  const invoices = Array.from({ length: 60 }, (_, i) => ({ invoice_id: `inv-${i}`, total: 1000 + i, notes: 'x'.repeat(400) }));
+
+  it('leaves a small output unchanged', () => {
+    const out = JSON.stringify({ status: 'sent', to: 'a@b.c' });
+    expect(criticOutputView(out)).toBe(out);
+  });
+
+  it('names passed-through fields and shortens long lists with their count', () => {
+    const input = JSON.stringify({ datasets: { invoices } });
+    const out = JSON.stringify({ datasets: { invoices }, drive_link: 'https://drive/x', sheets: { Invoices: 60 } });
+    const view = criticOutputView(out, input, 5_000);
+    expect(view).toContain('drive_link');
+    expect(view).toContain('Passed through unchanged from earlier agents, not repeated here: datasets');
+    expect(view).not.toContain('inv-0');
+  });
+
+  it('keeps the first items and the total of a long list it produced itself', () => {
+    const view = criticOutputView(JSON.stringify({ invoices }), '', 8_000);
+    expect(view).toContain('inv-0');
+    expect(view).toContain('(60 in total)');
+    expect(view.length).toBeLessThanOrEqual(8_000 + 200);
   });
 });

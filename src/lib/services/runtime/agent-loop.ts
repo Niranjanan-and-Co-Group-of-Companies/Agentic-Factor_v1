@@ -2,7 +2,7 @@ import { callLLM, generateEmbedding } from '../llm-router';
 import { createServiceClient } from '@/lib/supabase/server';
 import { Sandbox } from '@e2b/code-interpreter';
 import { robustJSONParse } from '@/lib/utils/json-parser';
-import { criticInputView, describeInputShape } from './pipeline-context';
+import { criticInputView, criticOutputView, describeInputShape } from './pipeline-context';
 import { applyScriptEdits, hasEditBlocks, EDIT_FORMAT, EDIT_MIN_CHARS } from './script-edits';
 import { createHash } from 'crypto';
 
@@ -2090,7 +2090,7 @@ INPUT THE AGENT RECEIVED (the previous agent's output, or the run's trigger data
 ${criticInputView(inputContext || '')}
 
 OUTPUT THE AGENT PRODUCED:
-${finalOutputJSON}
+${criticOutputView(finalOutputJSON, inputContext || '')}
 ${isFinalAgent && expectedOutputFormat ? `
 
 EXPECTED FINAL OUTPUT FORMAT:
@@ -2120,6 +2120,8 @@ PASS if:
 - The same holds for details public sources don't reveal (e.g. job postings that don't name the team): marking them "unknown" / "not specified" and working with what is available is correct. Fail only if the agent ignored data it had or made details up
 - For web research, judge the findings and how honestly they are reported, not the search process: a source that returned only listing or category pages, a different number of searches than planned, or fewer results than hoped are not failures${hasWriteOps ? `
 - (Preview run) the prepared content for the write action is right, even though the write itself shows as dry_run / placeholder / not executed` : ''}
+
+When the output shows "…N more items (N in total)" or names fields passed through from earlier agents, the list was shortened for you: judge from the items shown and the totals, and never fail an output because you cannot see every item.
 
 Be a real critic, not a rubber stamp — but don't be pedantic about minor formatting choices.
 
