@@ -183,6 +183,11 @@ export function translateAgentError(error: string, agentRole: string): string {
     : `${friendly}\nOriginal error: ${error.slice(0, 800)}`;
 }
 
+// A status code only where it is one ("HTTP 403", "status: 403", "403 Forbidden"): a bare number
+// matched a line number in a traceback and told a customer to reconnect an account over a cut-off AI reply.
+const httpStatus = (error: string, code: number, words: string) =>
+  new RegExp(`\\b(?:HTTP|status(?:_code)?|code|error)["']?\\s*[:=]?\\s*${code}\\b|\\b${code}\\s*(?:${words})|^\\[?[A-Z_]+\\]?\\s*${code}\\b`, 'im').test(error);
+
 function friendlyAgentError(error: string, agentRole: string): string {
   // The platform's web-search plan is used up — no script change can fix this, so say what it is.
   if (/tavily/i.test(error) && /\b432\b/.test(error)) {
@@ -197,7 +202,7 @@ function friendlyAgentError(error: string, agentRole: string): string {
   // LinkedIn-specific 403 — most common cause of failed social missions
   if (
     (error.toLowerCase().includes('linkedin') || error.includes('ugcPosts') || error.includes('linkedin.com')) &&
-    (error.includes('403') || error.toLowerCase().includes('forbidden'))
+    (httpStatus(error, 403, 'Forbidden|Client Error') || /\bforbidden\b/i.test(error))
   ) {
     return (
       `LinkedIn 403 Forbidden: Your LinkedIn Developer App needs "Share on LinkedIn" product approval. ` +
@@ -206,14 +211,14 @@ function friendlyAgentError(error: string, agentRole: string): string {
     );
   }
   // Generic 403
-  if (/\b403\b/.test(error) || error.toLowerCase().includes('forbidden')) {
+  if (httpStatus(error, 403, 'Forbidden|Client Error') || /\bforbidden\b/i.test(error)) {
     return (
       `Permission denied (403) in agent "${agentRole}": The OAuth token lacks the required scope. ` +
       `Go to the Connectors page and reconnect the account with the correct permissions.`
     );
   }
   // 401
-  if (/\b401\b/.test(error) || error.toLowerCase().includes('unauthorized')) {
+  if (httpStatus(error, 401, 'Unauthorized|Client Error') || /\bunauthorized\b/i.test(error)) {
     return (
       `Authentication failed (401) in agent "${agentRole}": The OAuth token has expired or been revoked. ` +
       `Go to the Connectors page and reconnect the account.`
@@ -221,7 +226,7 @@ function friendlyAgentError(error: string, agentRole: string): string {
   }
   // Rate limit
   if (
-    error.includes('429') ||
+    httpStatus(error, 429, 'Too Many Requests|Client Error') ||
     error.toLowerCase().includes('rate limit') ||
     error.toLowerCase().includes('too many requests')
   ) {

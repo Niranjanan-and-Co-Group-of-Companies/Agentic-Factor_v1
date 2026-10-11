@@ -23,3 +23,18 @@ describe('translateAgentError — provider quota', () => {
     expect(msg).toContain('web-search quota (Tavily) has been used up');
   });
 });
+
+describe('status codes are read only where they are status codes', () => {
+  it('does not call a traceback line number a permission error', () => {
+    const err = 'E2B execution error: RuntimeError: ask_ai output was cut off at max_tokens=350\nCell In[3], line 403\n    texts = ask_ai_batch(prompts)';
+    const out = translateAgentError(err, 'Copywriter');
+    expect(out).not.toContain('Permission denied');
+    expect(out).toContain('ask_ai output was cut off');
+  });
+
+  it('still recognises real 403, 401 and 429 replies', () => {
+    expect(translateAgentError('[composio_proxy:ZOHO_BOOKS GET /books/v3/reports] HTTP 403: {"message": "not authorized"}', 'X')).toContain('Permission denied (403)');
+    expect(translateAgentError('{"error": {"code": 401, "message": "Invalid Credentials"}}', 'X')).toContain('Authentication failed (401)');
+    expect(translateAgentError('[SLACK_SEND_MESSAGE] 429 Too Many Requests', 'X')).toContain('Rate limited (429)');
+  });
+});
