@@ -2025,14 +2025,12 @@ ${pythonCode}`;
             };
             for (const fname of tmpFiles) {
               try {
-                const fileContent = await sandbox.files.read(`/tmp/${fname}`);
+                // As bytes: the default text read, decoded as base64, turned every PNG/XLSX/PPTX into garbage.
+                const fileContent = await sandbox.files.read(`/tmp/${fname}`, { format: 'bytes' });
                 const ext = '.' + fname.split('.').pop()!.toLowerCase();
                 const ct = contentTypeMap[ext] || 'application/octet-stream';
                 const uploadPath = `${basePath}/${fname}`;
-                // fileContent can be string or Uint8Array; ensure Buffer
-                const buf = typeof fileContent === 'string'
-                  ? Buffer.from(fileContent, 'base64')
-                  : Buffer.from(fileContent);
+                const buf = Buffer.from(fileContent);
                 const { error: upErr } = await artifactSupabase.storage
                   .from(storageBucket)
                   .upload(uploadPath, buf, { contentType: ct, upsert: true });
