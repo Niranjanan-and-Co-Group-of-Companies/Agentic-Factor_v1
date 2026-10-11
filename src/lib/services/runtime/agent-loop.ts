@@ -29,6 +29,8 @@ const SANDBOX_LIFETIME_MS = SCRIPT_TIMEOUT_MS + 60_000;
 // An agent's attempts, critic review and live (Phase 2) execution all run inside one Inngest step,
 // i.e. one 300s serverless invocation; stay under it.
 const STEP_BUDGET_MS = 285_000;
+// The live run after an approval has its step to itself: sandbox setup plus this fits in the budget.
+const APPROVED_RUN_TIMEOUT_MS = 220_000;
 
 /** Create an E2B sandbox with automatic retry on transient infrastructure failures. */
 async function createSandboxWithRetry(timeoutMs: number, maxAttempts = 3): Promise<InstanceType<typeof Sandbox>> {
@@ -520,7 +522,8 @@ async function runRealSideEffects(
   sandboxEnvs: Record<string, string>,
   dryRunOutputJSON: string,
   agentId: string,
-  tenantId: string
+  tenantId: string,
+  timeoutMs: number = SCRIPT_TIMEOUT_MS,
 ): Promise<string> {
   let finalOutputJSON = dryRunOutputJSON;
   console.log(`[Agent ${agentId}] Phase 2: Executing real side effects...`);
@@ -534,7 +537,7 @@ async function runRealSideEffects(
     const finalEnvs = { ...sandboxEnvs };
     delete finalEnvs['AF_DRY_RUN'];
 
-    const finalSandbox = await createSandboxWithRetry(SANDBOX_LIFETIME_MS);
+    const finalSandbox = await createSandboxWithRetry(Math.max(SANDBOX_LIFETIME_MS, timeoutMs + 60_000));
 
     try {
       const phase2Pkgs = getRequiredPackages(pythonCode);
@@ -580,7 +583,7 @@ matplotlib.use('Agg')
 
 ${pythonCode}`.replace(/\x00/g, '');
 
-      const finalExec = await finalSandbox.runCode(finalWrapped, { envs: finalEnvs, timeoutMs: SCRIPT_TIMEOUT_MS });
+      const finalExec = await finalSandbox.runCode(finalWrapped, { envs: finalEnvs, timeoutMs });
       const finalStdout = finalExec.logs.stdout.join('\n').trim();
 
       if (finalExec.error) {
@@ -1126,10 +1129,29 @@ export async function executeAgent(
             console.log(`[Agent ${agent.id}] Approved action already executed — reusing its result.`);
             return { output: current.payload.realOutput, finalCode: approvedCode };
           }
+          // Not run a second time either way: some of its writes may already have happened.
+          const startedAt = Date.parse(current?.payload?.executedAt ?? '') || 0;
+          if (current?.payload?.realError || Date.now() - startedAt > STEP_BUDGET_MS + 30_000) {
+            throw new Error(
+              `The approved changes for "${agent.role}" stopped partway${current?.payload?.realError ? ` (${String(current.payload.realError).slice(0, 300)})` : ''}. ` +
+              `Some may already be done. Start a fresh run — the steps check what already exists before changing anything.`
+            );
+          }
           throw new Error(`The approved action for "${agent.role}" is already being executed by another run — not running it twice.`);
         }
 
-        const realOutput = await runRealSideEffects(approvedCode, resumeEnvs, existingAction.payload.output, agent.id, tenantId);
+        // This step does nothing but the live run, so it gets most of the step's time — a cleanup of
+        // 35 deletes and 5 updates passed its preview (writes deferred) but ran out of 90s for real.
+        let realOutput: string;
+        try {
+          realOutput = await runRealSideEffects(approvedCode, resumeEnvs, existingAction.payload.output, agent.id, tenantId, APPROVED_RUN_TIMEOUT_MS);
+        } catch (realErr) {
+          // Recorded so a retry of this step reports what happened instead of "already being executed".
+          await supabase.from('proposed_actions')
+            .update({ payload: { ...existingAction.payload, executedAt: new Date().toISOString(), realError: (realErr as Error).message.slice(0, 1000) } })
+            .eq('id', existingAction.id);
+          throw realErr;
+        }
         await supabase.from('proposed_actions')
           .update({ payload: { ...existingAction.payload, executedAt: new Date().toISOString(), realOutput } })
           .eq('id', existingAction.id);
