@@ -771,6 +771,91 @@ def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Di
     return _ComposioData(result) if isinstance(result, dict) else result
 
 
+
+# ── Files for Composio actions (attachments, uploads, imports) ─────────────
+_FILE_MARK = "__af_file__"
+
+
+def composio_file(path: str, mimetype: str = "") -> dict:
+    """A local file for a Composio action's file parameter, e.g.
+        composio_execute("CANVA_CREATE_DESIGN_IMPORT_JOB", {"title": t, "file": composio_file("/tmp/deck.pptx")})
+    composio_execute uploads it to Composio's file storage first and passes Composio's file reference
+    ({name, mimetype, s3key}) — never put base64 file content in params. A plain string path to an
+    existing local file (under /tmp or /home/user) is handled the same way. Kept in sync with CORE_FALLBACK."""
+    return {_FILE_MARK: path, "mimetype": mimetype}
+
+
+def _local_file(value):
+    if isinstance(value, dict) and _FILE_MARK in value:
+        return value[_FILE_MARK], value.get("mimetype") or ""
+    if isinstance(value, str) and value.startswith(("/tmp/", "/home/user/")) and len(value) < 500 and os.path.isfile(value):
+        return value, ""
+    return None
+
+
+def _with_files(params, handle):
+    """params with every local file in it (also inside lists, e.g. attachments) replaced by handle(path, mimetype)."""
+    def walk(v):
+        found = _local_file(v)
+        if found:
+            return handle(*found)
+        if isinstance(v, dict):
+            return {k: walk(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        return v
+    return walk(params)
+
+
+def _describe_file(path, mimetype=""):
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    return f"file {os.path.basename(path)} ({size} bytes{', ' + mimetype if mimetype else ''})"
+
+
+def _toolkit_of_action(action_name):
+    try:
+        r = requests.get(f"https://backend.composio.dev/api/v3.1/tools/{action_name}",
+                         headers={"x-api-key": os.environ.get("COMPOSIO_API_KEY", "")}, timeout=20)
+        slug = ((r.json() or {}).get("toolkit") or {}).get("slug") if r.status_code < 400 else None
+        if slug:
+            return slug
+    except Exception:
+        pass
+    return action_name.split("_")[0].lower()
+
+
+def _upload_for_action(action_name, path, mimetype=""):
+    """Uploads a local file to Composio's file storage for this action; returns the file reference."""
+    import hashlib
+    import mimetypes
+    with open(path, "rb") as f:
+        data = f.read()
+    mime = mimetype or mimetypes.guess_type(path)[0] or "application/octet-stream"
+    name = os.path.basename(path)
+    r = requests.post(
+        "https://backend.composio.dev/api/v3.1/files/upload/request",
+        headers={"x-api-key": os.environ.get("COMPOSIO_API_KEY", ""), "Content-Type": "application/json"},
+        json={"filename": name, "md5": hashlib.md5(data).hexdigest(), "mimetype": mime,
+              "tool_slug": action_name, "toolkit_slug": _toolkit_of_action(action_name)},
+        timeout=30,
+    )
+    if r.status_code >= 400:
+        raise APIError(r.status_code, f"Could not prepare the file upload: {r.text[:500]}", action_name)
+    info = r.json()
+    url = info.get("new_presigned_url") or info.get("newPresignedUrl") or info.get("presigned_url") or info.get("url")
+    if url and info.get("type") != "existing":
+        headers = {"Content-Type": mime}
+        if (info.get("metadata") or {}).get("storage_backend") == "azure_blob_storage":
+            headers["x-ms-blob-type"] = "BlockBlob"
+        put = requests.put(url, data=data, headers=headers, timeout=120)
+        if put.status_code >= 400:
+            raise APIError(put.status_code, f"File upload failed: {put.text[:300]}", action_name)
+    return {"name": name, "mimetype": mime, "s3key": info.get("key")}
+
+
 def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: Optional[Dict] = None) -> Dict:
     """
     Execute a Composio action for the current tenant entity.
@@ -792,7 +877,7 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
     if dry_run and not _is_composio_read(action_name):
         # Skip writes in DRY_RUN — reads still execute so downstream code gets real IDs/data
         sys.stderr.write(f"[DRY_RUN] Skipped composio_execute({action_name}) — write op deferred\n")
-        _record_deferred(action_name, params)
+        _record_deferred(action_name, _with_files(params, _describe_file))
         return _DeferredResult(dry_run_result or {"status": "ok", "dry_run": True, "action": action_name})
     # Reading back something a deferred write "created" (its id is the placeholder) can't hit the
     # real API — the resource doesn't exist yet — so answer it with a placeholder too.
@@ -810,6 +895,8 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
             "The tenant's Composio connection is not configured."
         )
 
+    # Local files become Composio file references (uploaded first), as Composio's own SDK does.
+    params = _with_files(params, lambda path, mime: _upload_for_action(action_name, path, mime))
     resp = requests.post(
         f"https://backend.composio.dev/api/v3.1/tools/execute/{action_name}",
         headers={"x-api-key": api_key, "Content-Type": "application/json"},
