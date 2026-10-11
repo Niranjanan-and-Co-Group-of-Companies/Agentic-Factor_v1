@@ -783,6 +783,11 @@ export const generateBlueprintBackground = inngest.createFunction(
         } else if (rawMsg.toLowerCase().includes('rate limit') || rawMsg.includes('429')) {
           userMsg = 'Too many requests right now — please wait a moment and try again.';
         }
+        else if (error?.name === 'ZodError' || /"code":\s*"invalid_type"|"code":\s*"too_small"/.test(rawMsg)) {
+          // A validation dump means nothing to a customer: say which parts were missing.
+          const fields = [...new Set([...rawMsg.matchAll(/"path":\s*\[\s*"([^"]+)"/g)].map(m => m[1]))];
+          userMsg = `The mission design came back incomplete${fields.length ? ` (missing: ${fields.join(', ')})` : ''}. Please try again.`;
+        }
         await updateJobStatus('failed', { error: userMsg });
       });
 

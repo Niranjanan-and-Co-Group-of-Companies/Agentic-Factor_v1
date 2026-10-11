@@ -27,6 +27,8 @@ interface LLMResponse {
   tokensUsed: number;
   inputTokens?: number;  // For token-based billing
   outputTokens?: number; // For token-based billing
+  /** The reply stopped at the output limit: it is incomplete. */
+  truncated?: boolean;
 }
 
 // ── Self-Healing Model Fallback Chains ──
@@ -426,12 +428,15 @@ async function callGeminiDirect(messages: LLMMessage[], temperature: number, jso
   }
 
   const data = await res.json();
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  // Every text part, skipping thought parts: the answer is not always part 0.
+  const content = ((data.candidates?.[0]?.content?.parts ?? []) as Array<{ text?: string; thought?: boolean }>)
+    .filter(p => typeof p.text === 'string' && !p.thought).map(p => p.text).join('');
   const inputTokens = data.usageMetadata?.promptTokenCount || 0;
   const outputTokens = data.usageMetadata?.candidatesTokenCount || 0;
   const tokensUsed = data.usageMetadata?.totalTokenCount || (inputTokens + outputTokens);
+  const truncated = data.candidates?.[0]?.finishReason === 'MAX_TOKENS';
 
-  return { content, provider: 'gemini', model, tokensUsed, inputTokens, outputTokens };
+  return { content, provider: 'gemini', model, tokensUsed, inputTokens, outputTokens, truncated };
 }
 
 // ── OpenAI Direct ──
@@ -452,7 +457,8 @@ async function callOpenAIDirect(messages: LLMMessage[], temperature: number, jso
   const completion = await openai.chat.completions.create({
     model: modelName,
     temperature,
-    max_tokens: maxTokens,
+    // GPT-4o-class models reject a limit above 16,384 output tokens.
+    max_tokens: Math.min(maxTokens, 16384),
     ...(jsonMode ? { response_format: { type: 'json_object' as const } } : {}),
     messages,
   });
@@ -464,6 +470,7 @@ async function callOpenAIDirect(messages: LLMMessage[], temperature: number, jso
     tokensUsed: completion.usage?.total_tokens || 0,
     inputTokens: completion.usage?.prompt_tokens || 0,
     outputTokens: completion.usage?.completion_tokens || 0,
+    truncated: completion.choices[0].finish_reason === 'length',
   };
 }
 
@@ -537,7 +544,7 @@ async function callAnthropicDirect(messages: LLMMessage[], temperature: number, 
     content = extractJsonFromResponse(content);
   }
 
-  return { content, provider: 'anthropic', model: modelName, tokensUsed, inputTokens, outputTokens };
+  return { content, provider: 'anthropic', model: modelName, tokensUsed, inputTokens, outputTokens, truncated: data.stop_reason === 'max_tokens' };
 }
 
 /**

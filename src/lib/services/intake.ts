@@ -966,10 +966,21 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
     content: `Generate a Mission JSON for the following intent:\n\n"${intent}"${fileContext}${memoryContext}${agentTemplateContext}${feedbackContext}${globalMemory}`,
   });
 
-  const llmResponse = await callLLM(
-    messages as any,
-    { temperature: 0.3, jsonMode: true, tier: 1, budgetContext: { tenantId, missionId: 'blueprint_generation' } }
-  );
+  const architectOptions = { temperature: 0.3, jsonMode: true, tier: 1 as const, maxTokens: 32000, budgetContext: { tenantId, missionId: 'blueprint_generation' } };
+  let llmResponse = await callLLM(messages as any, architectOptions);
+  // A blueprint cut off at the output limit loses its last sections (orchestration, checklist) and ends
+  // its last script mid-line; "repairing" that JSON only hid it — a pitch-deck mission failed with a
+  // schema dump. Ask once more for a shorter design.
+  if (llmResponse.truncated) {
+    console.warn('[intake] Blueprint reply hit the output limit — asking again for shorter scripts.');
+    llmResponse = await callLLM([
+      ...(messages as any),
+      { role: 'user', content: 'Your previous answer was cut off at the length limit. Answer again with the complete Mission JSON and keep every pythonScript short: generate long text (slide copy, emails, documents) at runtime with ask_ai / ask_ai_batch instead of writing it into the script, and loop over data instead of repeating code.' },
+    ], architectOptions);
+    if (llmResponse.truncated) {
+      throw new Error('This mission came out too large to design in one go. Try splitting the request into two smaller missions.');
+    }
+  }
 
   console.log(`[intake] LLM provider: ${llmResponse.provider}, tokens: ${llmResponse.tokensUsed}`);
 
@@ -1047,6 +1058,16 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
 
   // 3. Strip any PLACEHOLDER values that slipped past the system prompt
   rawJSON = sanitizePlaceholders(rawJSON) as Record<string, unknown>;
+
+  // 3.5 The two closing sections have safe defaults: a complete design that only left them out
+  // should not fail the whole build (a cut-off reply never gets here — it is retried above).
+  if (!rawJSON.orchestration || typeof rawJSON.orchestration !== 'object') {
+    rawJSON.orchestration = { pattern: 'sequential', timeoutSeconds: 300, edges: [] };
+  }
+  if (!Array.isArray(rawJSON.validationChecklist) || rawJSON.validationChecklist.length === 0) {
+    const roles = Array.isArray(rawJSON.agents) ? (rawJSON.agents as Array<{ role?: string }>).map(a => a?.role).filter(Boolean) : [];
+    rawJSON.validationChecklist = roles.length ? roles.map(r => `${r} completes its step with real data`) : ['Every step completes with real data'];
+  }
 
   // 4. Validate LLM output against schema
   const llmOutput = LLMOutputSchema.parse(rawJSON);
