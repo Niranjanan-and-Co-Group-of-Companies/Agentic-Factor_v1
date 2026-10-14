@@ -1981,10 +1981,12 @@ ${pythonCode}`;
         }
 
         // --- FILE OUTPUT EXTRACTION: Collect artifacts from E2B sandbox ---
-        const artifactUrls: { filename: string; url: string; contentType: string }[] = [];
+        // Private bucket; the link opens only for the owning workspace (see artifact-links).
+        const { ARTIFACT_BUCKET, artifactLink } = await import('../artifact-links');
+        const artifactUrls: { filename: string; url: string; path: string; contentType: string }[] = [];
         try {
           const artifactSupabase = createServiceClient();
-          const storageBucket = 'mission-artifacts';
+          const storageBucket = ARTIFACT_BUCKET;
           const basePath = `${tenantId}/${missionId}/${agent.id}`;
 
           // 1. Check execution.results for inline artifacts (e.g. matplotlib .png)
@@ -1999,10 +2001,7 @@ ${pythonCode}`;
                   .from(storageBucket)
                   .upload(uploadPath, buffer, { contentType: 'image/png', upsert: true });
                 if (!upErr) {
-                  const { data: { publicUrl } } = artifactSupabase.storage
-                    .from(storageBucket)
-                    .getPublicUrl(uploadPath);
-                  artifactUrls.push({ filename, url: publicUrl, contentType: 'image/png' });
+                  artifactUrls.push({ filename, url: artifactLink(uploadPath), path: uploadPath, contentType: 'image/png' });
                   console.log(`[Agent ${agent.id}] Uploaded inline artifact: ${filename}`);
                 } else {
                   console.warn(`[Agent ${agent.id}] Failed to upload inline artifact ${filename}:`, upErr.message);
@@ -2041,10 +2040,7 @@ ${pythonCode}`;
                   .from(storageBucket)
                   .upload(uploadPath, buf, { contentType: ct, upsert: true });
                 if (!upErr) {
-                  const { data: { publicUrl } } = artifactSupabase.storage
-                    .from(storageBucket)
-                    .getPublicUrl(uploadPath);
-                  artifactUrls.push({ filename: fname, url: publicUrl, contentType: ct });
+                  artifactUrls.push({ filename: fname, url: artifactLink(uploadPath), path: uploadPath, contentType: ct });
                   console.log(`[Agent ${agent.id}] Uploaded sandbox file: ${fname}`);
                 } else {
                   console.warn(`[Agent ${agent.id}] Failed to upload ${fname}:`, upErr.message);

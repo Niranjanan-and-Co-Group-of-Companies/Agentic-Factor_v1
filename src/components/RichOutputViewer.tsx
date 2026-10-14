@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { artifactHref } from "@/lib/services/artifact-links";
 
 // ============================================================
 // RichOutputViewer — Smart output renderer for mission results
@@ -19,6 +20,8 @@ interface Artifact {
   filename: string;
   url: string;
   contentType: string;
+  /** Same-origin link that downloads instead of opening (set when the output is read). */
+  downloadUrl?: string;
 }
 
 // ── Artifact type detection ──
@@ -136,7 +139,7 @@ function ArtifactGallery({ artifacts }: { artifacts: Artifact[] }) {
               />
               <div style={{ padding: "8px 12px", fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🖼️ {img.filename}</span>
-                <a href={img.url} download={img.filename} onClick={(e) => e.stopPropagation()} style={{ color: "var(--accent)", textDecoration: "none", fontSize: "0.7rem" }}>⬇</a>
+                <a href={img.downloadUrl ?? img.url} download={img.filename} onClick={(e) => e.stopPropagation()} style={{ color: "var(--accent)", textDecoration: "none", fontSize: "0.7rem" }}>⬇</a>
               </div>
             </div>
           ))}
@@ -153,7 +156,7 @@ function ArtifactGallery({ artifacts }: { artifacts: Artifact[] }) {
               </video>
               <div style={{ padding: "8px 12px", fontSize: "0.75rem", color: "var(--text-muted)" }}>
                 🎬 {vid.filename}
-                <a href={vid.url} download={vid.filename} style={{ marginLeft: 12, color: "var(--accent)", textDecoration: "none" }}>⬇ Download</a>
+                <a href={vid.downloadUrl ?? vid.url} download={vid.filename} style={{ marginLeft: 12, color: "var(--accent)", textDecoration: "none" }}>⬇ Download</a>
               </div>
             </div>
           ))}
@@ -172,7 +175,7 @@ function ArtifactGallery({ artifacts }: { artifacts: Artifact[] }) {
               />
               <div style={{ padding: "8px 12px", fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", justifyContent: "space-between" }}>
                 <span>📄 {pdf.filename}</span>
-                <a href={pdf.url} download={pdf.filename} style={{ color: "var(--accent)", textDecoration: "none" }}>⬇ Download PDF</a>
+                <a href={pdf.downloadUrl ?? pdf.url} download={pdf.filename} style={{ color: "var(--accent)", textDecoration: "none" }}>⬇ Download PDF</a>
               </div>
             </div>
           ))}
@@ -185,7 +188,7 @@ function ArtifactGallery({ artifacts }: { artifacts: Artifact[] }) {
           {[...spreadsheets, ...documents, ...others].map((file, i) => (
             <a
               key={i}
-              href={file.url}
+              href={file.downloadUrl ?? file.url}
               download={file.filename}
               style={{
                 display: "inline-flex",
@@ -295,7 +298,7 @@ function DataTable({ data }: { data: any[] }) {
                   }}
                 >
                   {typeof row[k] === "string" && isUrl(row[k]) ? (
-                    <a href={row[k]} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "underline" }}>
+                    <a href={artifactHref(row[k])} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "underline" }}>
                       {row[k].length > 50 ? row[k].substring(0, 50) + "..." : row[k]}
                     </a>
                   ) : typeof row[k] === "object" ? (
@@ -346,7 +349,7 @@ function SmartValue({ value, keyName }: { value: any; keyName?: string }) {
     // URL
     if (isUrl(value)) {
       return (
-        <a href={value} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "underline", wordBreak: "break-all" }}>
+        <a href={artifactHref(value)} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "underline", wordBreak: "break-all" }}>
           {value.length > 80 ? value.substring(0, 80) + "..." : value}
         </a>
       );
@@ -432,7 +435,7 @@ function SmartValue({ value, keyName }: { value: any; keyName?: string }) {
               }}
             >
               {typeof v === "string" && isUrl(v) ? (
-                <a href={v} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "underline" }}>{v}</a>
+                <a href={artifactHref(v)} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "underline" }}>{v}</a>
               ) : String(v)}
             </span>
           ))}
@@ -531,7 +534,7 @@ function ExportToolbar({ output, artifacts }: { output: string; artifacts: Artif
     // Download all artifacts
     artifacts.forEach((artifact) => {
       const a = document.createElement("a");
-      a.href = artifact.url;
+      a.href = artifact.downloadUrl ?? artifact.url;
       a.download = artifact.filename;
       a.target = "_blank";
       a.click();
@@ -579,7 +582,11 @@ export default function RichOutputViewer({ output }: { output: string }) {
     parsed = JSON.parse(output);
     isJSON = typeof parsed === "object" && parsed !== null;
     if (isJSON && parsed._artifacts) {
-      artifacts = parsed._artifacts;
+      // Files are private: links go through the app, which checks the workspace (old public
+      // storage links from earlier outputs are rewritten the same way).
+      artifacts = (parsed._artifacts as Artifact[]).map((a) => ({
+        ...a, url: artifactHref(a.url), downloadUrl: artifactHref(a.url, true),
+      }));
     }
   } catch {
     // Not JSON — render as text/markdown
