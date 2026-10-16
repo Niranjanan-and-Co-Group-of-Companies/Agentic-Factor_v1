@@ -1,3 +1,4 @@
+import Link from "next/link";
 import Logo from "@/components/brand/Logo";
 import ThemeToggle from "./ThemeToggle";
 import s from "./landing.module.css";
@@ -13,21 +14,21 @@ export default function SiteFooter() {
           </div>
           <div className={s.footerCol}>
             <h4>Product</h4>
-            <a href="/#how-it-works">How it works</a>
-            <a href="/#integrations">Integrations</a>
-            <a href="/#pricing">Pricing</a>
-            <a href="/dashboard">Command Center</a>
+            <Link href="/#how-it-works">How it works</Link>
+            <Link href="/#integrations">Integrations</Link>
+            <Link href="/#pricing">Pricing</Link>
+            <Link href="/dashboard">Command Center</Link>
           </div>
           <div className={s.footerCol}>
             <h4>Support</h4>
-            <a href="/contact">Contact us</a>
+            <Link href="/contact">Contact us</Link>
             <a href="mailto:hello@agenticfactor.io">hello@agenticfactor.io</a>
           </div>
           <div className={s.footerCol}>
             <h4>Legal</h4>
-            <a href="/terms">Terms &amp; Conditions</a>
-            <a href="/privacy">Privacy Policy</a>
-            <a href="/refund">Refund Policy</a>
+            <Link href="/terms">Terms &amp; Conditions</Link>
+            <Link href="/privacy">Privacy Policy</Link>
+            <Link href="/refund">Refund Policy</Link>
           </div>
         </div>
         <div className={s.footerBottom}>

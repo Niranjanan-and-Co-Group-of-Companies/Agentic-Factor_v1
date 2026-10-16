@@ -1,4 +1,6 @@
 // Brand marks for the landing page, imported by name so only these are bundled.
+import type { CSSProperties } from "react";
+import { LogoMark } from "@/components/brand/Logo";
 import {
   siGmail, siGooglesheets, siGoogledrive, siGooglecalendar, siGoogledocs, siGoogleslides, siGoogleforms, siGooglemeet, siGoogleanalytics,
   siYoutube, siHubspot, siZoho, siShopify, siRazorpay, siStripe, siQuickbooks, siXero, siNotion, siAirtable, siTrello, siAsana,
@@ -7,7 +9,8 @@ import {
   siIntercom, siZendesk, siPaypal, siWix, siWebflow, siPerplexity, siPosthog, siMixpanel, siConfluence, siBasecamp,
 } from "simple-icons";
 
-export interface BrandIcon { title: string; hex: string; path: string }
+/** A brand mark: an SVG path from simple-icons, or an image for brands it doesn't carry. */
+export interface BrandIcon { title: string; hex?: string; path?: string; src?: string }
 
 const pick = (i: { title: string; hex: string; path: string }): BrandIcon => ({ title: i.title, hex: i.hex, path: i.path });
 
@@ -25,14 +28,32 @@ export const BRAND = {
   telegram: pick(siTelegram), whatsapp: pick(siWhatsapp), intercom: pick(siIntercom), zendesk: pick(siZendesk),
   paypal: pick(siPaypal), wix: pick(siWix), webflow: pick(siWebflow), perplexity: pick(siPerplexity),
   posthog: pick(siPosthog), mixpanel: pick(siMixpanel), confluence: pick(siConfluence), basecamp: pick(siBasecamp),
+  // Not in simple-icons: the official mark from Composio's logo service.
+  canva: { title: "Canva", src: "https://logos.composio.dev/api/canva" },
 } satisfies Record<string, BrandIcon>;
 
 export type BrandKey = keyof typeof BRAND;
 
 export function BrandGlyph({ icon, size = 20, color }: { icon: BrandIcon; size?: number; color?: string }) {
+  if (icon.src) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={icon.src} alt={icon.title} width={size} height={size} style={{ display: "block", flexShrink: 0, objectFit: "contain" }} />;
+  }
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-label={icon.title} style={{ display: "block", flexShrink: 0 }}>
-      <path d={icon.path} fill={color ?? `#${icon.hex}`} />
+      <path d={icon.path} fill={color ?? `#${icon.hex ?? "1B1814"}`} />
     </svg>
+  );
+}
+
+// Brand tiles are always white, so the platform's own mark keeps its light-theme colours there.
+const MARK_ON_WHITE = { "--text-primary": "#1B1814", "--bg-primary": "#F7F3EC" } as CSSProperties;
+
+/** An agent's app in a plan row. "af" is a step the platform does itself (scoring, writing). */
+export function AppTile({ brand, className, size = 17 }: { brand: BrandKey | "af"; className?: string; size?: number }) {
+  return (
+    <span className={className} style={brand === "af" ? MARK_ON_WHITE : undefined}>
+      {brand === "af" ? <LogoMark size={size + 1} /> : <BrandGlyph icon={BRAND[brand]} size={size} />}
+    </span>
   );
 }
