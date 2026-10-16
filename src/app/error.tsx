@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 
+import Glyph from "@/components/ui/Glyph";
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => { console.error('[GlobalError]', error); }, [error]);
 
@@ -11,7 +12,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
       background: 'var(--bg-primary)', fontFamily: 'var(--font-sans)', padding: 24,
     }}>
       <div style={{ textAlign: 'center', maxWidth: 480 }}>
-        <div style={{ fontSize: '2.5rem', marginBottom: 16 }}>⚡</div>
+        <div style={{ fontSize: '2.5rem', marginBottom: 16 }}><Glyph e="⚡" /></div>
         <h1 style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>
           Something went wrong
         </h1>
@@ -23,7 +24,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
           <button
             onClick={reset}
             style={{
-              background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)',
+              background: 'var(--accent)', color: 'var(--on-accent)', border: 'none', borderRadius: 'var(--radius-md)',
               padding: '10px 24px', fontSize: '0.88rem', fontWeight: 600, cursor: 'pointer',
             }}
           >

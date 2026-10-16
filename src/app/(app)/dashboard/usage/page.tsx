@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 
+import Glyph from "@/components/ui/Glyph";
 // ============================================================
 // Usage Analytics Dashboard
 // Shows credit spend, run history, per-mission stats, and
@@ -217,7 +218,7 @@ export default function UsagePage() {
           <span><span style={{ color: "var(--emerald)" }}>■</span> Completed ({data?.runs.completed ?? 0})</span>
           <span><span style={{ color: "var(--rose)" }}>■</span> Failed ({data?.runs.failed ?? 0})</span>
           {Object.entries(data?.runs.byTrigger ?? {}).map(([trigger, count]) => (
-            <span key={trigger}>{TRIGGER_ICONS[trigger] ?? "▶️"} {trigger}: {count}</span>
+            <span key={trigger} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><Glyph e={TRIGGER_ICONS[trigger] ?? "▶️"} size={13} /> {trigger}: {count}</span>
           ))}
         </div>
       </div>
@@ -309,7 +310,7 @@ export default function UsagePage() {
               <div style={{ marginTop: 'var(--space-md)', padding: 'var(--space-sm) var(--space-md)',
                 background: 'color-mix(in srgb, var(--rose) 10%, transparent)', borderRadius: 'var(--radius-sm)',
                 fontSize: '0.85rem', color: 'var(--rose)' }}>
-                ⚠ Credits will run out in {daysUntilEmpty} day{daysUntilEmpty !== 1 ? 's' : ''}.{' '}
+                <Glyph e="⚠️" size={14} /> Credits will run out in {daysUntilEmpty} day{daysUntilEmpty !== 1 ? 's' : ''}.{' '}
                 <a href="/pricing" style={{ color: 'var(--rose)', textDecoration: 'underline' }}>Buy a top-up →</a>
               </div>
             )}

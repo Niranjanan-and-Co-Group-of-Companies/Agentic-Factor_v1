@@ -104,7 +104,7 @@ export default function GuidedTour({ steps, storageKey = "agentfactory_onboarded
             )}
           </mask>
         </defs>
-        <rect width="100%" height="100%" fill="rgba(0,0,0,0.75)" mask="url(#tour-mask)" />
+        <rect width="100%" height="100%" fill="var(--overlay)" mask="url(#tour-mask)" />
       </svg>
 
       {/* Spotlight border glow */}
@@ -116,8 +116,8 @@ export default function GuidedTour({ steps, storageKey = "agentfactory_onboarded
           width: spotlightRect.width + pad * 2,
           height: spotlightRect.height + pad * 2,
           borderRadius: 12,
-          border: "2px solid hsl(217, 91%, 60%)",
-          boxShadow: "0 0 24px hsla(217, 91%, 60%, 0.4)",
+          border: "2px solid var(--accent)",
+          boxShadow: "0 0 24px color-mix(in srgb, var(--accent) 40%, transparent)",
           pointerEvents: "none",
           transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
         }} />
@@ -128,36 +128,36 @@ export default function GuidedTour({ steps, storageKey = "agentfactory_onboarded
         position: "fixed",
         ...getTooltipStyle(),
         background: "hsl(222, 35%, 12%)",
-        border: "1px solid hsla(217, 91%, 60%, 0.3)",
+        border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
         borderRadius: 16,
         padding: "20px 24px",
         maxWidth: 340,
-        boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+        boxShadow: "0 12px 40px var(--overlay)",
         zIndex: 10000,
         animation: "slideIn 0.3s ease",
       }}>
         {/* Step counter */}
-        <div style={{ fontSize: "0.7rem", color: "hsl(215,15%,60%)", marginBottom: 8, fontWeight: 600, letterSpacing: 1 }}>
+        <div style={{ fontSize: "0.7rem", color: "var(--text-secondary)", marginBottom: 8, fontWeight: 600, letterSpacing: 1 }}>
           STEP {currentStep + 1} OF {steps.length}
         </div>
         <h3 style={{ fontSize: "1rem", fontWeight: 700, marginBottom: 6, color: "hsl(210,20%,92%)" }}>{step.title}</h3>
-        <p style={{ fontSize: "0.84rem", color: "hsl(215,15%,60%)", lineHeight: 1.6, marginBottom: 16 }}>{step.description}</p>
+        <p style={{ fontSize: "0.84rem", color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 16 }}>{step.description}</p>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <button
             onClick={handleSkip}
-            style={{ background: "none", border: "none", color: "hsl(215,15%,60%)", fontSize: "0.8rem", cursor: "pointer", padding: "6px 12px" }}
+            style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: "0.8rem", cursor: "pointer", padding: "6px 12px" }}
           >
             Skip Tutorial
           </button>
           <button
             onClick={handleNext}
             style={{
-              background: "linear-gradient(135deg, hsl(217,91%,60%), hsl(230,80%,55%))",
+              background: "linear-gradient(135deg, var(--accent), hsl(230,80%,55%))",
               color: "white", border: "none", padding: "8px 20px",
               borderRadius: 8, fontSize: "0.82rem", fontWeight: 600, cursor: "pointer",
             }}
           >
-            {currentStep < steps.length - 1 ? "Next →" : "Get Started! 🚀"}
+            {currentStep < steps.length - 1 ? "Next →" : "Get started"}
           </button>
         </div>
         {/* Step dots */}
@@ -165,7 +165,7 @@ export default function GuidedTour({ steps, storageKey = "agentfactory_onboarded
           {steps.map((_, i) => (
             <div key={i} style={{
               width: 8, height: 8, borderRadius: "50%",
-              background: i === currentStep ? "hsl(217,91%,60%)" : "hsla(215,20%,25%,0.5)",
+              background: i === currentStep ? "var(--accent)" : "hsla(215,20%,25%,0.5)",
               transition: "all 0.3s",
             }} />
           ))}

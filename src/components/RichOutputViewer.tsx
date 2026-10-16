@@ -3,6 +3,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { artifactHref } from "@/lib/services/artifact-links";
 
+import Glyph from "@/components/ui/Glyph";
 // ============================================================
 // RichOutputViewer — Smart output renderer for mission results
 //
@@ -109,7 +110,7 @@ function ArtifactGallery({ artifacts }: { artifacts: Artifact[] }) {
   return (
     <div style={{ marginBottom: "var(--space-lg)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "var(--space-md)" }}>
-        <span style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}>📎 Attachments</span>
+        <span style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}><Glyph e="📎" /> Attachments</span>
         <span className="badge badge-blue">{artifacts.length} file{artifacts.length !== 1 ? "s" : ""}</span>
       </div>
 
@@ -138,7 +139,7 @@ function ArtifactGallery({ artifacts }: { artifacts: Artifact[] }) {
                 loading="lazy"
               />
               <div style={{ padding: "8px 12px", fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🖼️ {img.filename}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><Glyph e="🖼️" /> {img.filename}</span>
                 <a href={img.downloadUrl ?? img.url} download={img.filename} onClick={(e) => e.stopPropagation()} style={{ color: "var(--accent)", textDecoration: "none", fontSize: "0.7rem" }}>⬇</a>
               </div>
             </div>
@@ -155,7 +156,7 @@ function ArtifactGallery({ artifacts }: { artifacts: Artifact[] }) {
                 <source src={vid.url} type={vid.contentType} />
               </video>
               <div style={{ padding: "8px 12px", fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                🎬 {vid.filename}
+                <Glyph e="🎬" size={14} /> {vid.filename}
                 <a href={vid.downloadUrl ?? vid.url} download={vid.filename} style={{ marginLeft: 12, color: "var(--accent)", textDecoration: "none" }}>⬇ Download</a>
               </div>
             </div>
@@ -174,7 +175,7 @@ function ArtifactGallery({ artifacts }: { artifacts: Artifact[] }) {
                 title={pdf.filename}
               />
               <div style={{ padding: "8px 12px", fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", justifyContent: "space-between" }}>
-                <span>📄 {pdf.filename}</span>
+                <span><Glyph e="📄" /> {pdf.filename}</span>
                 <a href={pdf.downloadUrl ?? pdf.url} download={pdf.filename} style={{ color: "var(--accent)", textDecoration: "none" }}>⬇ Download PDF</a>
               </div>
             </div>
@@ -207,7 +208,7 @@ function ArtifactGallery({ artifacts }: { artifacts: Artifact[] }) {
               onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.background = "hsla(var(--accent-hsl), 0.08)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--bg-card)"; }}
             >
-              {artifactIcon(file.contentType)} {file.filename}
+              <Glyph e={artifactIcon(file.contentType)} size={14} /> {file.filename}
               <span style={{ color: "var(--accent)", fontSize: "0.75rem" }}>⬇</span>
             </a>
           ))}
@@ -219,7 +220,7 @@ function ArtifactGallery({ artifacts }: { artifacts: Artifact[] }) {
         <div
           style={{
             position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-            background: "rgba(0,0,0,0.85)", zIndex: 9999,
+            background: "var(--overlay)", zIndex: 9999,
             display: "flex", alignItems: "center", justifyContent: "center",
             cursor: "zoom-out",
           }}
@@ -228,7 +229,7 @@ function ArtifactGallery({ artifacts }: { artifacts: Artifact[] }) {
           <img
             src={lightbox}
             alt="Full size"
-            style={{ maxWidth: "90vw", maxHeight: "90vh", borderRadius: "var(--radius-md)", boxShadow: "0 0 40px rgba(0,0,0,0.5)" }}
+            style={{ maxWidth: "90vw", maxHeight: "90vh", borderRadius: "var(--radius-md)", boxShadow: "0 0 40px var(--overlay)" }}
           />
           <button
             onClick={() => setLightbox(null)}
@@ -399,7 +400,7 @@ function SmartValue({ value, keyName }: { value: any; keyName?: string }) {
 
   // Boolean
   if (typeof value === "boolean") {
-    return <span style={{ color: value ? "var(--emerald)" : "var(--rose)" }}>{value ? "✅ Yes" : "❌ No"}</span>;
+    return <span style={{ color: value ? "var(--emerald)" : "var(--rose)" }}>{value ? "Yes" : "No"}</span>;
   }
 
   // Number
@@ -548,14 +549,14 @@ function ExportToolbar({ output, artifacts }: { output: string; artifacts: Artif
         onClick={handleCopyMarkdown}
         style={{ fontSize: "0.75rem", padding: "4px 10px" }}
       >
-        📋 Copy Raw
+        <Glyph e="📋" size={14} /> Copy raw
       </button>
       <button
         className="btn btn-ghost btn-sm"
         onClick={handleDownloadJSON}
         style={{ fontSize: "0.75rem", padding: "4px 10px" }}
       >
-        💾 Download JSON
+        <Glyph e="💾" size={14} /> Download JSON
       </button>
       {artifacts.length > 0 && (
         <button
@@ -563,7 +564,7 @@ function ExportToolbar({ output, artifacts }: { output: string; artifacts: Artif
           onClick={handleDownloadAll}
           style={{ fontSize: "0.75rem", padding: "4px 10px" }}
         >
-          📦 Download All Files ({artifacts.length})
+          <Glyph e="📦" size={14} /> Download all files ({artifacts.length})
         </button>
       )}
     </div>

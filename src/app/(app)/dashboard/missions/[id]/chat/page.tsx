@@ -8,6 +8,8 @@ import MissionsSidebar from '@/components/MissionsSidebar';
 import { renderMarkdown } from '@/lib/utils/render-markdown';
 import { sanitizeTitle } from '@/lib/utils/sanitize-title';
 
+import Glyph from "@/components/ui/Glyph";
+import { LogoMark } from "@/components/brand/Logo";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ChatSession {
@@ -100,8 +102,8 @@ interface ToolCard {
 function RunMonitorCard({ monitor }: { monitor: NonNullable<ChatMessage['runMonitor']> }) {
   const { agents, status, agentsDone, agentsTotal } = monitor;
   const isFinished = status === 'completed' || status === 'failed';
-  const headerColor = status === 'completed' ? 'hsla(152,69%,45%,1)'
-    : status === 'failed' ? '#ef4444'
+  const headerColor = status === 'completed' ? 'var(--emerald)'
+    : status === 'failed' ? 'var(--rose)'
     : 'var(--accent)';
   const headerIcon = status === 'completed' ? '✅' : status === 'failed' ? '❌' : '🚀';
   const headerLabel = status === 'completed' ? 'Mission completed'
@@ -116,7 +118,7 @@ function RunMonitorCard({ monitor }: { monitor: NonNullable<ChatMessage['runMoni
         {!isFinished && (
           <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--border)', borderTopColor: headerColor, display: 'inline-block', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
         )}
-        {isFinished && <span style={{ fontSize: '0.9rem' }}>{headerIcon}</span>}
+        {isFinished && headerIcon && <span style={{ display: 'inline-flex' }}><Glyph e={headerIcon} size={15} /></span>}
         <span style={{ fontSize: '0.82rem', fontWeight: 700, color: headerColor }}>{headerLabel}</span>
         <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
           {agentsDone}/{agentsTotal} agents
@@ -128,7 +130,7 @@ function RunMonitorCard({ monitor }: { monitor: NonNullable<ChatMessage['runMoni
         <div style={{ height: 4, background: 'var(--border)', borderRadius: 4, overflow: 'hidden', marginBottom: 6 }}>
           <div style={{
             height: '100%', borderRadius: 4,
-            background: status === 'failed' ? '#ef4444' : headerColor,
+            background: status === 'failed' ? 'var(--rose)' : headerColor,
             width: `${Math.round((agentsDone / agentsTotal) * 100)}%`,
             transition: 'width 0.5s ease',
           }} />
@@ -138,8 +140,8 @@ function RunMonitorCard({ monitor }: { monitor: NonNullable<ChatMessage['runMoni
       {/* Per-agent rows */}
       {agents.map((agent, i) => {
         const agentStatus = agent.status;
-        const statusColor = agentStatus === 'done' ? 'hsla(152,69%,45%,1)'
-          : agentStatus === 'failed' ? '#ef4444'
+        const statusColor = agentStatus === 'done' ? 'var(--emerald)'
+          : agentStatus === 'failed' ? 'var(--rose)'
           : agentStatus === 'running' ? 'var(--accent)'
           : 'var(--text-muted)';
         const statusIcon = agentStatus === 'done' ? '✓'
@@ -152,7 +154,7 @@ function RunMonitorCard({ monitor }: { monitor: NonNullable<ChatMessage['runMoni
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '6px 10px', borderRadius: 8,
             background: agentStatus === 'queued' ? 'transparent' : 'var(--bg-secondary)',
-            border: `1px solid ${agentStatus === 'queued' ? 'transparent' : agentStatus === 'done' ? 'hsla(152,69%,45%,0.2)' : agentStatus === 'failed' ? 'rgba(239,68,68,0.2)' : 'var(--border)'}`,
+            border: `1px solid ${agentStatus === 'queued' ? 'transparent' : agentStatus === 'done' ? 'color-mix(in srgb, var(--emerald) 20%, transparent)' : agentStatus === 'failed' ? 'color-mix(in srgb, var(--rose) 20%, transparent)' : 'var(--border)'}`,
             opacity: agentStatus === 'queued' ? 0.5 : 1,
             transition: 'all 0.2s',
           }}>
@@ -170,10 +172,10 @@ function RunMonitorCard({ monitor }: { monitor: NonNullable<ChatMessage['runMoni
               <span style={{ fontSize: '0.7rem', color: 'var(--accent)', marginLeft: 'auto', fontWeight: 600 }}>Running</span>
             )}
             {agentStatus === 'done' && (
-              <span style={{ fontSize: '0.7rem', color: 'hsla(152,69%,45%,1)', marginLeft: 'auto' }}>Done</span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--emerald)', marginLeft: 'auto' }}>Done</span>
             )}
             {agentStatus === 'failed' && (
-              <span style={{ fontSize: '0.7rem', color: '#ef4444', marginLeft: 'auto' }}>Failed</span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--rose)', marginLeft: 'auto' }}>Failed</span>
             )}
           </div>
         );
@@ -195,8 +197,8 @@ const BLUEPRINT_STEP_LABELS: Record<string, string> = {
 function BlueprintUpdateCard({ update }: { update: NonNullable<ChatMessage['blueprintUpdate']> }) {
   const { steps, status, errorMessage, versionNumber } = update;
   const isFinished = status === 'completed' || status === 'error';
-  const headerColor = status === 'completed' ? 'hsla(152,69%,45%,1)'
-    : status === 'error' ? '#ef4444'
+  const headerColor = status === 'completed' ? 'var(--emerald)'
+    : status === 'error' ? 'var(--rose)'
     : 'var(--accent)';
   const headerLabel = status === 'completed' ? 'Mission updated'
     : status === 'error' ? 'Update failed'
@@ -209,7 +211,7 @@ function BlueprintUpdateCard({ update }: { update: NonNullable<ChatMessage['blue
         {!isFinished && (
           <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--border)', borderTopColor: headerColor, display: 'inline-block', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
         )}
-        {isFinished && <span style={{ fontSize: '0.9rem' }}>{headerIcon}</span>}
+        {isFinished && headerIcon && <span style={{ display: 'inline-flex' }}><Glyph e={headerIcon} size={15} /></span>}
         <span style={{ fontSize: '0.82rem', fontWeight: 700, color: headerColor }}>{headerLabel}</span>
         {status === 'completed' && versionNumber && (
           <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>v{versionNumber} saved</span>
@@ -217,13 +219,13 @@ function BlueprintUpdateCard({ update }: { update: NonNullable<ChatMessage['blue
       </div>
 
       {status === 'error' && errorMessage && (
-        <div style={{ fontSize: '0.78rem', color: '#ef4444', padding: '6px 10px', background: 'rgba(239,68,68,0.08)', borderRadius: 6, border: '1px solid rgba(239,68,68,0.2)' }}>
+        <div style={{ fontSize: '0.78rem', color: 'var(--rose)', padding: '6px 10px', background: 'color-mix(in srgb, var(--rose) 8%, transparent)', borderRadius: 6, border: '1px solid color-mix(in srgb, var(--rose) 20%, transparent)' }}>
           {errorMessage}
         </div>
       )}
 
       {steps.map((s) => {
-        const stepColor = s.status === 'done' ? 'hsla(152,69%,45%,1)'
+        const stepColor = s.status === 'done' ? 'var(--emerald)'
           : s.status === 'active' ? 'var(--accent)'
           : 'var(--text-muted)';
         return (
@@ -231,7 +233,7 @@ function BlueprintUpdateCard({ update }: { update: NonNullable<ChatMessage['blue
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '5px 10px', borderRadius: 8,
             background: s.status === 'pending' ? 'transparent' : 'var(--bg-secondary)',
-            border: `1px solid ${s.status === 'pending' ? 'transparent' : s.status === 'done' ? 'hsla(152,69%,45%,0.2)' : 'var(--border)'}`,
+            border: `1px solid ${s.status === 'pending' ? 'transparent' : s.status === 'done' ? 'color-mix(in srgb, var(--emerald) 20%, transparent)' : 'var(--border)'}`,
             opacity: s.status === 'pending' ? 0.45 : 1,
             transition: 'all 0.2s',
           }}>
@@ -265,14 +267,14 @@ function ToolCallCards({ cards }: { cards: ToolCard[] }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
       {cards.map(card => {
         const isExpanded = expanded === card.name;
-        const statusColor = card.status === 'done' ? 'hsla(152,69%,45%,1)'
-          : card.status === 'error' ? '#ef4444'
+        const statusColor = card.status === 'done' ? 'var(--emerald)'
+          : card.status === 'error' ? 'var(--rose)'
           : 'var(--accent)';
-        const borderColor = card.status === 'done' ? 'hsla(152,69%,45%,0.25)'
-          : card.status === 'error' ? 'rgba(239,68,68,0.25)'
+        const borderColor = card.status === 'done' ? 'color-mix(in srgb, var(--emerald) 25%, transparent)'
+          : card.status === 'error' ? 'color-mix(in srgb, var(--rose) 25%, transparent)'
           : 'var(--border)';
-        const leftStripe = card.status === 'done' ? 'hsla(152,69%,45%,0.7)'
-          : card.status === 'error' ? '#ef4444'
+        const leftStripe = card.status === 'done' ? 'color-mix(in srgb, var(--emerald) 70%, transparent)'
+          : card.status === 'error' ? 'var(--rose)'
           : 'var(--accent)';
 
         return (
@@ -301,7 +303,7 @@ function ToolCallCards({ cards }: { cards: ToolCard[] }) {
               ) : (
                 <span style={{
                   width: 16, height: 16, borderRadius: 3, flexShrink: 0,
-                  background: 'var(--accent)', color: '#fff',
+                  background: 'var(--accent)', color: 'var(--on-accent)',
                   fontSize: '0.6rem', fontWeight: 700,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
@@ -602,7 +604,7 @@ export default function MissionChatPage() {
       setConnectedInSession(prev => new Set([...prev, slug]));
       setConnectingSlug(null);
       setRequiredConnectors(prev => prev.map(c => c.service === slug ? { ...c, connected: true } : c));
-      showToast(`✅ ${slug} connected successfully!`);
+      showToast(`${slug} connected successfully!`);
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
@@ -758,7 +760,7 @@ export default function MissionChatPage() {
       });
       const data = await res.json() as { authUrl?: string; error?: string };
       if (!data.authUrl) {
-        showToast(`❌ ${data.error ?? 'Could not start connection'}`);
+        showToast(`${data.error ?? 'Could not start connection'}`);
         setConnectingSlug(null);
         return;
       }
@@ -770,7 +772,7 @@ export default function MissionChatPage() {
           setConnectingSlug(null);
           setConnectedInSession(prev => new Set([...prev, slug]));
           setRequiredConnectors(prev => prev.map(c => c.service === slug ? { ...c, connected: true } : c));
-          showToast(`✅ ${label} connected!`);
+          showToast(`${label} connected!`);
           // Persist connector to mission_json.permissions (non-fatal)
           fetch(`/api/missions/${missionId}/add-connector`, {
             method: 'POST',
@@ -781,7 +783,7 @@ export default function MissionChatPage() {
         }
       }, 600);
     } catch {
-      showToast('❌ Could not start connection');
+      showToast('Could not start connection');
       setConnectingSlug(null);
     }
   }, [missionId]);
@@ -821,7 +823,7 @@ export default function MissionChatPage() {
       setRequiredConnectors(prev => prev.map(c => c.service === slug ? { ...c, connected: true } : c));
       setInlineApiKeyModal(null);
       setInlineApiKeyValue('');
-      showToast(`✅ ${label} connected!`);
+      showToast(`${label} connected!`);
       // Register with Composio so action execution works (non-fatal)
       fetch('/api/composio/connect-apikey', {
         method: 'POST',
@@ -999,7 +1001,7 @@ export default function MissionChatPage() {
 
       if (!res.ok) {
         const err = await res.json() as { error?: string };
-        setMessages([...newMessages, { role: 'assistant', content: `⚠️ ${err.error ?? 'Something went wrong. Please try again.'}` }]);
+        setMessages([...newMessages, { role: 'assistant', content: `${err.error ?? 'Something went wrong. Please try again.'}` }]);
         setIsStreaming(false);
         return;
       }
@@ -1174,7 +1176,7 @@ export default function MissionChatPage() {
               finished = true;
               setMessages(prev => {
                 const updated = [...prev];
-                updated[updated.length - 1] = { role: 'assistant', content: `⚠️ ${evt.message ?? 'Error'}` };
+                updated[updated.length - 1] = { role: 'assistant', content: `${evt.message ?? 'Error'}` };
                 return updated;
               });
               setToolStatusLines([]);
@@ -1211,14 +1213,14 @@ export default function MissionChatPage() {
         if (!recovered) {
           setMessages(prev => {
             const updated = [...prev];
-            updated[updated.length - 1] = { role: 'assistant', content: '⚠️ The reply did not arrive. Please try again.' };
+            updated[updated.length - 1] = { role: 'assistant', content: 'The reply did not arrive. Please try again.' };
             return updated;
           });
         }
       }
     } catch (err) {
       console.error('[chat send]', err);
-      setMessages([...newMessages, { role: 'assistant', content: '⚠️ Connection error. Please check your internet and try again.' }]);
+      setMessages([...newMessages, { role: 'assistant', content: 'Connection error. Please check your internet and try again.' }]);
     }
 
     // Only clear streaming state if we're NOT waiting for Inngest to complete
@@ -1242,7 +1244,7 @@ export default function MissionChatPage() {
       });
       const verifyData = await verifyRes.json() as { verified: boolean; error?: string; accountInfo?: string };
       if (!verifyData.verified) {
-        showToast(`❌ ${verifyData.error ?? 'Invalid key'}`);
+        showToast(`${verifyData.error ?? 'Invalid key'}`);
         setSavingKey(false);
         return;
       }
@@ -1258,10 +1260,10 @@ export default function MissionChatPage() {
       setRequiredConnectors(prev => prev.map(c => c.service === detectedKey.provider ? { ...c, connected: true } : c));
       setDetectedKey(null);
       setInput(prev => prev.replace(detectedKey.key, '[key saved]'));
-      showToast(`✅ ${detectedKey.label} connected!${verifyData.accountInfo ? ' ' + verifyData.accountInfo : ''}`);
+      showToast(`${detectedKey.label} connected!${verifyData.accountInfo ? ' ' + verifyData.accountInfo : ''}`);
       await sendMessage(`I just connected ${detectedKey.label}. What should we update in the mission to use it?`);
     } catch {
-      showToast('❌ Could not save the key. Please try again.');
+      showToast('Could not save the key. Please try again.');
     }
     setSavingKey(false);
   };
@@ -1341,7 +1343,7 @@ export default function MissionChatPage() {
 
     try {
       if (action.type === 'run_now') {
-        showToast('🚀 Starting mission run…');
+        showToast('Starting mission run…');
         const endpoint = missionStatus === 'draft'
           ? `/api/missions/${missionId}/run`
           : `/api/missions/${missionId}/execute`;
@@ -1352,15 +1354,15 @@ export default function MissionChatPage() {
           if (runData.runId && runData.agents) {
             subscribeToRun(runData.runId, runData.agents);
           } else {
-            showToast('✅ Mission started!');
+            showToast('Mission started!');
           }
         } else {
           const err = await res.json().catch(() => ({})) as { error?: string; message?: string };
-          showToast(`❌ ${err.message ?? err.error ?? 'Could not start run.'}`);
+          showToast(`${err.message ?? err.error ?? 'Could not start run.'}`);
         }
 
       } else if (action.type === 'run_selective') {
-        showToast(`🚀 Starting selective run…`);
+        showToast(`Starting selective run…`);
         const endpoint = missionStatus === 'draft'
           ? `/api/missions/${missionId}/run`
           : `/api/missions/${missionId}/execute`;
@@ -1379,15 +1381,15 @@ export default function MissionChatPage() {
           if (runData.runId && runData.agents) {
             subscribeToRun(runData.runId, runData.agents);
           } else {
-            showToast('✅ Selective run started!');
+            showToast('Selective run started!');
           }
         } else {
           const err = await res.json().catch(() => ({})) as { error?: string; message?: string };
-          showToast(`❌ ${err.message ?? err.error ?? 'Could not start selective run.'}`);
+          showToast(`${err.message ?? err.error ?? 'Could not start selective run.'}`);
         }
 
       } else if (action.type === 'resume_run') {
-        showToast('▶ Resuming from failed point…');
+        showToast('Resuming from the failed step…');
         const res = await fetch(`/api/missions/${missionId}/execute`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1395,29 +1397,29 @@ export default function MissionChatPage() {
           body: JSON.stringify({ mode: 'resume' }),
         });
         if (res.ok) {
-          showToast('✅ Mission resuming!');
+          showToast('Mission resuming!');
           startRunPolling();
         } else {
           const err = await res.json() as { error?: string };
-          showToast(`❌ ${err.error ?? 'Could not resume.'}`);
+          showToast(`${err.error ?? 'Could not resume.'}`);
         }
 
       } else if (action.type === 'go_live') {
-        showToast('🚀 Going live…');
+        showToast('Going live…');
         const res = await fetch(`/api/missions/${missionId}/graduate`, {
           method: 'POST',
           credentials: 'include',
         });
         if (res.ok) {
-          showToast('✅ Mission is now live! Real actions will execute.');
+          showToast('Mission is now live! Real actions will execute.');
           setMissionStatus('active');
         } else {
           const err = await res.json() as { error?: string };
-          showToast(`❌ ${err.error ?? 'Could not go live.'}`);
+          showToast(`${err.error ?? 'Could not go live.'}`);
         }
 
       } else if (action.type === 'schedule' && action.cron) {
-        showToast('📅 Applying schedule…');
+        showToast('Applying schedule…');
         const res = await fetch(`/api/missions/${missionId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -1428,11 +1430,11 @@ export default function MissionChatPage() {
           }),
         });
         if (res.ok) {
-          showToast(`✅ Scheduled: ${action.label}`);
+          showToast(`Scheduled: ${action.label}`);
           setMissionStatus('paused');
         } else {
           const err = await res.json() as { error?: string };
-          showToast(`❌ ${err.error ?? 'Could not set schedule. Please try from the mission page.'}`);
+          showToast(`${err.error ?? 'Could not set schedule. Please try from the mission page.'}`);
         }
 
       } else if (action.type === 'webhook') {
@@ -1442,7 +1444,7 @@ export default function MissionChatPage() {
           body: JSON.stringify({ missionId, label: 'Created from mission chat' }),
         });
         if (!res.ok) {
-          showToast('❌ Could not create a webhook. Please try again.');
+          showToast('Could not create a webhook. Please try again.');
         } else {
           const hook = await res.json() as { triggerUrl: string; secret: string };
           const details = `POST ${hook.triggerUrl}\nHeader: x-webhook-secret: ${hook.secret}\nBody: any JSON — it is passed to the first agent.`;
@@ -1567,7 +1569,7 @@ export default function MissionChatPage() {
         }
 
       } else if (action.type === 'revert_version' && action.versionNumber) {
-        showToast(`⏪ Reverting to version ${action.versionNumber}…`);
+        showToast(`Reverting to version ${action.versionNumber}…`);
         const res = await fetch(`/api/missions/${missionId}/revert`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1577,18 +1579,18 @@ export default function MissionChatPage() {
         if (res.ok) {
           const data = await res.json() as { title?: string; versionNumber?: number };
           if (data.title) setMissionTitle(sanitizeTitle(data.title));
-          showToast(`✅ Reverted to version ${action.versionNumber}!`);
+          showToast(`Reverted to version ${action.versionNumber}!`);
           setMessages(prev => [
             ...prev,
             { role: 'assistant', content: `Done — mission restored to version ${action.versionNumber}. The current state was saved as a new version so you can revert that too if needed.`, ts: Date.now() },
           ]);
         } else {
           const err = await res.json().catch(() => ({})) as { error?: string };
-          showToast(`❌ ${err.error ?? 'Could not revert. Please try again.'}`);
+          showToast(`${err.error ?? 'Could not revert. Please try again.'}`);
         }
       }
     } catch {
-      showToast('❌ Something went wrong. Please try again.');
+      showToast('Something went wrong. Please try again.');
     }
     setApplyingAction(null);
   };
@@ -1692,7 +1694,7 @@ export default function MissionChatPage() {
             <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
               <span style={{
                 fontSize: '0.65rem', fontWeight: 600, padding: '2px 8px', borderRadius: 20,
-                background: missionStatus === 'active' ? 'hsla(152,69%,50%,0.12)' : missionStatus === 'draft' ? 'hsla(258,90%,66%,0.12)' : 'var(--bg-card)',
+                background: missionStatus === 'active' ? 'color-mix(in srgb, var(--emerald) 12%, transparent)' : missionStatus === 'draft' ? 'color-mix(in srgb, var(--purple) 12%, transparent)' : 'var(--bg-card)',
                 color: missionStatus === 'active' ? 'var(--emerald)' : missionStatus === 'draft' ? 'var(--purple)' : 'var(--text-muted)',
                 border: '1px solid currentColor', opacity: 0.8,
               }}>
@@ -1707,13 +1709,13 @@ export default function MissionChatPage() {
                   : 'Start a run of this mission'}
                 className="btn btn-primary btn-sm"
                 style={{ fontSize: '0.78rem' }}>
-                {missionStatus === 'draft' ? '▶ Run' : '↺ Run again'}
+                {missionStatus === 'draft' ? 'Run' : 'Run again'}
               </button>
               <button
                 onClick={() => setShareOpen(v => !v)}
                 className="btn btn-ghost btn-sm"
                 style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: '0.85rem' }}>👥</span> Share
+                <span style={{ fontSize: '0.85rem' }}><Glyph e="👥" /></span> Share
               </button>
               <button onClick={() => router.push('/dashboard')}
                 className="btn btn-ghost btn-sm"
@@ -1761,7 +1763,7 @@ export default function MissionChatPage() {
                 </button>
               </div>
               {shareResult && (
-                <div style={{ fontSize: '0.8rem', marginBottom: 8, color: shareResult.type === 'success' ? 'var(--emerald)' : '#ef4444' }}>
+                <div style={{ fontSize: '0.8rem', marginBottom: 8, color: shareResult.type === 'success' ? 'var(--emerald)' : 'var(--rose)' }}>
                   {shareResult.type === 'success' ? '✓ ' : '✗ '}{shareResult.message}
                 </div>
               )}
@@ -1774,12 +1776,12 @@ export default function MissionChatPage() {
                       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.member_email}</span>
                       <span style={{ color: 'var(--text-muted)', textTransform: 'capitalize', flexShrink: 0 }}>{m.role}</span>
                       <span style={{ fontSize: '0.7rem', padding: '1px 6px', borderRadius: 10, flexShrink: 0,
-                        background: m.status === 'accepted' ? 'hsla(152,69%,50%,0.12)' : 'hsla(38,90%,55%,0.12)',
-                        color: m.status === 'accepted' ? 'var(--emerald)' : '#f59e0b' }}>
+                        background: m.status === 'accepted' ? 'color-mix(in srgb, var(--emerald) 12%, transparent)' : 'color-mix(in srgb, var(--amber) 12%, transparent)',
+                        color: m.status === 'accepted' ? 'var(--emerald)' : 'var(--amber)' }}>
                         {m.status === 'accepted' ? 'Active' : 'Pending'}
                       </span>
                       <button onClick={() => revokeMissionMember(m.id, m.member_email)}
-                        style={{ background: 'none', cursor: 'pointer', color: '#ef4444', fontSize: '0.75rem', padding: '2px 6px', borderRadius: 4, border: '1px solid #ef4444', flexShrink: 0 }}>
+                        style={{ background: 'none', cursor: 'pointer', color: 'var(--rose)', fontSize: '0.75rem', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--rose)', flexShrink: 0 }}>
                         Remove
                       </button>
                     </div>
@@ -1795,8 +1797,8 @@ export default function MissionChatPage() {
           {/* Live run ticker */}
           {liveRun && !liveRunDismissed && (
             <div style={{
-              background: liveRun.status === 'completed' ? 'hsla(152,69%,50%,0.1)' : liveRun.status === 'failed' ? 'hsla(0,80%,60%,0.1)' : 'hsla(258,90%,66%,0.1)',
-              borderBottom: `1px solid ${liveRun.status === 'completed' ? 'hsla(152,69%,50%,0.25)' : liveRun.status === 'failed' ? 'hsla(0,80%,60%,0.25)' : 'hsla(258,90%,66%,0.25)'}`,
+              background: liveRun.status === 'completed' ? 'color-mix(in srgb, var(--emerald) 10%, transparent)' : liveRun.status === 'failed' ? 'color-mix(in srgb, var(--rose) 10%, transparent)' : 'color-mix(in srgb, var(--purple) 10%, transparent)',
+              borderBottom: `1px solid ${liveRun.status === 'completed' ? 'color-mix(in srgb, var(--emerald) 25%, transparent)' : liveRun.status === 'failed' ? 'color-mix(in srgb, var(--rose) 25%, transparent)' : 'color-mix(in srgb, var(--purple) 25%, transparent)'}`,
               padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
             }}>
               {liveRun.status !== 'completed' && liveRun.status !== 'failed' ? (
@@ -1850,9 +1852,8 @@ export default function MissionChatPage() {
               {/* Welcome / empty state */}
               {messages.length === 0 && !proactiveAlert && (
                 <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/logo.png" alt="" style={{ height: 56, objectFit: 'contain', marginBottom: 16, display: 'inline-block' }} />
-                  <h2 style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>
+                  <div style={{ display: 'inline-flex', marginBottom: 20 }}><LogoMark size={44} /></div>
+                  <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '2.3rem', fontWeight: 400, lineHeight: 1.08, letterSpacing: '-0.01em', color: 'var(--text-primary)', marginBottom: 12 }}>
                     Your Mission Assistant
                   </h2>
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', lineHeight: 1.6, maxWidth: 420, margin: '0 auto 24px' }}>
@@ -1872,11 +1873,11 @@ export default function MissionChatPage() {
               {/* Proactive alert */}
               {proactiveAlert && messages.length === 0 && (
                 <div style={{
-                  background: 'hsla(38,92%,55%,0.08)', border: '1px solid hsla(38,92%,55%,0.25)',
+                  background: 'color-mix(in srgb, var(--amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 25%, transparent)',
                   borderRadius: 'var(--radius-md)', padding: '14px 18px',
                   display: 'flex', gap: 12, alignItems: 'flex-start',
                 }}>
-                  <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>⚡</span>
+                  <span style={{ fontSize: '1.1rem', flexShrink: 0 }}><Glyph e="⚡" /></span>
                   <div>
                     <div style={{ fontSize: '0.78rem', color: 'var(--amber)', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Heads up</div>
                     <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>{proactiveAlert}</div>
@@ -1889,11 +1890,11 @@ export default function MissionChatPage() {
               {requiredConnectors.length > 0 && !allConnected && (
                 <div style={{
                   background: 'var(--bg-secondary)',
-                  border: `1px solid ${hasUnconnected ? 'hsla(38,92%,55%,0.3)' : 'hsla(152,69%,50%,0.3)'}`,
+                  border: `1px solid ${hasUnconnected ? 'color-mix(in srgb, var(--amber) 30%, transparent)' : 'color-mix(in srgb, var(--emerald) 30%, transparent)'}`,
                   borderRadius: 'var(--radius-md)', padding: '16px',
                 }}>
                   <div style={{ fontSize: '0.75rem', fontWeight: 700, color: hasUnconnected ? 'var(--amber)' : 'var(--emerald)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>🔌</span>
+                    <span><Glyph e="🔌" /></span>
                     <span>Required Connections</span>
                     {hasUnconnected && <span style={{ fontWeight: 400, color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>— connect these before running</span>}
                   </div>
@@ -1907,7 +1908,7 @@ export default function MissionChatPage() {
                           display: 'flex', alignItems: 'center', gap: 10,
                           padding: '10px 12px',
                           background: 'var(--bg-card)',
-                          border: `1px solid ${isConnected ? 'hsla(152,69%,50%,0.2)' : 'var(--border)'}`,
+                          border: `1px solid ${isConnected ? 'color-mix(in srgb, var(--emerald) 20%, transparent)' : 'var(--border)'}`,
                           borderRadius: 'var(--radius-sm)',
                         }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
@@ -1919,8 +1920,8 @@ export default function MissionChatPage() {
                           {isConnected ? (
                             <span style={{
                               fontSize: '0.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 12,
-                              background: 'hsla(152,69%,50%,0.1)', color: 'var(--emerald)',
-                              border: '1px solid hsla(152,69%,50%,0.2)', whiteSpace: 'nowrap', flexShrink: 0,
+                              background: 'color-mix(in srgb, var(--emerald) 10%, transparent)', color: 'var(--emerald)',
+                              border: '1px solid color-mix(in srgb, var(--emerald) 20%, transparent)', whiteSpace: 'nowrap', flexShrink: 0,
                             }}>
                               ✓ Connected
                             </span>
@@ -1966,7 +1967,7 @@ export default function MissionChatPage() {
                   }}>
                     {msg.role === 'user' ? 'You' : (
                       /* eslint-disable-next-line @next/next/no-img-element */
-                      <img src="/logo.png" alt="Assistant" style={{ width: 22, height: 22, objectFit: 'contain', borderRadius: 2 }} />
+                      <LogoMark size={22} title="Assistant" />
                     )}
                   </div>
 
@@ -2004,8 +2005,8 @@ export default function MissionChatPage() {
                       )}
                       {/* Inline agent error — shown below content so planning text is preserved */}
                       {msg.agentError && (
-                        <div style={{ marginTop: 10, display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                          <span style={{ fontSize: '0.9rem', flexShrink: 0 }}>⚠️</span>
+                        <div style={{ marginTop: 10, display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 12px', borderRadius: 8, background: 'color-mix(in srgb, var(--rose) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--rose) 20%, transparent)' }}>
+                          <span style={{ fontSize: '0.9rem', flexShrink: 0 }}><Glyph e="⚠️" /></span>
                           <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>{msg.agentError}</span>
                         </div>
                       )}
@@ -2030,7 +2031,7 @@ export default function MissionChatPage() {
                               transition: 'color 0.15s',
                             }}
                           >
-                            {playingMsgIdx === i ? '⏹' : '🔊'}
+                            <Glyph e={playingMsgIdx === i ? '⏹' : '🔊'} size={14} />
                           </button>
                         )}
                       </div>
@@ -2052,13 +2053,13 @@ export default function MissionChatPage() {
                       return (
                         <div style={{
                           marginTop: 10, background: 'var(--bg-secondary)',
-                          border: `1px solid ${isConnector ? 'hsla(152,69%,50%,0.3)' : 'var(--border-hover)'}`,
+                          border: `1px solid ${isConnector ? 'color-mix(in srgb, var(--emerald) 30%, transparent)' : 'var(--border-hover)'}`,
                           borderRadius: 'var(--radius-md)', padding: '14px 16px',
                         }}>
                           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 3 }}>
-                                {a.type === 'schedule' ? '📅' : a.type === 'run_now' ? '🚀' : a.type === 'resume_run' ? '▶' : a.type === 'go_live' ? '🟢' : a.type === 'suggest_connector' ? '🔌' : a.type === 'update_mission' ? '⚙️' : '🔗'}{' '}
+                                <Glyph e={a.type === 'schedule' ? '📅' : a.type === 'run_now' ? '🚀' : a.type === 'resume_run' ? '▶' : a.type === 'go_live' ? '🟢' : a.type === 'suggest_connector' ? '🔌' : a.type === 'update_mission' ? '⚙️' : '🔗'} size={14} style={{ color: 'var(--accent)' }} />{' '}
                                 {a.label}
                               </div>
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
@@ -2073,9 +2074,9 @@ export default function MissionChatPage() {
                                 <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
                                   <span style={{
                                     fontSize: '0.72rem', fontWeight: 600, padding: '2px 8px', borderRadius: 12,
-                                    background: isAlreadyConnected ? 'hsla(152,69%,50%,0.1)' : 'hsla(258,90%,66%,0.08)',
+                                    background: isAlreadyConnected ? 'color-mix(in srgb, var(--emerald) 10%, transparent)' : 'color-mix(in srgb, var(--purple) 8%, transparent)',
                                     color: isAlreadyConnected ? 'var(--emerald)' : 'var(--purple)',
-                                    border: `1px solid ${isAlreadyConnected ? 'hsla(152,69%,50%,0.2)' : 'hsla(258,90%,66%,0.2)'}`,
+                                    border: `1px solid ${isAlreadyConnected ? 'color-mix(in srgb, var(--emerald) 20%, transparent)' : 'color-mix(in srgb, var(--purple) 20%, transparent)'}`,
                                   }}>
                                     {isAlreadyConnected ? '✓ ' : ''}{connectorLabel}
                                   </span>
@@ -2164,12 +2165,12 @@ export default function MissionChatPage() {
               {/* API key banner */}
               {detectedKey && (
                 <div style={{
-                  background: 'hsla(152,69%,50%,0.08)', border: '1px solid hsla(152,69%,50%,0.25)',
+                  background: 'color-mix(in srgb, var(--emerald) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--emerald) 25%, transparent)',
                   borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 10,
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: '0.8rem',
                 }}>
                   <span style={{ color: 'var(--emerald)' }}>
-                    🔑 Looks like a <strong>{detectedKey.label}</strong> API key — save it to this project?
+                    <Glyph e="🔑" size={14} /> Looks like a <strong>{detectedKey.label}</strong> API key — save it to this project?
                   </span>
                   <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                     <button className="btn btn-ghost btn-sm" style={{ fontSize: '0.73rem' }} onClick={() => setDetectedKey(null)}>Dismiss</button>
@@ -2189,7 +2190,7 @@ export default function MissionChatPage() {
               {pendingFile && (
                 <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 20, padding: '4px 10px 4px 8px', fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: '100%' }}>
-                    <span>{pendingFile.uploading ? '⏳' : pendingFile.error ? '⚠️' : '📎'}</span>
+                    <span style={{ display: 'inline-flex' }}><Glyph e={pendingFile.uploading ? '⏳' : pendingFile.error ? '⚠️' : '📎'} size={14} /></span>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}>{pendingFile.name}</span>
                     {pendingFile.uploading && <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>uploading…</span>}
                     {pendingFile.error && <span style={{ color: 'var(--rose)', fontSize: '0.75rem' }}>{pendingFile.error}</span>}
@@ -2222,7 +2223,7 @@ export default function MissionChatPage() {
                   title="Attach a file"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0, fontSize: '1.1rem', lineHeight: 1, paddingBottom: 2, color: 'var(--text-muted)', opacity: isStreaming ? 0.4 : 1 }}
                 >
-                  📎
+                  <Glyph e="📎" size={16} />
                 </button>
 
                 <button onClick={toggleVoice} title={isRecording ? 'Stop recording' : 'Voice input'}
@@ -2232,7 +2233,7 @@ export default function MissionChatPage() {
                     color: isRecording ? 'var(--rose)' : 'var(--text-muted)',
                     animation: isRecording ? 'blink 1s step-end infinite' : 'none',
                   }}>
-                  🎤
+                  <Glyph e="🎤" size={16} />
                 </button>
 
                 <textarea
@@ -2267,7 +2268,7 @@ export default function MissionChatPage() {
               </div>
 
               <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: 8 }}>
-                Enter to send · Shift+Enter for new line · 📎 attach file · 🎤 voice
+                Enter to send · Shift+Enter for a new line · attach a file or use voice
               </div>
             </div>
           </div>
@@ -2277,7 +2278,7 @@ export default function MissionChatPage() {
       {/* ── Inline API Key Modal ──────────────────────────────── */}
       {inlineApiKeyModal && (
         <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9000,
+          position: 'fixed', inset: 0, background: 'var(--overlay)', zIndex: 9000,
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
         }}
           onClick={e => { if (e.target === e.currentTarget) { setInlineApiKeyModal(null); } }}
@@ -2311,7 +2312,7 @@ export default function MissionChatPage() {
               }}
             />
             {inlineApiKeyError && (
-              <div style={{ fontSize: '0.75rem', color: 'var(--rose)', marginTop: 6 }}>❌ {inlineApiKeyError}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--rose)', marginTop: 6 }}><Glyph e="❌" /> {inlineApiKeyError}</div>
             )}
             <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
               <button

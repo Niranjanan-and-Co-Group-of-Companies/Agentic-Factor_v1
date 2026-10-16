@@ -6,13 +6,13 @@ export const metadata = {
 export default function PrivacyPage() {
   return (
     <div className="welcome-section" style={{ maxWidth: 800 }}>
-      <h1 className="welcome-section-title" style={{ textAlign: "left", fontSize: "1.5rem", marginBottom: 32 }}>🔒 Privacy Policy</h1>
+      <h1 className="welcome-section-title" style={{ textAlign: "left", fontSize: "2.6rem", marginBottom: 32 }}>Privacy Policy</h1>
       <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 32 }}>Last updated: June 2026</p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 28, fontSize: "0.88rem", color: "var(--text-secondary)", lineHeight: 1.8 }}>
 
         {/* ── MANDATORY GOOGLE STATEMENT ── */}
-        <section style={{ background: "hsla(217,91%,60%,0.06)", border: "1px solid hsla(217,91%,60%,0.2)", borderRadius: 10, padding: "16px 20px" }}>
+        <section style={{ background: "color-mix(in srgb, var(--accent) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--accent) 20%, transparent)", borderRadius: 10, padding: "16px 20px" }}>
           <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>Google API Services — Limited Use Disclosure</h2>
           <p>
             AgenticFactor&apos;s use and transfer of information received from Google APIs adheres to the{" "}
@@ -27,7 +27,7 @@ export default function PrivacyPage() {
         </section>
 
         {/* ── AI TRAINING DISCLAIMER ── */}
-        <section style={{ background: "hsla(142,71%,45%,0.06)", border: "1px solid hsla(142,71%,45%,0.2)", borderRadius: 10, padding: "16px 20px" }}>
+        <section style={{ background: "color-mix(in srgb, var(--emerald) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--emerald) 20%, transparent)", borderRadius: 10, padding: "16px 20px" }}>
           <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>AI Training — Strict Prohibition</h2>
           <p>
             <strong>We never use your data to train, fine-tune, or develop AI models.</strong> Data fetched from Google (Gmail, Drive, Calendar, Sheets), Meta (Facebook, Instagram), LinkedIn, Twitter/X, Slack, or any other connected third-party service is used solely as execution context within the user&apos;s tenant-isolated sandboxed agents at the time of task execution. This data is never retained for, or transferred to, any AI model training pipeline — including Anthropic Claude, OpenAI, or Google Gemini. Third-party LLM providers receive only the minimum prompt context required to generate code or reasoning for the specific agent step; they do not receive raw personal data from your connected accounts unless you explicitly include it in your mission description.

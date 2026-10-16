@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 
+import Glyph from "@/components/ui/Glyph";
 interface Run {
   id: string;
   mission_id: string;
@@ -25,9 +26,9 @@ interface Mission {
 
 const STATUS_COLOR: Record<string, string> = {
   completed: 'var(--emerald)',
-  failed: '#ef4444',
-  active: '#f59e0b',
-  paused: '#6366f1',
+  failed: 'var(--rose)',
+  active: 'var(--amber)',
+  paused: 'var(--purple)',
 };
 
 function formatDuration(ms: number | null) {
@@ -141,7 +142,7 @@ export default function RunsPage() {
       {/* Empty state */}
       {runs.length === 0 && (
         <div style={{ textAlign: 'center', padding: '80px 20px', color: 'var(--text-muted)' }}>
-          <div style={{ fontSize: '3rem', marginBottom: 16 }}>📋</div>
+          <div style={{ fontSize: '3rem', marginBottom: 16 }}><Glyph e="📋" /></div>
           <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>No runs yet</h3>
           <p style={{ fontSize: '0.88rem', marginBottom: 24 }}>Runs appear here once you execute a mission.</p>
           <button className="btn btn-primary" onClick={() => router.push('/dashboard/missions')}>Go to Missions →</button>
@@ -186,7 +187,7 @@ export default function RunsPage() {
                     <td style={{ padding: '10px 14px', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{formatDuration(run.duration_ms)}</td>
                     <td style={{ padding: '10px 14px', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
                       {run.agents_done}/{run.agents_total}
-                      {run.agents_failed > 0 && <span style={{ color: '#ef4444', marginLeft: 4 }}>({run.agents_failed} failed)</span>}
+                      {run.agents_failed > 0 && <span style={{ color: 'var(--rose)', marginLeft: 4 }}>({run.agents_failed} failed)</span>}
                     </td>
                   </tr>
                 ))}

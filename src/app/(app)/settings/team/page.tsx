@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 
+import Glyph from "@/components/ui/Glyph";
 interface TeamMember {
   id: string;
   member_email: string;
@@ -24,7 +25,7 @@ const WORKSPACE_ROLE_LABELS: Record<string, string> = {
 };
 
 const ROLE_COLORS: Record<string, string> = {
-  admin: "#ef4444", collaborator: "#6366f1", editor: "#f59e0b", viewer: "#10b981",
+  admin: "var(--rose)", collaborator: "var(--purple)", editor: "var(--amber)", viewer: "var(--emerald)",
 };
 
 const PLAN_SEAT_LIMITS: Record<string, number> = {
@@ -129,7 +130,7 @@ export default function TeamPage() {
 
       {/* ── Seat usage bar ── */}
       {!loading && (
-        <div style={{ ...card, background: seatsExhausted ? "color-mix(in srgb, #ef4444 6%, transparent)" : "color-mix(in srgb, var(--accent) 6%, transparent)" }}>
+        <div style={{ ...card, background: seatsExhausted ? "color-mix(in srgb, var(--rose) 6%, transparent)" : "color-mix(in srgb, var(--accent) 6%, transparent)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>
               {noInvitesOnPlan
@@ -153,7 +154,7 @@ export default function TeamPage() {
             <div style={{ height: 6, background: "var(--border)", borderRadius: 6, overflow: "hidden" }}>
               <div style={{
                 height: "100%", borderRadius: 6,
-                background: seatsExhausted ? "#ef4444" : "var(--accent)",
+                background: seatsExhausted ? "var(--rose)" : "var(--accent)",
                 width: `${Math.min(100, Math.round((seatInfo.used / seatInfo.limit) * 100))}%`,
                 transition: "width 0.4s ease",
               }} />
@@ -229,7 +230,7 @@ export default function TeamPage() {
             </div>
             {inviteResult && (
               <div style={{ marginTop: "var(--space-sm)", fontSize: "0.85rem",
-                color: inviteResult.type === "success" ? "var(--emerald)" : "#ef4444" }}>
+                color: inviteResult.type === "success" ? "var(--emerald)" : "var(--rose)" }}>
                 {inviteResult.type === "success" ? "✓ " : "✗ "}{inviteResult.message}
               </div>
             )}
@@ -252,7 +253,7 @@ export default function TeamPage() {
           <div style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>Loading…</div>
         ) : members.length === 0 ? (
           <div style={{ textAlign: "center", padding: "var(--space-xl)", color: "var(--text-muted)" }}>
-            <div style={{ fontSize: "2rem", marginBottom: "var(--space-sm)" }}>👥</div>
+            <div style={{ fontSize: "2rem", marginBottom: "var(--space-sm)" }}><Glyph e="👥" /></div>
             No workspace members yet.{" "}
             {noInvitesOnPlan ? "Upgrade to Pro to invite your team." : "Invite someone above."}
           </div>
@@ -284,9 +285,9 @@ export default function TeamPage() {
 
                 <span style={{ fontSize: "0.7rem", borderRadius: 4, padding: "2px 7px", fontWeight: 600,
                   background: m.status === "accepted"
-                    ? "color-mix(in srgb, #10b981 15%, transparent)"
-                    : "color-mix(in srgb, #f59e0b 15%, transparent)",
-                  color: m.status === "accepted" ? "#10b981" : "#f59e0b" }}>
+                    ? "color-mix(in srgb, var(--emerald) 15%, transparent)"
+                    : "color-mix(in srgb, var(--amber) 15%, transparent)",
+                  color: m.status === "accepted" ? "var(--emerald)" : "var(--amber)" }}>
                   {m.status === "accepted" ? "Active" : "Pending"}
                 </span>
 
@@ -305,7 +306,7 @@ export default function TeamPage() {
                   onClick={() => revokeMember(m.id, m.member_email)}
                   disabled={revoking === m.id}
                   style={{ background: "none", border: "1px solid var(--border)", borderRadius: 4,
-                    color: "#ef4444", cursor: "pointer", padding: "4px 10px", fontSize: "0.79rem",
+                    color: "var(--rose)", cursor: "pointer", padding: "4px 10px", fontSize: "0.79rem",
                     opacity: revoking === m.id ? 0.5 : 1, flexShrink: 0 }}>
                   {revoking === m.id ? "…" : "Remove"}
                 </button>

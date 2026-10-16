@@ -1,8 +1,10 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
+import type { LucideIcon } from "lucide-react";
+import { MessagesSquare, Plug, ChartColumn, Tag, KeyRound, ScrollText, Users, LifeBuoy, Sun, Moon, UserRound, LogOut, PanelLeftClose, PanelLeftOpen, Plus, X } from "lucide-react";
+import Logo, { LogoMark } from "@/components/brand/Logo";
 import { createBrowserClient } from "@supabase/ssr";
 
 interface UserProfile { name: string; email: string; avatar: string | null; }
@@ -15,18 +17,18 @@ function getSupabase() {
 }
 
 // Core nav — lean and purposeful
-const NAV_ITEMS = [
-  { href: "/dashboard",       icon: "⌂",  label: "Command Center" },
-  { href: "/connectors",      icon: "🔌", label: "Connectors"     },
-  { href: "/dashboard/usage", icon: "📈", label: "Usage & Credits" },
-  { href: "/pricing",         icon: "🏷️", label: "Plans & Pricing" },
-  { href: "/permissions",     icon: "🔑", label: "Credentials"    },
-  { href: "/audit-logs",      icon: "📜", label: "Audit Logs"     },
+const NAV_ITEMS: { href: string; icon: LucideIcon; label: string }[] = [
+  { href: "/dashboard",       icon: MessagesSquare, label: "Command Center" },
+  { href: "/connectors",      icon: Plug,           label: "Connectors"     },
+  { href: "/dashboard/usage", icon: ChartColumn,    label: "Usage & Credits" },
+  { href: "/pricing",         icon: Tag,            label: "Plans & Pricing" },
+  { href: "/permissions",     icon: KeyRound,       label: "Credentials"    },
+  { href: "/audit-logs",      icon: ScrollText,     label: "Audit Logs"     },
 ];
 
-const BOTTOM_LINKS = [
-  { href: "/settings/team", icon: "👥", label: "Team"    },
-  { href: "/contact",       icon: "💬", label: "Support" },
+const BOTTOM_LINKS: { href: string; icon: LucideIcon; label: string }[] = [
+  { href: "/settings/team", icon: Users,    label: "Team"    },
+  { href: "/contact",       icon: LifeBuoy, label: "Support" },
 ];
 
 export default function Sidebar() {
@@ -37,7 +39,7 @@ export default function Sidebar() {
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed]  = useState(false);
-  const [isDark, setIsDark]        = useState(true);
+  const [isDark, setIsDark]        = useState(false);
 
   // Persist collapse state
   useEffect(() => {
@@ -56,19 +58,16 @@ export default function Sidebar() {
     });
   }, []);
 
-  // Theme
+  // Theme: the root layout sets data-theme before first paint (saved choice, else the system's).
   useEffect(() => {
-    const saved = localStorage.getItem("af-theme");
-    setIsDark(saved !== "light");
+    setIsDark(document.documentElement.getAttribute("data-theme") === "dark");
   }, []);
 
   const toggleTheme = () => {
     const next = isDark ? "light" : "dark";
     setIsDark(!isDark);
-    document.documentElement.setAttribute("data-theme", next === "light" ? "light" : "");
-    if (next === "light") document.documentElement.setAttribute("data-theme", "light");
-    else document.documentElement.removeAttribute("data-theme");
-    localStorage.setItem("af-theme", next);
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("af-theme", next); } catch { /* private mode */ }
   };
 
   // Close mobile drawer on route change
@@ -102,7 +101,7 @@ export default function Sidebar() {
     href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
 
   // ── Nav link (works in both collapsed and expanded) ──
-  const NavLink = ({ href, icon, label }: { href: string; icon: string; label: string }) => {
+  const NavLink = ({ href, icon: Icon, label }: { href: string; icon: LucideIcon; label: string }) => {
     const active = isActive(href);
     return (
       <Link
@@ -116,19 +115,22 @@ export default function Sidebar() {
           borderRadius: "var(--radius-sm)",
           textDecoration: "none",
           fontSize: "0.82rem",
-          fontWeight: active ? 600 : 400,
-          color: active ? "var(--accent)" : "var(--text-secondary)",
-          background: active ? "var(--accent-subtle)" : "transparent",
-          transition: "all 0.15s",
+          fontWeight: active ? 600 : 450,
+          color: active ? "var(--text-primary)" : "var(--text-secondary)",
+          background: active ? "var(--bg-card)" : "transparent",
+          boxShadow: active ? "var(--shadow-sm), inset 0 0 0 1px var(--border)" : "none",
+          transition: "background 0.15s, color 0.15s",
           whiteSpace: "nowrap",
           overflow: "hidden",
           minWidth: 0,
           width: "100%",
         }}
-        onMouseEnter={e => { if (!active) (e.currentTarget as HTMLAnchorElement).style.background = "var(--bg-card)"; }}
+        onMouseEnter={e => { if (!active) (e.currentTarget as HTMLAnchorElement).style.background = "var(--bg-glass)"; }}
         onMouseLeave={e => { if (!active) (e.currentTarget as HTMLAnchorElement).style.background = "transparent"; }}
       >
-        <span style={{ fontSize: "1rem", flexShrink: 0, lineHeight: 1, width: collapsed ? "100%" : "auto", textAlign: collapsed ? "center" : "left" }}>{icon}</span>
+        <span style={{ flexShrink: 0, lineHeight: 1, width: collapsed ? "100%" : "auto", display: "inline-flex", justifyContent: collapsed ? "center" : "flex-start", color: active ? "var(--accent)" : "inherit" }}>
+          <Icon size={17} strokeWidth={1.75} aria-hidden />
+        </span>
         {!collapsed && <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>}
       </Link>
     );
@@ -140,22 +142,23 @@ export default function Sidebar() {
       {/* Logo + collapse toggle */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: collapsed && !mobile ? "center" : "space-between", padding: collapsed && !mobile ? "10px 0" : "12px 16px 10px", borderBottom: "1px solid var(--border)", flexShrink: 0, minHeight: collapsed && !mobile ? 56 : 72 }}>
         {(!collapsed || mobile) && (
-          <Link href="/dashboard" style={{ display: "flex", alignItems: "center" }}>
-            <Image src="/logo.png" alt="Agentic Factor" width={160} height={44} style={{ objectFit: "contain", display: "block" }} />
+          <Link href="/dashboard" style={{ display: "flex", alignItems: "center", textDecoration: "none" }} aria-label="Agentic Factor — Command Center">
+            <Logo size={26} textSize="1.22rem" />
           </Link>
         )}
         {collapsed && !mobile && (
           <Link href="/dashboard" title="Command Center" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Image src="/logo.png" alt="AF" width={36} height={36} style={{ objectFit: "contain", display: "block", borderRadius: 6 }} />
+            <LogoMark size={30} title="Agentic Factor" />
           </Link>
         )}
         {!mobile && (
           <button
             onClick={toggleCollapse}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "0.9rem", lineHeight: 1, padding: "4px", borderRadius: "var(--radius-sm)", flexShrink: 0, display: "flex", alignItems: "center" }}
           >
-            {collapsed ? "›" : "‹"}
+            {collapsed ? <PanelLeftOpen size={16} strokeWidth={1.75} /> : <PanelLeftClose size={16} strokeWidth={1.75} />}
           </button>
         )}
       </div>
@@ -173,20 +176,21 @@ export default function Sidebar() {
         {!collapsed && (
           <button
             onClick={() => router.push("/dashboard?new=1")}
-            style={{ marginTop: 8, width: "100%", background: "var(--accent)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", padding: "8px 14px", fontSize: "0.8rem", fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8, transition: "opacity 0.15s" }}
-            onMouseEnter={e => (e.currentTarget.style.opacity = "0.88")}
-            onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+            style={{ marginTop: 8, width: "100%", background: "var(--btn-primary-bg)", color: "var(--btn-primary-fg)", border: "none", borderRadius: "var(--radius-sm)", padding: "8px 14px", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 8, transition: "background 0.15s", boxShadow: "var(--shadow-sm)" }}
+            onMouseEnter={e => (e.currentTarget.style.background = "var(--btn-primary-bg-hover)")}
+            onMouseLeave={e => (e.currentTarget.style.background = "var(--btn-primary-bg)")}
           >
-            <span>+</span> New Mission
+            <Plus size={15} strokeWidth={2} aria-hidden /> New Mission
           </button>
         )}
         {collapsed && (
           <button
             onClick={() => router.push("/dashboard?new=1")}
             title="New Mission"
-            style={{ width: "100%", background: "var(--accent)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", padding: "10px 0", fontSize: "1rem", cursor: "pointer", textAlign: "center", marginTop: 8 }}
+            aria-label="New Mission"
+            style={{ width: "100%", background: "var(--btn-primary-bg)", color: "var(--btn-primary-fg)", border: "none", borderRadius: "var(--radius-sm)", padding: "10px 0", fontSize: "1rem", cursor: "pointer", display: "flex", justifyContent: "center", marginTop: 8 }}
           >
-            +
+            <Plus size={16} strokeWidth={2} aria-hidden />
           </button>
         )}
       </div>
@@ -198,9 +202,10 @@ export default function Sidebar() {
           <button
             onClick={toggleTheme}
             title={isDark ? "Light mode" : "Dark mode"}
-            style={{ background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "3px 7px", cursor: "pointer", fontSize: "0.78rem", color: "var(--text-secondary)" }}
+            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            style={{ background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px", cursor: "pointer", color: "var(--text-secondary)", display: "inline-flex", alignItems: "center" }}
           >
-            {isDark ? "☀️" : "🌙"}
+            {isDark ? <Sun size={14} strokeWidth={1.75} /> : <Moon size={14} strokeWidth={1.75} />}
           </button>
         </div>
 
@@ -210,7 +215,7 @@ export default function Sidebar() {
             {user.avatar
               // eslint-disable-next-line @next/next/no-img-element
               ? <img src={user.avatar} alt={user.name} style={{ width: 30, height: 30, borderRadius: "50%", flexShrink: 0, objectFit: "cover" }} />
-              : <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--accent)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.82rem", fontWeight: 700, flexShrink: 0 }}>{user.name.charAt(0).toUpperCase()}</div>
+              : <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--bg-ink)", color: "#F2EDE5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.8rem", fontWeight: 600, flexShrink: 0 }}>{user.name.charAt(0).toUpperCase()}</div>
             }
             {(!collapsed || mobile) && (
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -219,12 +224,12 @@ export default function Sidebar() {
               </div>
             )}
             {(!collapsed || mobile) && (
-              <button onClick={handleSignOut} title="Sign out" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "0.85rem", padding: "2px 4px", flexShrink: 0 }}>↪</button>
+              <button onClick={handleSignOut} title="Sign out" aria-label="Sign out" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: "2px 4px", flexShrink: 0, display: "inline-flex" }}><LogOut size={15} strokeWidth={1.75} /></button>
             )}
           </div>
         ) : (
           <Link href="/login" style={{ display: "flex", alignItems: "center", justifyContent: collapsed && !mobile ? "center" : "flex-start", gap: 8, textDecoration: "none", color: "var(--accent)", fontSize: "0.8rem" }}>
-            <span>👤</span>{(!collapsed || mobile) && "Sign in"}
+            <UserRound size={16} strokeWidth={1.75} aria-hidden />{(!collapsed || mobile) && "Sign in"}
           </Link>
         )}
 
@@ -232,7 +237,7 @@ export default function Sidebar() {
         {!collapsed && (
           <div style={{ marginTop: 8, fontSize: "0.65rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 5, paddingLeft: 2 }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--emerald)", display: "inline-block" }} />
-            System Online · v8.0
+            All systems running
           </div>
         )}
       </div>
@@ -250,8 +255,8 @@ export default function Sidebar() {
             <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
           </svg>
         </button>
-        <Image src="/logo.png" alt="Agentic Factor" width={110} height={36} style={{ objectFit: "contain" }} />
-        <button onClick={() => router.push("/dashboard?new=1")} style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 12px", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" }}>+ New</button>
+        <Logo size={24} textSize="1.1rem" />
+        <button onClick={() => router.push("/dashboard?new=1")} style={{ background: "var(--btn-primary-bg)", color: "var(--btn-primary-fg)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 12px", fontSize: "0.78rem", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><Plus size={14} strokeWidth={2} aria-hidden /> New</button>
       </div>
 
       {/* Desktop sidebar */}
@@ -267,8 +272,8 @@ export default function Sidebar() {
         <div className="mobile-drawer-overlay" onClick={() => setMobileOpen(false)}>
           <nav className="mobile-drawer" onClick={e => e.stopPropagation()}>
             <div className="mobile-drawer-head">
-              <Image src="/logo.png" alt="Agentic Factor" width={110} height={30} style={{ objectFit: "contain" }} />
-              <button className="mobile-close-btn" onClick={() => setMobileOpen(false)} aria-label="Close menu">✕</button>
+              <Logo size={24} textSize="1.1rem" />
+              <button className="mobile-close-btn" onClick={() => setMobileOpen(false)} aria-label="Close menu"><X size={16} strokeWidth={1.75} /></button>
             </div>
             <div style={{ flex: 1, overflow: "auto" }}>
               <SidebarContent mobile />

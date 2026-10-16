@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 
+import Glyph from "@/components/ui/Glyph";
 export default function ContactPage() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -39,7 +40,7 @@ export default function ContactPage() {
 
   return (
     <div className="welcome-section" style={{ maxWidth: 800 }}>
-      <h1 className="welcome-section-title" style={{ textAlign: "left", fontSize: "1.5rem", marginBottom: 12 }}>💬 Contact Us</h1>
+      <h1 className="welcome-section-title" style={{ textAlign: "left", fontSize: "2.6rem", marginBottom: 12 }}>Contact us</h1>
       <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", marginBottom: 32, lineHeight: 1.7 }}>
         Have a question, need support, or want to discuss enterprise plans? Reach out and we&apos;ll get back to you within 24 hours.
       </p>
@@ -48,12 +49,12 @@ export default function ContactPage() {
         {/* Contact Info */}
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           <div className="card" style={{ padding: 24 }}>
-            <div style={{ fontSize: "1.5rem", marginBottom: 8 }}>📧</div>
+            <div style={{ fontSize: "1.5rem", marginBottom: 8 }}><Glyph e="📧" /></div>
             <h3 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: 4 }}>Email</h3>
             <a href="mailto:hello@agenticfactor.io" style={{ color: "var(--accent)", fontSize: "0.88rem", textDecoration: "none" }}>hello@agenticfactor.io</a>
           </div>
           <div className="card" style={{ padding: 24 }}>
-            <div style={{ fontSize: "1.5rem", marginBottom: 8 }}>🏢</div>
+            <div style={{ fontSize: "1.5rem", marginBottom: 8 }}><Glyph e="🏢" /></div>
             <h3 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: 4 }}>Enterprise Sales</h3>
             <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", lineHeight: 1.6 }}>
               Custom plans, SLA, dedicated support, and volume pricing.
@@ -61,7 +62,7 @@ export default function ContactPage() {
             <a href="mailto:enterprise@agenticfactor.io" style={{ color: "var(--accent)", fontSize: "0.85rem", textDecoration: "none", marginTop: 8, display: "inline-block" }}>enterprise@agenticfactor.io</a>
           </div>
           <div className="card" style={{ padding: 24 }}>
-            <div style={{ fontSize: "1.5rem", marginBottom: 8 }}>⏰</div>
+            <div style={{ fontSize: "1.5rem", marginBottom: 8 }}><Glyph e="⏰" /></div>
             <h3 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: 4 }}>Response Time</h3>
             <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>We typically respond within 24 hours on business days.</p>
           </div>
@@ -71,7 +72,7 @@ export default function ContactPage() {
         <div className="card" style={{ padding: 28 }}>
           {sent ? (
             <div style={{ textAlign: "center", padding: 32 }}>
-              <div style={{ fontSize: "3rem", marginBottom: 12 }}>✅</div>
+              <div style={{ fontSize: "3rem", marginBottom: 12 }}><Glyph e="✅" /></div>
               <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: 8 }}>Message Sent!</h3>
               <p style={{ color: "var(--text-secondary)", fontSize: "0.88rem", lineHeight: 1.6 }}>
                 We&apos;ll get back to you within 24 hours. Check your inbox — we&apos;ve sent you a confirmation email.
@@ -97,7 +98,7 @@ export default function ContactPage() {
               </div>
 
               {error && (
-                <p style={{ fontSize: "0.82rem", color: "var(--ruby, #ef4444)", margin: 0, lineHeight: 1.5 }}>
+                <p style={{ fontSize: "0.82rem", color: "var(--ruby, var(--rose))", margin: 0, lineHeight: 1.5 }}>
                   {error}
                 </p>
               )}

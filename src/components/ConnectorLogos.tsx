@@ -124,7 +124,7 @@ export default function ConnectorLogo({ id, size = 32 }: Props) {
       <div style={{
         ...containerStyle,
         background: dark ? `#${icon.hex}` : '#ffffff',
-        border: dark ? 'none' : '1px solid #e5e7eb',
+        border: dark ? 'none' : '1px solid var(--border)',
       }}>
         <svg
           viewBox="0 0 24 24"
@@ -143,7 +143,7 @@ export default function ConnectorLogo({ id, size = 32 }: Props) {
   // 2 — Clearbit: company logo img, letter tile on error
   if (clearbitDomain) {
     return (
-      <div style={{ ...containerStyle, background: '#ffffff', border: '1px solid #e5e7eb', position: 'relative' }}>
+      <div style={{ ...containerStyle, background: '#ffffff', border: '1px solid var(--border)', position: 'relative' }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={`https://logo.clearbit.com/${clearbitDomain}`}
@@ -169,7 +169,7 @@ export default function ConnectorLogo({ id, size = 32 }: Props) {
 }
 
 function LetterTile({ id, size }: { id: string; size: number }) {
-  const bg = TILE_COLORS[id] || '#6366f1';
+  const bg = TILE_COLORS[id] || 'var(--purple)';
   return (
     <div style={{
       width: size,

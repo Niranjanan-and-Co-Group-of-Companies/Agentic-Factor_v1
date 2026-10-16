@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 
+import Glyph from "@/components/ui/Glyph";
 interface RunData {
   run: {
     id: string; run_number: number; trigger: string; status: string;
@@ -18,10 +19,10 @@ const EVENT_ICONS: Record<string, string> = {
   'agent.started': '▶',
   'agent.completed': '✓',
   'agent.failed': '✗',
-  'agent.tool_call': '🔧',
+  'agent.tool_call': '⚙️',
   'mission.started': '🚀',
   'mission.completed': '🎉',
-  'mission.failed': '💥',
+  'mission.failed': '❌',
   'billing.credit_used': '💳',
   'mission.approval_needed': '⚠️',
 };
@@ -167,7 +168,7 @@ export default function RunDetailPage() {
               {data.events.map((event) => (
                 <div key={event.id} style={{ display: 'flex', gap: 10, padding: '6px 8px', borderRadius: 6, fontSize: '0.82rem',
                   background: event.type.includes('failed') ? 'color-mix(in srgb, var(--rose) 8%, transparent)' : 'transparent' }}>
-                  <span style={{ flexShrink: 0, width: 18, textAlign: 'center' }}>{EVENT_ICONS[event.type] ?? '·'}</span>
+                  <span style={{ flexShrink: 0, width: 18, display: 'inline-flex', justifyContent: 'center' }}>{EVENT_ICONS[event.type] ? <Glyph e={EVENT_ICONS[event.type]} size={14} /> : '·'}</span>
                   <span style={{ color: 'var(--text-muted)', flexShrink: 0, width: 80 }}>
                     {new Date(event.timestamp).toLocaleTimeString()}
                   </span>

@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 
+import Glyph from "@/components/ui/Glyph";
 interface AuditEvent {
   id: string;
   event_type: string;
@@ -92,7 +93,7 @@ export default function AuditLogsPage() {
           <div style={{ color: 'var(--text-muted)' }}>Loading...</div>
         ) : events.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 'var(--space-xl)', color: 'var(--text-muted)' }}>
-            <div style={{ fontSize: '2rem', marginBottom: 8 }}>📋</div>
+            <div style={{ fontSize: '2rem', marginBottom: 8 }}><Glyph e="📋" /></div>
             No events found{filter ? ` for "${filter}"` : ''}.
           </div>
         ) : (

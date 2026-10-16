@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { sanitizeTitle } from '@/lib/utils/sanitize-title';
 
+import { LogoMark } from "@/components/brand/Logo";
 interface Mission {
   id: string;
   title: string;
@@ -88,7 +89,7 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
           style={{
             width: '100%', textAlign: 'left',
             background: isCommandCenter ? 'var(--accent-subtle)' : 'none',
-            border: isCommandCenter ? '1px solid hsla(152,69%,50%,0.2)' : '1px solid transparent',
+            border: isCommandCenter ? '1px solid color-mix(in srgb, var(--emerald) 20%, transparent)' : '1px solid transparent',
             borderRadius: 'var(--radius-sm)',
             padding: '8px 10px',
             cursor: 'pointer',
@@ -96,7 +97,7 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
           }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="" style={{ width: 20, height: 20, objectFit: 'contain', flexShrink: 0 }} />
+          <LogoMark size={20} />
           <div style={{ minWidth: 0 }}>
             <div style={{
               fontSize: '0.8rem', fontWeight: 700,
@@ -131,7 +132,7 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
                   style={{
                     width: '100%', textAlign: 'left',
                     background: isActive ? 'var(--accent-subtle)' : 'none',
-                    border: isActive ? '1px solid hsla(152,69%,50%,0.2)' : '1px solid transparent',
+                    border: isActive ? '1px solid color-mix(in srgb, var(--emerald) 20%, transparent)' : '1px solid transparent',
                     borderRadius: 'var(--radius-sm)',
                     padding: '7px 8px',
                     cursor: 'pointer',
@@ -186,7 +187,7 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
             <div style={{ height: 3, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
               <div style={{
                 height: '100%', borderRadius: 4,
-                background: total < 100 ? '#ef4444' : 'var(--accent)',
+                background: total < 100 ? 'var(--rose)' : 'var(--accent)',
                 width: `${creditPct}%`,
               }} />
             </div>

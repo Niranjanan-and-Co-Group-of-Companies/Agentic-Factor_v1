@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 
+import Glyph from "@/components/ui/Glyph";
 interface BillingData {
   plan: string;
   billing_status: string;
@@ -20,9 +21,9 @@ const PLAN_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  active: "#10b981", trialing: "#10b981", past_due: "#f59e0b", halted: "#ef4444",
-  cancelled: "#6b7280", cancellation_pending: "#f59e0b", pending: "#f59e0b",
-  completed: "#6b7280",
+  active: "var(--emerald)", trialing: "var(--emerald)", past_due: "var(--amber)", halted: "var(--rose)",
+  cancelled: "var(--text-muted)", cancellation_pending: "var(--amber)", pending: "var(--amber)",
+  completed: "var(--text-muted)",
 };
 
 const TOPUP_PACKS = [
@@ -129,14 +130,14 @@ export default function BillingPage() {
   const usedPct = billing?.credits_total ? Math.min(100, Math.round(((billing.credits_total - (billing.credits_remaining ?? 0)) / billing.credits_total) * 100)) : 0;
   const isPaidPlan = billing?.plan && !["free"].includes(billing.plan);
   const canCancel = isPaidPlan && !["cancelled", "completed", "cancellation_pending"].includes(billing?.billing_status ?? "");
-  const statusColor = STATUS_COLORS[billing?.billing_status ?? ""] ?? "#6b7280";
+  const statusColor = STATUS_COLORS[billing?.billing_status ?? ""] ?? "var(--text-muted)";
 
   return (
     <div className="page-container stack" style={{ gap: "var(--space-lg)", maxWidth: 760 }}>
       {/* Toast */}
       {toast && (
         <div style={{ position: "fixed", top: 20, right: 20, zIndex: 9999, padding: "10px 18px",
-          background: toast.type === "ok" ? "var(--emerald)" : "#ef4444", color: "#fff",
+          background: toast.type === "ok" ? "var(--emerald)" : "var(--rose)", color: "var(--on-strong)",
           borderRadius: 8, fontWeight: 600, fontSize: "0.86rem", boxShadow: "0 4px 16px rgba(0,0,0,0.2)" }}>
           {toast.msg}
         </div>
@@ -172,7 +173,7 @@ export default function BillingPage() {
               </a>
             )}
             {canCancel && !cancelConfirm && (
-              <button className="btn btn-ghost btn-sm" style={{ fontSize: "0.82rem", color: "#ef4444" }}
+              <button className="btn btn-ghost btn-sm" style={{ fontSize: "0.82rem", color: "var(--rose)" }}
                 onClick={() => setCancelConfirm(true)}>
                 Cancel Subscription
               </button>
@@ -200,7 +201,7 @@ export default function BillingPage() {
 
         {/* Cancel confirmation */}
         {cancelConfirm && (
-          <div style={{ marginTop: 16, padding: "14px 16px", background: "color-mix(in srgb, #ef4444 8%, transparent)", borderRadius: 8, border: "1px solid color-mix(in srgb, #ef4444 30%, transparent)" }}>
+          <div style={{ marginTop: 16, padding: "14px 16px", background: "color-mix(in srgb, var(--rose) 8%, transparent)", borderRadius: 8, border: "1px solid color-mix(in srgb, var(--rose) 30%, transparent)" }}>
             <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: 8 }}>
               Cancel subscription?
             </div>
@@ -208,7 +209,7 @@ export default function BillingPage() {
               You'll retain full access until the end of your current billing period. Your top-up credits are preserved.
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn btn-sm" style={{ background: "#ef4444", color: "#fff", border: "none" }}
+              <button className="btn btn-sm" style={{ background: "var(--rose)", color: "var(--on-strong)", border: "none" }}
                 onClick={cancelSubscription} disabled={cancelling}>
                 {cancelling ? "Cancelling…" : "Yes, cancel at period end"}
               </button>
@@ -242,7 +243,7 @@ export default function BillingPage() {
             <div style={{ height: 8, background: "var(--border)", borderRadius: 8, overflow: "hidden", marginBottom: 6 }}>
               <div style={{
                 height: "100%", borderRadius: 8,
-                background: usedPct > 85 ? "#ef4444" : usedPct > 60 ? "#f59e0b" : "var(--accent)",
+                background: usedPct > 85 ? "var(--rose)" : usedPct > 60 ? "var(--amber)" : "var(--accent)",
                 width: `${usedPct}%`, transition: "width 0.4s ease",
               }} />
             </div>
@@ -295,7 +296,7 @@ export default function BillingPage() {
             }}>
               <div style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 4 }}>{pack.name}</div>
               <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "var(--accent)", marginBottom: 2, fontVariantNumeric: "tabular-nums" }}>
-                🪙 {pack.credits.toLocaleString()}
+                <Glyph e="🪙" size={14} /> {pack.credits.toLocaleString()}
               </div>
               <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: 12 }}>credits</div>
               <button className="btn btn-primary btn-sm" style={{ width: "100%", fontSize: "0.82rem" }}

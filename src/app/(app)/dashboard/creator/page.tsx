@@ -6,6 +6,7 @@ import UnifiedInput from "@/components/UnifiedInput";
 import AgentSettings from "@/components/AgentSettings";
 import ConnectorQuickConnect from "@/components/ConnectorQuickConnect";
 
+import Glyph from "@/components/ui/Glyph";
 // ============================================================
 // Types for the Blueprint Review Layer
 // ============================================================
@@ -233,7 +234,7 @@ function MissionCreatorInner() {
 
             // Handle terminal states
             if (statusData.status === 'completed') {
-              pushLog('🚀 Blueprint ready — loading preview...');
+              pushLog('Blueprint ready — loading preview…');
               const agentsWithTrust = (statusData.blueprint.agents as BlueprintAgent[]).map((a: any) => ({
                 ...a, trustLevel: ("conditional" as TrustLevel),
               }));
@@ -268,7 +269,7 @@ function MissionCreatorInner() {
             }
 
             if (statusData.status === 'pending') {
-              pushLog('⏳ Starting blueprint generation...');
+              pushLog('Starting blueprint generation…');
             }
           } catch (parseErr) {
             console.warn('[Creator] SSE parse error, continuing...', parseErr);
@@ -468,7 +469,7 @@ function MissionCreatorInner() {
     return (
       <>
         <div className="page-header">
-          <h1 className="page-title">🎯 Mission Architect</h1>
+          <h1 className="page-title"><Glyph e="🎯" /> Mission Architect</h1>
           <p className="page-subtitle">Describe your goal — the AI will propose a strategy for your review</p>
         </div>
         <div className="grid-2" style={{ gridTemplateColumns: "1fr 360px", alignItems: "start" }}>
@@ -480,7 +481,7 @@ function MissionCreatorInner() {
                 <UnifiedInput
                   context="intake"
                   placeholder='e.g. "Scrape competitor pricing data from 5 sites, analyze trends, and email me a weekly report with charts."'
-                  submitLabel={loading ? "⏳ Architecting..." : "⚡ Generate Blueprint"}
+                  submitLabel={loading ? "Designing…" : "Generate blueprint"}
                   initialValue={intent}
                   onTextChange={(text) => setIntent(text)}
                   onSubmit={(text, files) => {
@@ -493,7 +494,7 @@ function MissionCreatorInner() {
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "var(--space-xs)" }}>
                     {attachedFiles.map((f, i) => (
                       <span key={i} className="file-chip" style={{ fontSize: "0.75rem" }}>
-                        🧠 {f.name} <span style={{ color: "var(--text-muted)" }}>({(f.size / 1024).toFixed(1)}KB)</span>
+                        <Glyph e="🧠" size={13} /> {f.name} <span style={{ color: "var(--text-muted)" }}>({(f.size / 1024).toFixed(1)}KB)</span>
                         <span style={{ color: "var(--emerald)", fontSize: "0.65rem", marginLeft: 4 }}>✓ attached</span>
                         <button onClick={() => setAttachedFiles(prev => prev.filter((_, idx) => idx !== i))}>✕</button>
                       </span>
@@ -502,7 +503,7 @@ function MissionCreatorInner() {
                 )}
                 <div className="row" style={{ justifyContent: "space-between", marginTop: "var(--space-sm)" }}>
                   <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                    {intent.length > 0 ? `${intent.length} chars` : "Min 10 characters · Use 📎 for files · 🎙️ for voice"}
+                    {intent.length > 0 ? `${intent.length} chars` : "Min 10 characters · attach files or use voice"}
                     {attachedFiles.length > 0 && ` · ${attachedFiles.length} file(s) attached`}
                   </span>
                 </div>
@@ -536,10 +537,10 @@ function MissionCreatorInner() {
                 )}
                 {error && (
                   error.includes('managing system load') ? (
-                    <div style={{ marginTop: "var(--space-md)", padding: "var(--space-md) var(--space-lg)", background: "hsla(38,100%,50%,0.10)", border: "1.5px solid hsla(38,100%,50%,0.4)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", gap: "var(--space-md)" }}>
-                      <span style={{ fontSize: "1.2rem", flexShrink: 0 }}>⚡</span>
+                    <div style={{ marginTop: "var(--space-md)", padding: "var(--space-md) var(--space-lg)", background: "color-mix(in srgb, var(--amber) 10%, transparent)", border: "1.5px solid color-mix(in srgb, var(--amber) 40%, transparent)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", gap: "var(--space-md)" }}>
+                      <span style={{ fontSize: "1.2rem", flexShrink: 0 }}><Glyph e="⚡" /></span>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 700, fontSize: "0.82rem", color: "hsla(38,100%,38%,1)", textTransform: "uppercase", letterSpacing: "0.05em" }}>High Load</div>
+                        <div style={{ fontWeight: 700, fontSize: "0.82rem", color: "var(--amber)", textTransform: "uppercase", letterSpacing: "0.05em" }}>High Load</div>
                         <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginTop: 2 }}>{error}</div>
                       </div>
                       <button
@@ -552,7 +553,7 @@ function MissionCreatorInner() {
                       </button>
                     </div>
                   ) : (
-                    <div style={{ marginTop: "var(--space-md)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem", lineHeight: 1.6 }}>❌ {error}</div>
+                    <div style={{ marginTop: "var(--space-md)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem", lineHeight: 1.6 }}><Glyph e="❌" /> {error}</div>
                   )
                 )}
               </div>
@@ -560,7 +561,7 @@ function MissionCreatorInner() {
           </div>
 
           <div className="stack">
-            <div className="card" style={{ borderColor: "hsla(217,91%,60%,0.2)", background: "var(--accent-subtle)" }}>
+            <div className="card" style={{ borderColor: "color-mix(in srgb, var(--accent) 20%, transparent)", background: "var(--accent-subtle)" }}>
               <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.7 }}>
                 <strong style={{ color: "var(--accent)" }}>How it works:</strong><br />
                 ① Describe your goal (text, voice, or files)<br />
@@ -585,7 +586,7 @@ function MissionCreatorInner() {
     return (
       <div className="page-header" style={{ height: "calc(100vh - 100px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div className="card animate-slide-in" style={{ width: "100%", maxWidth: 600, padding: "var(--space-xl)", textAlign: "center" }}>
-          <div style={{ fontSize: "3rem", marginBottom: "var(--space-md)" }}>🤖</div>
+          <div style={{ fontSize: "3rem", marginBottom: "var(--space-md)" }}><Glyph e="🤖" /></div>
           <h2 style={{ marginBottom: "var(--space-md)" }}>AI Architect Needs Context</h2>
           <p style={{ fontSize: "1.1rem", color: "var(--text-secondary)", marginBottom: "var(--space-xl)", lineHeight: 1.6 }}>
             {discoveryQuestion}
@@ -614,7 +615,7 @@ function MissionCreatorInner() {
         <div className="page-header">
           <div className="row" style={{ justifyContent: "space-between" }}>
             <div>
-              <h1 className="page-title">📐 Blueprint Review</h1>
+              <h1 className="page-title"><Glyph e="📐" /> Blueprint Review</h1>
               <p className="page-subtitle">Review the strategy. Edit agents, set trust levels, and attach reference files.</p>
             </div>
             <div className="row" style={{ alignItems: "center" }}>
@@ -629,7 +630,7 @@ function MissionCreatorInner() {
                       Skip — Go Live Immediately
                     </button>
                     <button className="btn btn-primary btn-lg" onClick={() => handleConfirmClick(true)} disabled={loading || !allConnectorsReady} title={blockedTitle}>
-                      {loading ? "🔒 Provisioning..." : allConnectorsReady ? "👁 Start in Preview Mode" : "🔌 Connect Accounts First"}
+                      {loading ? "Provisioning…" : allConnectorsReady ? "Start in preview mode" : "Connect accounts first"}
                     </button>
                   </>
                 );
@@ -642,10 +643,10 @@ function MissionCreatorInner() {
         </div>
         {error && (
           error.includes('managing system load') ? (
-            <div style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md) var(--space-lg)", background: "hsla(38,100%,50%,0.10)", border: "1.5px solid hsla(38,100%,50%,0.4)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", gap: "var(--space-md)" }}>
-              <span style={{ fontSize: "1.2rem", flexShrink: 0 }}>⚡</span>
+            <div style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md) var(--space-lg)", background: "color-mix(in srgb, var(--amber) 10%, transparent)", border: "1.5px solid color-mix(in srgb, var(--amber) 40%, transparent)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", gap: "var(--space-md)" }}>
+              <span style={{ fontSize: "1.2rem", flexShrink: 0 }}><Glyph e="⚡" /></span>
               <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: "0.82rem", color: "hsla(38,100%,38%,1)", textTransform: "uppercase", letterSpacing: "0.05em" }}>High Load</div>
+                <div style={{ fontWeight: 700, fontSize: "0.82rem", color: "var(--amber)", textTransform: "uppercase", letterSpacing: "0.05em" }}>High Load</div>
                 <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)", marginTop: 2 }}>{error}</div>
               </div>
               <button className="btn btn-primary btn-sm" onClick={handleResetAndRetry} disabled={resetLoading || loading} style={{ flexShrink: 0 }}>
@@ -653,7 +654,7 @@ function MissionCreatorInner() {
               </button>
             </div>
           ) : (
-            <div style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem" }}>❌ {error}</div>
+            <div style={{ marginBottom: "var(--space-lg)", padding: "var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-md)", color: "var(--rose)", fontSize: "0.85rem" }}><Glyph e="❌" /> {error}</div>
           )
         )}
 
@@ -677,7 +678,7 @@ function MissionCreatorInner() {
             {/* Proposed Agents — Editable + Trust Level */}
             <div className="card">
               <div className="card-header">
-                <span className="card-title">🤖 Proposed Agent Team</span>
+                <span className="card-title"><Glyph e="🤖" /> Proposed Agent Team</span>
                 <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Set trust level for each agent</span>
               </div>
               <div className="stack" style={{ gap: "var(--space-sm)" }}>
@@ -685,11 +686,11 @@ function MissionCreatorInner() {
                   <div key={idx} className="card" style={{ padding: "var(--space-md)", borderColor: editingAgent === idx ? "var(--accent)" : undefined, boxShadow: editingAgent === idx ? "var(--shadow-glow)" : undefined }}>
                     <div className="row" style={{ justifyContent: "space-between", cursor: "pointer" }} onClick={() => setEditingAgent(editingAgent === idx ? null : idx)}>
                       <div className="row">
-                        <span style={{ fontSize: "1.3rem" }}>{["🕷️","📊","📄","🔍","🛡️","🧪"][idx] || "🤖"}</span>
+                        <span style={{ display: "inline-flex", color: "var(--accent)" }}><Glyph e={["🌐","📊","📄","🔍","🛡️","🧪"][idx] || "🤖"} size={20} /></span>
                         <div>
                           <div style={{ fontWeight: 600 }}>{agent.role}</div>
                           <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                            Agent #{agent.agentIndex} · {agent.capabilities.length} caps · {TRUST_LABELS[agent.trustLevel].icon} {TRUST_LABELS[agent.trustLevel].label}
+                            Agent #{agent.agentIndex} · {agent.capabilities.length} caps · <Glyph e={TRUST_LABELS[agent.trustLevel].icon} size={13} /> {TRUST_LABELS[agent.trustLevel].label}
                           </div>
                         </div>
                       </div>
@@ -712,7 +713,7 @@ function MissionCreatorInner() {
                         <div style={{ marginBottom: "var(--space-md)", padding: "var(--space-sm) var(--space-md)", borderRadius: "var(--radius-sm)",
                           background: agent.trustLevel === "manual" ? "var(--amber-bg)" : agent.trustLevel === "autonomous" ? "var(--emerald-bg)" : "var(--accent-subtle)",
                           fontSize: "0.78rem" }}>
-                          <strong>{TRUST_LABELS[agent.trustLevel].icon} {TRUST_LABELS[agent.trustLevel].label}:</strong>{" "}
+                          <strong><Glyph e={TRUST_LABELS[agent.trustLevel].icon} size={13} /> {TRUST_LABELS[agent.trustLevel].label}:</strong>{" "}
                           {TRUST_LABELS[agent.trustLevel].desc}
                         </div>
                         <div style={{ marginBottom: "var(--space-md)" }}>
@@ -748,14 +749,14 @@ function MissionCreatorInner() {
             {/* Context Files — Blueprint Stage */}
             <div className="card">
               <div className="card-header">
-                <span className="card-title">📎 Attached Context Files</span>
+                <span className="card-title"><Glyph e="📎" /> Attached Context Files</span>
                 <span className="badge badge-purple">{attachedFiles.length} file(s)</span>
               </div>
               {attachedFiles.length > 0 ? (
                 <div className="stack" style={{ gap: "var(--space-xs)" }}>
                   {attachedFiles.map((f, i) => (
                     <div key={i} className="row" style={{ padding: "var(--space-sm)", background: "var(--bg-glass)", borderRadius: "var(--radius-sm)", fontSize: "0.82rem" }}>
-                      <span>🧠</span>
+                      <span><Glyph e="🧠" /></span>
                       <span style={{ flex: 1, fontWeight: 500 }}>{f.name}</span>
                       <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>({(f.size / 1024).toFixed(1)}KB)</span>
                       <span style={{ color: "var(--emerald)", fontSize: "0.65rem" }}>✓ injected into agents</span>
@@ -770,7 +771,7 @@ function MissionCreatorInner() {
             {/* Orchestration Graph */}
             <div className="card">
               <div className="card-header">
-                <span className="card-title">🔗 Orchestration Flow</span>
+                <span className="card-title"><Glyph e="🔗" /> Orchestration Flow</span>
                 <span className="badge badge-purple">{blueprint.orchestration.pattern}</span>
               </div>
               <div className="graph-container">
@@ -779,7 +780,7 @@ function MissionCreatorInner() {
                     <div className={`graph-node ${i === 0 ? "entry" : ""}`}>
                       <div className="graph-node-role">{agent.role}</div>
                       <span style={{ fontSize: "0.7rem", color: agent.trustLevel === "autonomous" ? "var(--emerald)" : agent.trustLevel === "manual" ? "var(--amber)" : "var(--accent)" }}>
-                        {TRUST_LABELS[agent.trustLevel].icon} {TRUST_LABELS[agent.trustLevel].label}
+                        <Glyph e={TRUST_LABELS[agent.trustLevel].icon} size={13} /> {TRUST_LABELS[agent.trustLevel].label}
                       </span>
                     </div>
                     {i < blueprint.agents.length - 1 && <div className="graph-edge">→</div>}
@@ -794,7 +795,7 @@ function MissionCreatorInner() {
             {/* Phase 4.2: Blueprint Chat Editor */}
             <div className="card">
               <div className="card-header">
-                <span className="card-title">💬 Blueprint Editor</span>
+                <span className="card-title"><Glyph e="💬" /> Blueprint Editor</span>
                 <span className="badge badge-emerald">Live</span>
               </div>
               <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "var(--space-sm)" }}>
@@ -808,7 +809,7 @@ function MissionCreatorInner() {
                   onSubmit={(text) => handleEditBlueprint(text)}
                 />
                 {chatLoading && (
-                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "var(--radius-sm)", backdropFilter: "blur(2px)", zIndex: 10 }}>
+                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "var(--radius-sm)", backdropFilter: "blur(2px)", zIndex: 10 }}>
                     <div className="voice-wave">
                       <span /><span /><span /><span /><span />
                     </div>
@@ -821,7 +822,7 @@ function MissionCreatorInner() {
             {blueprint.discoveryQuestions && blueprint.discoveryQuestions.length > 0 && (
               <div className="card" style={{ borderColor: "var(--accent)" }}>
                 <div className="card-header">
-                  <span className="card-title">🔍 Discovery Questions</span>
+                  <span className="card-title"><Glyph e="🔍" /> Discovery Questions</span>
                   <span className="badge badge-purple">{blueprint.discoveryQuestions.length} remaining</span>
                 </div>
                 <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: "var(--space-md)" }}>
@@ -850,7 +851,7 @@ function MissionCreatorInner() {
             {/* Expected Output Format */}
             <div className="card">
               <div className="card-header">
-                <span className="card-title">📝 Expected Final Output</span>
+                <span className="card-title"><Glyph e="📝" /> Expected Final Output</span>
                 <span className="badge badge-emerald">Validation</span>
               </div>
               <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: "var(--space-md)" }}>
@@ -867,14 +868,14 @@ function MissionCreatorInner() {
 
             <div className="card">
               <div className="card-header">
-                <span className="card-title">✅ Validation Checklist</span>
+                <span className="card-title"><Glyph e="✅" /> Validation Checklist</span>
                 <span className="badge badge-green">{blueprint.validationChecklist.length} checks</span>
               </div>
               <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: "var(--space-md)" }}>The Validation Agent will verify these before HITL approval.</p>
               <div className="stack" style={{ gap: "var(--space-xs)" }}>
                 {blueprint.validationChecklist.map((item, idx) => (
                   <div key={idx} className="row" style={{ padding: "var(--space-sm)", background: "var(--bg-glass)", borderRadius: "var(--radius-sm)", fontSize: "0.82rem" }}>
-                    <span style={{ color: "var(--emerald)" }}>☐</span>
+                    <span style={{ color: "var(--emerald)" }}><Glyph e="☐" /></span>
                     <span style={{ flex: 1 }}>{item}</span>
                     <button onClick={() => removeCheckItem(idx)} style={{ background: "none", border: "none", color: "var(--rose)", cursor: "pointer", fontSize: "0.8rem" }}>✕</button>
                   </div>
@@ -893,15 +894,15 @@ function MissionCreatorInner() {
               const allConnected  = composioPerms.every(p => connectedSlugs.has((p.service ?? '').toLowerCase()));
               if (composioPerms.length === 0 && otherPerms.length === 0) return null;
               return (
-                <div className="card" style={{ borderColor: allConnected ? 'hsla(152,69%,50%,0.35)' : 'hsla(38,100%,50%,0.35)' }}>
+                <div className="card" style={{ borderColor: allConnected ? 'color-mix(in srgb, var(--emerald) 35%, transparent)' : 'color-mix(in srgb, var(--amber) 35%, transparent)' }}>
                   <div className="card-header">
-                    <span className="card-title">🔐 Required Connections</span>
+                    <span className="card-title"><Glyph e="🔐" /> Required Connections</span>
                     <span className={`badge ${allConnected ? 'badge-green' : 'badge-amber'}`}>
                       {allConnected ? '✓ All Connected' : `${composioPerms.filter(p => !connectedSlugs.has((p.service ?? '').toLowerCase())).length} Needed`}
                     </span>
                   </div>
                   {!allConnected && (
-                    <div style={{ marginBottom: 'var(--space-md)', padding: 'var(--space-sm) var(--space-md)', background: 'hsla(38,100%,50%,0.08)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: 'hsla(38,100%,40%,1)', borderLeft: '3px solid hsla(38,100%,50%,0.6)' }}>
+                    <div style={{ marginBottom: 'var(--space-md)', padding: 'var(--space-sm) var(--space-md)', background: 'color-mix(in srgb, var(--amber) 8%, transparent)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: 'var(--amber)', borderLeft: '3px solid color-mix(in srgb, var(--amber) 60%, transparent)' }}>
                       Connect the accounts below before starting — the mission will fail without them.
                     </div>
                   )}
@@ -929,7 +930,7 @@ function MissionCreatorInner() {
                     })}
                     {otherPerms.map((perm, idx) => (
                       <div key={`other-${idx}`} className="row" style={{ padding: 'var(--space-sm)', background: 'var(--bg-glass)', borderRadius: 'var(--radius-sm)', fontSize: '0.82rem' }}>
-                        <span>🔑</span>
+                        <span><Glyph e="🔑" /></span>
                         <div style={{ flex: 1 }}>
                           <span style={{ fontWeight: 500 }}>{perm.service}</span>
                           <span style={{ color: 'var(--text-muted)' }}> · {perm.type === 'oauth_token' ? 'OAuth' : 'API Key'}</span>
@@ -943,19 +944,19 @@ function MissionCreatorInner() {
 
             {/* Trust Level Legend */}
             <div className="card" style={{ background: "var(--bg-glass)" }}>
-              <div className="card-title" style={{ marginBottom: "var(--space-sm)", fontSize: "0.85rem" }}>🎛️ Trust Levels</div>
+              <div className="card-title" style={{ marginBottom: "var(--space-sm)", fontSize: "0.85rem" }}><Glyph e="🎛️" /> Trust Levels</div>
               {(["manual", "conditional", "autonomous"] as TrustLevel[]).map((level) => (
                 <div key={level} className="row" style={{ padding: "var(--space-xs) 0", fontSize: "0.78rem" }}>
-                  <span>{TRUST_LABELS[level].icon}</span>
+                  <span style={{ display: "inline-flex" }}><Glyph e={TRUST_LABELS[level].icon} size={14} /></span>
                   <span style={{ fontWeight: 600, minWidth: 85 }}>{TRUST_LABELS[level].label}</span>
                   <span style={{ color: "var(--text-muted)" }}>{TRUST_LABELS[level].desc}</span>
                 </div>
               ))}
             </div>
 
-            <div className="card" style={{ background: "var(--accent-subtle)", borderColor: "hsla(217,91%,60%,0.2)" }}>
+            <div className="card" style={{ background: "var(--accent-subtle)", borderColor: "color-mix(in srgb, var(--accent) 20%, transparent)" }}>
               <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.7 }}>
-                <strong style={{ color: "var(--accent)" }}>⚠ Lazy Execution:</strong> No database rows or agent processes are created until you click <strong>Confirm Blueprint</strong>. This is a preview only.
+                <strong style={{ color: "var(--accent)" }}><Glyph e="⚠" /> Lazy Execution:</strong> No database rows or agent processes are created until you click <strong>Confirm Blueprint</strong>. This is a preview only.
               </p>
             </div>
           </div>
@@ -991,11 +992,11 @@ function MissionCreatorInner() {
   return (
     <>
       <div className="page-header">
-        <h1 className="page-title">✅ Blueprint Saved</h1>
+        <h1 className="page-title"><Glyph e="✅" /> Blueprint Saved</h1>
         <p className="page-subtitle">Your mission blueprint has been saved. Open your mission and click <strong>Start Mission</strong> to begin execution.</p>
       </div>
       <div className="card animate-slide-in" style={{ maxWidth: 700, margin: "0 auto", textAlign: "center", padding: "var(--space-2xl)" }}>
-        <div style={{ fontSize: "3rem", marginBottom: "var(--space-md)" }}>📋</div>
+        <div style={{ fontSize: "3rem", marginBottom: "var(--space-md)" }}><Glyph e="📋" /></div>
         <h2 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}>{blueprint?.title}</h2>
         <p style={{ color: "var(--text-secondary)", marginBottom: "var(--space-xl)" }}>{blueprint?.agents.length} agents ready · Pattern: {blueprint?.orchestration.pattern}</p>
         <div className="grid-3" style={{ marginBottom: "var(--space-xl)" }}>
@@ -1009,16 +1010,16 @@ function MissionCreatorInner() {
             {(["manual", "conditional", "autonomous"] as TrustLevel[]).map((level) => {
               const count = blueprint.agents.filter(a => a.trustLevel === level).length;
               if (count === 0) return null;
-              return <span key={level} className={`badge ${level === "manual" ? "badge-amber" : level === "autonomous" ? "badge-green" : "badge-blue"}`}>{TRUST_LABELS[level].icon} {count} {TRUST_LABELS[level].label}</span>;
+              return <span key={level} className={`badge ${level === "manual" ? "badge-amber" : level === "autonomous" ? "badge-green" : "badge-blue"}`}><Glyph e={TRUST_LABELS[level].icon} size={13} /> {count} {TRUST_LABELS[level].label}</span>;
             })}
           </div>
         )}
         <div className="row" style={{ justifyContent: "center" }}>
           <button className="btn btn-ghost" onClick={() => { setPhase("input"); setBlueprint(null); setConfirmResult(null); }}>+ New Mission</button>
           {confirmResult?.missionId ? (
-            <a href={`/dashboard/missions/${confirmResult.missionId as string}`} className="btn btn-primary">▶ Start Mission</a>
+            <a href={`/dashboard/missions/${confirmResult.missionId as string}`} className="btn btn-primary">Start mission</a>
           ) : (
-            <a href="/dashboard" className="btn btn-primary">📊 View Dashboard</a>
+            <a href="/dashboard" className="btn btn-primary"><Glyph e="📊" /> View Dashboard</a>
           )}
         </div>
       </div>
@@ -1054,10 +1055,10 @@ function TemplatesStrip({ onFork }: { onFork: (missionId: string) => void }) {
       const res = await fetch('/api/templates', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) });
       if (res.ok) {
         const d = await res.json() as { mission_id: string };
-        setToast('✅ Mission created! Redirecting…');
+        setToast('Mission created. Redirecting…');
         setTimeout(() => onFork(d.mission_id), 800);
-      } else { setToast('❌ Could not create from template.'); }
-    } catch { setToast('❌ Connection error.'); }
+      } else { setToast('Could not create from template.'); }
+    } catch { setToast('Connection error.'); }
     setForking(null);
   };
 
@@ -1073,7 +1074,7 @@ function TemplatesStrip({ onFork }: { onFork: (missionId: string) => void }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
         {templates.map(t => (
           <div key={t.id} className="card" style={{ padding: 12, display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer' }} onClick={() => handleFork(t.slug)}>
-            <div style={{ fontSize: '1.4rem', flexShrink: 0 }}>{t.icon ?? '🎯'}</div>
+            <div style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-secondary)', color: 'var(--accent)' }}><Glyph e={t.icon ?? '🎯'} size={20} /></div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--text-primary)', marginBottom: 2 }}>{t.title}</div>
               <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{t.description}</div>

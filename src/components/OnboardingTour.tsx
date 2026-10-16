@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 
+import Glyph from "@/components/ui/Glyph";
 const TOUR_KEY = "af-tour-done";
 
 const STEPS = [
@@ -87,7 +88,7 @@ export default function OnboardingTour() {
           border: "1px solid var(--border)",
           borderRadius: "var(--radius-xl)",
           padding: "var(--space-2xl)",
-          boxShadow: "0 32px 80px rgba(0,0,0,0.5)",
+          boxShadow: "0 32px 80px var(--overlay)",
           animation: "slideIn 0.25s var(--ease)",
           display: "flex", flexDirection: "column", gap: "var(--space-lg)",
         }}
@@ -109,7 +110,7 @@ export default function OnboardingTour() {
         {/* Content */}
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: "3.2rem", marginBottom: "var(--space-md)", lineHeight: 1 }}>
-            {current.icon}
+            <Glyph e={current.icon} size={34} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
           </div>
           <h2 style={{
             fontSize: "1.25rem", fontWeight: 700,

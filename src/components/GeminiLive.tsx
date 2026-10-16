@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useCallback } from "react";
 
+import Glyph from "@/components/ui/Glyph";
 // Voice Input — floating mic button for speech-to-text via Web Speech API.
 // Feeds transcript into the active input context (intake, blueprint, etc.)
 
@@ -62,9 +63,9 @@ export default function GeminiLive({ onTranscript, context = "intake" }: VoiceIn
   }, [transcript, onTranscript]);
 
   const contextLabels: Record<string, string> = {
-    intake: "🎯 Mission Intake",
-    blueprint: "📐 Blueprint Review",
-    clarification: "💬 Clarification",
+    intake: "Mission intake",
+    blueprint: "Blueprint review",
+    clarification: "Clarification",
   };
 
   return (
@@ -72,7 +73,7 @@ export default function GeminiLive({ onTranscript, context = "intake" }: VoiceIn
       {open && (
         <div className="voice-panel">
           <div className="card-header" style={{ marginBottom: "var(--space-sm)" }}>
-            <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>🎙️ Voice Input</span>
+            <span style={{ fontWeight: 600, fontSize: "0.9rem" }}><Glyph e="🎙️" /> Voice Input</span>
             <span className="badge badge-purple" style={{ fontSize: "0.6rem" }}>{contextLabels[context]}</span>
           </div>
 
@@ -107,9 +108,9 @@ export default function GeminiLive({ onTranscript, context = "intake" }: VoiceIn
 
           <div className="row" style={{ justifyContent: "center" }}>
             {!recording ? (
-              <button className="btn btn-primary btn-sm" onClick={startRecording}>🎙️ Start Speaking</button>
+              <button className="btn btn-primary btn-sm" onClick={startRecording}><Glyph e="🎙️" /> Start Speaking</button>
             ) : (
-              <button className="btn btn-danger btn-sm" onClick={stopRecording}>⏹ Stop & Send</button>
+              <button className="btn btn-danger btn-sm" onClick={stopRecording}><Glyph e="⏹" /> Stop & Send</button>
             )}
             <button className="btn btn-ghost btn-sm" onClick={() => { setOpen(false); stopRecording(); }}>Close</button>
           </div>
@@ -121,7 +122,7 @@ export default function GeminiLive({ onTranscript, context = "intake" }: VoiceIn
         onClick={() => { if (recording) stopRecording(); else setOpen(!open); }}
         title="Voice Input"
       >
-        {recording ? "⏹" : "🎙️"}
+        <Glyph e={recording ? "⏹" : "🎙️"} size={18} />
       </button>
     </>
   );

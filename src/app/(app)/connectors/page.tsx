@@ -2,8 +2,9 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
+import Glyph from "@/components/ui/Glyph";
 // ============================================================
-// Connector Marketplace — 850+ integrations via Composio
+// Connector Marketplace — 1,600+ integrations via Composio
 // ============================================================
 
 interface Toolkit {
@@ -163,7 +164,7 @@ export default function ConnectorsPage() {
       setNextCursor(data.next_cursor);
       setTotalItems(data.total_items);
     } catch {
-      showToast("⚠️ Could not load integrations. Please refresh.");
+      showToast("Could not load integrations. Please refresh.");
     }
     setLoadingCatalog(false);
     setLoadingMore(false);
@@ -236,10 +237,10 @@ export default function ConnectorsPage() {
   useEffect(() => {
     const handle = (e: MessageEvent) => {
       if (e.data?.type === "OAUTH_SUCCESS") {
-        showToast(`✅ ${e.data.provider || "App"} connected!`);
+        showToast(`${e.data.provider || "App"} connected!`);
         checkConnectionStatus();
       } else if (e.data?.type === "OAUTH_ERROR") {
-        showToast("❌ Connection failed. Please try again.");
+        showToast("Connection failed. Please try again.");
       }
     };
     window.addEventListener("message", handle);
@@ -305,7 +306,7 @@ export default function ConnectorsPage() {
       });
       const data = await res.json() as { authUrl?: string; error?: string };
       if (!res.ok || !data.authUrl) {
-        showToast(`❌ Could not start connection for ${tk.name}. Try again.`);
+        showToast(`Could not start connection for ${tk.name}. Try again.`);
         setConnecting(null);
         return;
       }
@@ -318,7 +319,7 @@ export default function ConnectorsPage() {
         }
       }, 500);
     } catch {
-      showToast(`❌ Connection failed for ${tk.name}.`);
+      showToast(`Connection failed for ${tk.name}.`);
       setConnecting(null);
     }
   };
@@ -344,7 +345,7 @@ export default function ConnectorsPage() {
       });
       showToast(`✓ ${tk.name} disconnected.`);
     } catch {
-      showToast("❌ Could not disconnect. Please try again.");
+      showToast("Could not disconnect. Please try again.");
     }
   };
 
@@ -395,7 +396,7 @@ export default function ConnectorsPage() {
       }).catch(() => {});
       setKeySuccess(true);
       setTimeout(() => {
-        showToast(`✅ ${apiKeyModal.name} connected!`);
+        showToast(`${apiKeyModal.name} connected!`);
         setApiKeyModal(null);
         checkConnectionStatus();
       }, 1200);
@@ -416,7 +417,7 @@ export default function ConnectorsPage() {
       });
       const data = await res.json() as { success?: boolean; error?: string };
       if (!res.ok || !data.success) { setCustomError(data.error ?? "Failed"); setSavingCustom(false); return; }
-      showToast(`✅ ${customForm.name} connected!`);
+      showToast(`${customForm.name} connected!`);
       setShowCustomModal(false);
       setCustomForm({ name: "", api_key: "", base_url: "", auth_type: "bearer" });
       fetchCustomConnectors();
@@ -428,7 +429,7 @@ export default function ConnectorsPage() {
   if (loadingCatalog) return (
     <>
       <div className="page-header">
-        <h1 className="page-title">🔗 850+ Integrations — connect anything</h1>
+        <h1 className="page-title">1,600+ integrations — connect anything</h1>
         <p className="page-subtitle">OAuth or API key · no code required · enterprise-grade encryption</p>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "var(--space-md)" }}>
@@ -453,22 +454,22 @@ export default function ConnectorsPage() {
       <div className="page-header" style={{ marginBottom: "var(--space-lg)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "var(--space-md)" }}>
           <div>
-            <h1 className="page-title">🔗 850+ Integrations — connect anything</h1>
+            <h1 className="page-title">1,600+ integrations — connect anything</h1>
             <p className="page-subtitle">OAuth or API key · no code required · enterprise-grade encryption</p>
           </div>
           <div style={{ display: "flex", gap: "var(--space-sm)", alignItems: "center" }}>
             <span className="badge badge-green">{connectedCount} Connected</span>
-            <span className="badge badge-purple">{totalItems || "850+"}  Total</span>
+            <span className="badge badge-purple">{totalItems || "1,600+"} total</span>
           </div>
         </div>
       </div>
 
       {/* ── Security Banner ── */}
-      <div className="card" style={{ marginBottom: "var(--space-lg)", borderColor: "hsla(152,69%,50%,0.2)", background: "var(--emerald-bg)" }}>
+      <div className="card" style={{ marginBottom: "var(--space-lg)", borderColor: "color-mix(in srgb, var(--emerald) 20%, transparent)", background: "var(--emerald-bg)" }}>
         <div className="row">
-          <span style={{ fontSize: "1.2rem" }}>🛡️</span>
+          <span style={{ fontSize: "1.2rem" }}><Glyph e="🛡️" /></span>
           <div>
-            <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--emerald)" }}>Secure · OAuth 2.0 + PKCE · 850+ integrations · API Keys encrypted at rest</p>
+            <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--emerald)" }}>Secure · OAuth 2.0 + PKCE · 1,600+ integrations · API Keys encrypted at rest</p>
             <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", marginTop: 2 }}>
               OAuth tokens auto-refreshed · API keys stored in encrypted vault · No secrets stored in the browser
             </p>
@@ -480,7 +481,7 @@ export default function ConnectorsPage() {
       <div style={{ marginBottom: "var(--space-md)" }}>
         <input
           className="input" type="text"
-          placeholder={`🔍 Search ${totalItems || "850+"}  integrations (e.g. Gmail, Stripe, CRM...)`}
+          placeholder={`Search ${totalItems || "1,600+"} integrations (e.g. Gmail, Stripe, CRM…)`}
           value={search} onChange={e => setSearch(e.target.value)}
           autoComplete="off" name="connector-search"
           style={{ fontSize: "0.9rem" }}
@@ -501,9 +502,9 @@ export default function ConnectorsPage() {
 
       {/* ── Social Media Guidance Banner ── */}
       {showSocialBanner && (
-        <div className="card" style={{ marginBottom: "var(--space-lg)", borderColor: "hsla(38,92%,55%,0.3)", background: "hsla(38,92%,55%,0.06)" }}>
+        <div className="card" style={{ marginBottom: "var(--space-lg)", borderColor: "color-mix(in srgb, var(--amber) 30%, transparent)", background: "color-mix(in srgb, var(--amber) 6%, transparent)" }}>
           <div className="row" style={{ gap: "var(--space-md)" }}>
-            <span style={{ fontSize: "1.4rem", flexShrink: 0 }}>💡</span>
+            <span style={{ fontSize: "1.4rem", flexShrink: 0 }}><Glyph e="💡" /></span>
             <div>
               <div style={{ fontWeight: 700, fontSize: "0.9rem", marginBottom: 4, color: "var(--amber)" }}>
                 For Facebook & Instagram posting, use Buffer
@@ -519,7 +520,7 @@ export default function ConnectorsPage() {
       {/* ── No results ── */}
       {filtered.length === 0 && !showBufferCard && !showAICards && !showCanvaCard && (
         <div className="card" style={{ textAlign: "center", padding: "var(--space-2xl)" }}>
-          <div style={{ fontSize: "2.5rem", marginBottom: "var(--space-md)" }}>🔍</div>
+          <div style={{ fontSize: "2.5rem", marginBottom: "var(--space-md)" }}><Glyph e="🔍" /></div>
           <h2 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}>No results for &ldquo;{search}&rdquo;</h2>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>
             Try a different name or use the custom connector below to add any REST API.
@@ -528,7 +529,7 @@ export default function ConnectorsPage() {
       )}
       {filtered.length === 0 && (showBufferCard || showAICards) && !showSocialBanner && !showAICards && (
         <div className="card" style={{ textAlign: "center", padding: "var(--space-xl)", marginBottom: "var(--space-md)" }}>
-          <div style={{ fontSize: "2rem", marginBottom: "var(--space-sm)" }}>🔍</div>
+          <div style={{ fontSize: "2rem", marginBottom: "var(--space-sm)" }}><Glyph e="🔍" /></div>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>No other results for &ldquo;{search}&rdquo; — but Buffer is available below.</p>
         </div>
       )}
@@ -542,7 +543,7 @@ export default function ConnectorsPage() {
             <div key="buffer" className="card" style={{
               padding: "var(--space-lg)",
               transition: "all 0.2s",
-              ...(bufferConnected ? { borderColor: "hsla(152,69%,50%,0.35)" } : { borderColor: "hsla(38,92%,55%,0.25)" }),
+              ...(bufferConnected ? { borderColor: "color-mix(in srgb, var(--emerald) 35%, transparent)" } : { borderColor: "color-mix(in srgb, var(--amber) 25%, transparent)" }),
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--space-sm)" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -572,21 +573,21 @@ export default function ConnectorsPage() {
               </p>
               {bufferConnected && userEmail && (
                 <div style={{ padding: "4px 10px", background: "var(--emerald-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.7rem", color: "var(--emerald)", marginBottom: "var(--space-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  🔒 {userEmail}
+                  <Glyph e="🔒" size={13} /> {userEmail}
                 </div>
               )}
               <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginBottom: "var(--space-sm)" }}>
                 Facebook · Instagram · LinkedIn · Twitter · Pinterest
               </div>
               {bufferConnected ? (
-                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "hsla(0,84%,60%,0.25)" }}
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "color-mix(in srgb, var(--rose) 25%, transparent)" }}
                   onClick={() => handleDisconnect(tk)}>
                   Disconnect
                 </button>
               ) : (
-                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--amber)", borderColor: "hsla(38,92%,55%,0.3)" }}
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--amber)", borderColor: "color-mix(in srgb, var(--amber) 30%, transparent)" }}
                   onClick={() => handleApiKeyOpen(tk)}>
-                  🔑 Add Access Token →
+                  <Glyph e="🔑" size={14} /> Add access token →
                 </button>
               )}
             </div>
@@ -599,7 +600,7 @@ export default function ConnectorsPage() {
             <div key="openai" className="card" style={{
               padding: "var(--space-lg)",
               transition: "all 0.2s",
-              ...(openaiConnected ? { borderColor: "hsla(152,69%,50%,0.35)" } : { borderColor: "hsla(267,83%,65%,0.2)" }),
+              ...(openaiConnected ? { borderColor: "color-mix(in srgb, var(--emerald) 35%, transparent)" } : { borderColor: "color-mix(in srgb, var(--purple) 20%, transparent)" }),
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--space-sm)" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -628,21 +629,21 @@ export default function ConnectorsPage() {
               </p>
               {openaiConnected && userEmail && (
                 <div style={{ padding: "4px 10px", background: "var(--emerald-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.7rem", color: "var(--emerald)", marginBottom: "var(--space-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  🔒 {userEmail}
+                  <Glyph e="🔒" size={13} /> {userEmail}
                 </div>
               )}
               <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginBottom: "var(--space-sm)" }}>
                 DALL-E 3 · Whisper · GPT-4o Vision · TTS
               </div>
               {openaiConnected ? (
-                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "hsla(0,84%,60%,0.25)" }}
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "color-mix(in srgb, var(--rose) 25%, transparent)" }}
                   onClick={() => handleDisconnect(tk)}>
                   Disconnect
                 </button>
               ) : (
-                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--accent)", borderColor: "hsla(267,83%,65%,0.25)" }}
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--accent)", borderColor: "color-mix(in srgb, var(--purple) 25%, transparent)" }}
                   onClick={() => handleApiKeyOpen(tk)}>
-                  🔑 Add API Key →
+                  <Glyph e="🔑" size={14} /> Add API key →
                 </button>
               )}
             </div>
@@ -656,7 +657,7 @@ export default function ConnectorsPage() {
             <div key="gemini" className="card" style={{
               padding: "var(--space-lg)",
               transition: "all 0.2s",
-              ...(geminiConnected ? { borderColor: "hsla(152,69%,50%,0.35)" } : { borderColor: "hsla(214,89%,52%,0.2)" }),
+              ...(geminiConnected ? { borderColor: "color-mix(in srgb, var(--emerald) 35%, transparent)" } : { borderColor: "color-mix(in srgb, var(--accent) 20%, transparent)" }),
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--space-sm)" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -685,21 +686,21 @@ export default function ConnectorsPage() {
               </p>
               {geminiConnected && userEmail && (
                 <div style={{ padding: "4px 10px", background: "var(--emerald-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.7rem", color: "var(--emerald)", marginBottom: "var(--space-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  🔒 {userEmail}
+                  <Glyph e="🔒" size={13} /> {userEmail}
                 </div>
               )}
               <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginBottom: "var(--space-sm)" }}>
                 Gemini 2.0 Flash · Gemini 1.5 Pro · Vision · 1M context
               </div>
               {geminiConnected ? (
-                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "hsla(0,84%,60%,0.25)" }}
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "color-mix(in srgb, var(--rose) 25%, transparent)" }}
                   onClick={() => handleDisconnect(tk)}>
                   Disconnect
                 </button>
               ) : (
-                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "hsla(214,89%,52%,1)", borderColor: "hsla(214,89%,52%,0.25)" }}
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--accent)", borderColor: "color-mix(in srgb, var(--accent) 25%, transparent)" }}
                   onClick={() => handleApiKeyOpen(tk)}>
-                  🔑 Add API Key →
+                  <Glyph e="🔑" size={14} /> Add API key →
                 </button>
               )}
             </div>
@@ -713,7 +714,7 @@ export default function ConnectorsPage() {
             <div key="canva" className="card" style={{
               padding: "var(--space-lg)",
               transition: "all 0.2s",
-              ...(canvaConnected ? { borderColor: "hsla(152,69%,50%,0.35)" } : { borderColor: "hsla(353,100%,50%,0.18)" }),
+              ...(canvaConnected ? { borderColor: "color-mix(in srgb, var(--emerald) 35%, transparent)" } : { borderColor: "color-mix(in srgb, var(--rose) 18%, transparent)" }),
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--space-sm)" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -742,14 +743,14 @@ export default function ConnectorsPage() {
               </p>
               {canvaConnected && userEmail && (
                 <div style={{ padding: "4px 10px", background: "var(--emerald-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.7rem", color: "var(--emerald)", marginBottom: "var(--space-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  🔒 {userEmail}
+                  <Glyph e="🔒" size={13} /> {userEmail}
                 </div>
               )}
               <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginBottom: "var(--space-sm)" }}>
                 Create designs · Export PNG/PDF/MP4 · Auto-fill templates · Upload assets
               </div>
               {canvaConnected ? (
-                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "hsla(0,84%,60%,0.25)" }}
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "color-mix(in srgb, var(--rose) 25%, transparent)" }}
                   onClick={() => handleDisconnect(tk)}>
                   Disconnect
                 </button>
@@ -775,7 +776,7 @@ export default function ConnectorsPage() {
             <div key={tk.slug} className="card" style={{
               padding: "var(--space-lg)",
               transition: "all 0.2s",
-              ...(connected ? { borderColor: "hsla(152,69%,50%,0.35)" } : {}),
+              ...(connected ? { borderColor: "color-mix(in srgb, var(--emerald) 35%, transparent)" } : {}),
             }}>
               {/* Card header */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--space-sm)" }}>
@@ -810,7 +811,7 @@ export default function ConnectorsPage() {
               {/* Connected email */}
               {connected && userEmail && (
                 <div style={{ padding: "4px 10px", background: "var(--emerald-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.7rem", color: "var(--emerald)", marginBottom: "var(--space-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  🔒 {userEmail}
+                  <Glyph e="🔒" size={13} /> {userEmail}
                 </div>
               )}
 
@@ -823,7 +824,7 @@ export default function ConnectorsPage() {
 
               {/* Action button */}
               {connected ? (
-                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "hsla(0,84%,60%,0.25)" }}
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--rose)", borderColor: "color-mix(in srgb, var(--rose) 25%, transparent)" }}
                   onClick={() => handleDisconnect(tk)}>
                   Disconnect
                 </button>
@@ -842,9 +843,9 @@ export default function ConnectorsPage() {
                     : "Connect →"}
                 </button>
               ) : isApiKey ? (
-                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--amber)", borderColor: "hsla(38,92%,55%,0.3)" }}
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", color: "var(--amber)", borderColor: "color-mix(in srgb, var(--amber) 30%, transparent)" }}
                   onClick={() => handleApiKeyOpen(tk)}>
-                  🔑 Add API Key →
+                  <Glyph e="🔑" size={14} /> Add API key →
                 </button>
               ) : null}
             </div>
@@ -872,7 +873,7 @@ export default function ConnectorsPage() {
       <div style={{ marginTop: "var(--space-2xl)", borderTop: "1px solid var(--border)", paddingTop: "var(--space-xl)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-lg)" }}>
           <div>
-            <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>🔌 Custom API Connectors</div>
+            <div style={{ fontWeight: 700, fontSize: "1.05rem" }}><Glyph e="🔌" /> Custom API Connectors</div>
             <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: 2 }}>
               Connect any REST API not listed above — agents call it using the <code>custom_api_call</code> tool.
             </div>
@@ -889,7 +890,7 @@ export default function ConnectorsPage() {
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "var(--space-md)" }}>
             {customConnectors.map(c => (
-              <div key={c.provider} className="card" style={{ padding: "var(--space-md)", borderColor: "hsla(152,69%,50%,0.3)" }}>
+              <div key={c.provider} className="card" style={{ padding: "var(--space-md)", borderColor: "color-mix(in srgb, var(--emerald) 30%, transparent)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: "0.9rem" }}>{c.metadata?.display_name ?? c.provider}</div>
@@ -918,7 +919,7 @@ export default function ConnectorsPage() {
 
       {/* ── API Key Modal ── */}
       {apiKeyModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "1rem" }}
+        <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "1rem" }}
           onClick={() => setApiKeyModal(null)}>
           <div className="card" style={{ width: "100%", maxWidth: 440, padding: "var(--space-xl)" }} onClick={e => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-lg)" }}>
@@ -937,7 +938,7 @@ export default function ConnectorsPage() {
 
             {keySuccess ? (
               <div style={{ padding: "var(--space-lg)", textAlign: "center" }}>
-                <div style={{ fontSize: "2rem", marginBottom: 8 }}>✅</div>
+                <div style={{ fontSize: "2rem", marginBottom: 8 }}><Glyph e="✅" /></div>
                 <div style={{ fontWeight: 700, color: "var(--emerald)" }}>{apiKeyModal.name} Connected!</div>
               </div>
             ) : (
@@ -958,7 +959,7 @@ export default function ConnectorsPage() {
                 )}
                 {keyError && (
                   <div style={{ padding: "var(--space-sm) var(--space-md)", background: "var(--rose-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.8rem", color: "var(--rose)", marginBottom: "var(--space-md)" }}>
-                    ❌ {keyError}
+                    <Glyph e="❌" size={14} /> {keyError}
                   </div>
                 )}
                 <div style={{ display: "flex", gap: "var(--space-sm)", justifyContent: "flex-end" }}>
@@ -975,12 +976,12 @@ export default function ConnectorsPage() {
 
       {/* ── Custom Connector Modal ── */}
       {showCustomModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "1rem" }}
+        <div style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "1rem" }}
           onClick={() => setShowCustomModal(false)}>
           <div className="card" style={{ width: "100%", maxWidth: 460, padding: "var(--space-xl)" }} onClick={e => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-lg)" }}>
               <div>
-                <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>🔌 Add Custom API Connector</div>
+                <div style={{ fontWeight: 700, fontSize: "1.05rem" }}><Glyph e="🔌" /> Add Custom API Connector</div>
                 <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 2 }}>Connect any REST API — Vapi, hotel PMS, internal tools</div>
               </div>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowCustomModal(false)}>✕</button>
@@ -1011,7 +1012,7 @@ export default function ConnectorsPage() {
             </div>
             {customError && (
               <div style={{ padding: "var(--space-sm)", background: "var(--rose-bg)", borderRadius: "var(--radius-sm)", fontSize: "0.8rem", color: "var(--rose)", marginTop: "var(--space-md)" }}>
-                ❌ {customError}
+                <Glyph e="❌" size={14} /> {customError}
               </div>
             )}
             <div style={{ display: "flex", gap: "var(--space-sm)", justifyContent: "flex-end", marginTop: "var(--space-lg)" }}>
@@ -1025,7 +1026,7 @@ export default function ConnectorsPage() {
       )}
 
       {toast && (
-        <div className="approval-toast" style={{ background: "var(--accent)", color: "white" }}>{toast}</div>
+        <div className="approval-toast" style={{ background: "var(--accent)", color: "var(--on-accent)" }}>{toast}</div>
       )}
     </>
   );

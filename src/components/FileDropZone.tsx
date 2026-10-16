@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useCallback } from "react";
 
+import Glyph from "@/components/ui/Glyph";
 // ============================================================
 // Universal File Drop Zone
 // Drag-and-drop + click-to-upload. Files are extracted, then
@@ -179,10 +180,10 @@ export default function FileDropZone({
       >
         <input ref={inputRef} type="file" accept={accept} multiple style={{ display: "none" }}
           onChange={(e) => e.target.files && processFiles(e.target.files)} />
-        {!compact && <div className="drop-icon">📎</div>}
+        {!compact && <div className="drop-icon"><Glyph e="📎" /></div>}
         <div className="drop-text">
           {compact ? (
-            <>📎 <strong>Drop files</strong> or click · Embedded into pgvector</>
+            <><Glyph e="📎" /> <strong>Drop files</strong> or click · Embedded into pgvector</>
           ) : (
             <>Drop files here or <strong>click to upload</strong><br />
             Files are embedded with OpenAI and indexed as {contextLabels[context]}<br />
@@ -196,7 +197,7 @@ export default function FileDropZone({
         <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-sm)", marginTop: "var(--space-sm)" }}>
           {files.map((f) => (
             <div key={f.id} className="file-chip" style={f.status === "failed" ? { borderColor: "var(--rose)" } : undefined}>
-              {statusIcons[f.status] || "📄"}
+              <Glyph e={statusIcons[f.status] || "📄"} size={14} />
               <span>{f.name}</span>
               <span style={{ color: "var(--text-muted)" }}>({formatSize(f.size)})</span>
               {f.status === "indexed" && <span style={{ color: "var(--emerald)", fontSize: "0.65rem" }}>✓ embedded</span>}

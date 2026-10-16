@@ -6,12 +6,12 @@ export const metadata = {
 export default function RefundPage() {
   return (
     <div className="welcome-section" style={{ maxWidth: 800 }}>
-      <h1 className="welcome-section-title" style={{ textAlign: "left", fontSize: "1.5rem", marginBottom: 32 }}>💰 Refund & Cancellation Policy</h1>
+      <h1 className="welcome-section-title" style={{ textAlign: "left", fontSize: "2.6rem", marginBottom: 32 }}>Refund & Cancellation Policy</h1>
       <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 32 }}>Last updated: May 2026</p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 28, fontSize: "0.88rem", color: "var(--text-secondary)", lineHeight: 1.8 }}>
-        <section style={{ background: "hsla(0,84%,60%,0.06)", border: "1px solid hsla(0,84%,60%,0.2)", borderRadius: 12, padding: 24 }}>
-          <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "hsl(0,84%,60%)", marginBottom: 8 }}>No Refund Policy</h2>
+        <section style={{ background: "color-mix(in srgb, var(--rose) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--rose) 20%, transparent)", borderRadius: 12, padding: 24 }}>
+          <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--rose)", marginBottom: 8 }}>No Refund Policy</h2>
           <p><strong>All purchases on Agentic Factor are final and non-refundable.</strong> This includes subscription fees, credit purchases, and any one-time payments. We do not offer refunds under any circumstances.</p>
         </section>
 

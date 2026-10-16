@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
+import Glyph from "@/components/ui/Glyph";
 interface Template {
   id: string;
   slug: string;
@@ -99,7 +100,7 @@ export default function TemplatesPage() {
             style={{ padding: '5px 12px', borderRadius: 20, border: '1px solid var(--border)',
               background: category === c.key ? 'var(--accent)' : 'var(--surface)',
               color: category === c.key ? '#fff' : 'var(--text)', cursor: 'pointer', fontSize: '0.82rem' }}>
-            {c.icon} {c.label}
+            <Glyph e={c.icon} size={14} /> {c.label}
           </button>
         ))}
       </div>
@@ -108,7 +109,7 @@ export default function TemplatesPage() {
       {!category && !search && filtered.some(t => t.is_featured) && (
         <div>
           <div style={{ fontWeight: 600, marginBottom: 'var(--space-md)', fontSize: '0.9rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            ⭐ Featured
+            <Glyph e="⭐" size={13} /> Featured
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 'var(--space-md)' }}>
             {filtered.filter(t => t.is_featured).map(t => (
@@ -152,7 +153,7 @@ function TemplateCard({ template: t, onFork, forking }: { template: Template; on
       transition: 'border-color 0.15s', cursor: 'default',
     }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-        <span style={{ fontSize: '2rem', flexShrink: 0 }}>{t.icon}</span>
+        <span style={{ flexShrink: 0, width: 44, height: 44, borderRadius: 12, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-secondary)', color: 'var(--accent)' }}><Glyph e={t.icon} size={22} /></span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{t.title}</div>
           {t.is_featured && (
@@ -178,7 +179,7 @@ function TemplateCard({ template: t, onFork, forking }: { template: Template; on
         </span>
         <button className="btn btn-primary" onClick={() => onFork(t.slug)} disabled={isBusy}
           style={{ padding: '6px 16px', fontSize: '0.85rem' }}>
-          {isBusy ? 'Creating...' : '⚡ Use Template'}
+          {isBusy ? 'Creating…' : 'Use template'}
         </button>
       </div>
     </div>

@@ -8,6 +8,9 @@ import MissionsSidebar from '@/components/MissionsSidebar';
 import { renderMarkdown } from '@/lib/utils/render-markdown';
 import { withArchitectQuestion } from '@/lib/utils/architect-question';
 
+import Glyph from "@/components/ui/Glyph";
+import ConnectorLogo from "@/components/ConnectorLogos";
+import { LogoMark } from "@/components/brand/Logo";
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface ChatSession { id: string; title: string; updated_at: string; }
@@ -70,8 +73,8 @@ function groupByDate(sessions: ChatSession[]) {
 
 function statusDot(status: string) {
   const colors: Record<string, string> = {
-    active: 'var(--emerald)', failed: 'var(--red,#ef4444)',
-    paused: '#f59e0b', draft: 'var(--text-muted)', completed: '#6366f1',
+    active: 'var(--emerald)', failed: 'var(--red,var(--rose))',
+    paused: 'var(--amber)', draft: 'var(--text-muted)', completed: 'var(--purple)',
   };
   return colors[status] ?? 'var(--text-muted)';
 }
@@ -242,11 +245,11 @@ function CommandCenterPageInner() {
     const handle = (e: MessageEvent) => {
       if (e.data?.type === 'OAUTH_SUCCESS') {
         const provider = e.data.provider as string ?? '';
-        showToast(`✅ ${connectorMeta(provider).label} connected!`);
+        showToast(`${connectorMeta(provider).label} connected!`);
         setConnectedInSession(prev => { const s = new Set(prev); s.add(provider); return s; });
         setConnectingSlug(null);
       } else if (e.data?.type === 'OAUTH_ERROR') {
-        showToast('❌ Connection failed. Please try again.');
+        showToast('Connection failed. Please try again.');
         setConnectingSlug(null);
       }
     };
@@ -280,7 +283,7 @@ function CommandCenterPageInner() {
         if (popup?.closed) { clearInterval(poll); setConnectingSlug(null); }
       }, 500);
     } catch {
-      showToast(`❌ Could not connect ${connectorMeta(service).label}. Try again.`);
+      showToast(`Could not connect ${connectorMeta(service).label}. Try again.`);
       setConnectingSlug(null);
     }
   }, []);
@@ -308,7 +311,7 @@ function CommandCenterPageInner() {
       const svc = inlineApiKeyModal.service;
       setConnectedInSession(prev => { const s = new Set(prev); s.add(svc); return s; });
       setTimeout(() => {
-        showToast(`✅ ${connectorMeta(svc).label} connected!`);
+        showToast(`${connectorMeta(svc).label} connected!`);
         setInlineApiKeyModal(null); setInlineApiKeyValue(''); setInlineApiKeySuccess(false);
       }, 1000);
     } catch { setInlineApiKeyError('Network error. Please try again.'); }
@@ -488,7 +491,7 @@ function CommandCenterPageInner() {
 
       if (!res.ok) {
         const err = await res.json() as { error?: string };
-        setMessages([...newMessages, { role: 'assistant', content: `⚠️ ${err.error ?? 'Something went wrong.'}` }]);
+        setMessages([...newMessages, { role: 'assistant', content: `${err.error ?? 'Something went wrong.'}` }]);
         setIsStreaming(false); return;
       }
 
@@ -542,7 +545,7 @@ function CommandCenterPageInner() {
             }
             if (evt.type === 'error') {
               finished = true;
-              setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: `⚠️ ${evt.message ?? evt.text ?? 'Error'}` }; return u; });
+              setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: `${evt.message ?? evt.text ?? 'Error'}` }; return u; });
             }
           } catch { /* skip */ }
         }
@@ -554,10 +557,10 @@ function CommandCenterPageInner() {
           if (saved.action?.type === 'building_blueprint' && saved.action.jobId) startBlueprintPolling(saved.action.jobId);
           if (!activeSessionId) { setActiveSessionId(saved.sessionId); loadSessions(); }
         } else {
-          setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: '⚠️ The reply did not arrive. Please try again.' }; return u; });
+          setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: 'The reply did not arrive. Please try again.' }; return u; });
         }
       }
-    } catch { setMessages([...newMessages, { role: 'assistant', content: '⚠️ Connection error. Please try again.' }]); }
+    } catch { setMessages([...newMessages, { role: 'assistant', content: 'Connection error. Please try again.' }]); }
     setIsStreaming(false); inputRef.current?.focus();
   };
 
@@ -566,33 +569,33 @@ function CommandCenterPageInner() {
     setApplyingAction(msgIndex);
     try {
       if (action.type === 'run_mission' && action.missionId) {
-        showToast('🚀 Starting mission…');
+        showToast('Starting mission…');
         const ep = action.missionStatus === 'draft'
           ? `/api/missions/${action.missionId}/run`
           : `/api/missions/${action.missionId}/execute`;
         const res = await fetch(ep, { method: 'POST', credentials: 'include' });
-        if (res.ok) { showToast('✅ Mission started!'); startRunPolling(action.missionId); }
-        else { const e = await res.json() as { error?: string }; showToast(`❌ ${e.error ?? 'Could not start.'}`); }
+        if (res.ok) { showToast('Mission started!'); startRunPolling(action.missionId); }
+        else { const e = await res.json() as { error?: string }; showToast(`${e.error ?? 'Could not start.'}`); }
 
       } else if (action.type === 'schedule_mission' && action.missionId && action.cron) {
-        showToast('📅 Setting schedule…');
+        showToast('Setting schedule…');
         const res = await fetch(`/api/missions/${action.missionId}`, {
           method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'schedule', scheduleConfig: { cron: action.cron, timezone: action.timezone ?? 'Asia/Kolkata' } }),
         });
-        showToast(res.ok ? `✅ Scheduled: ${action.label}` : '❌ Could not set schedule.');
+        showToast(res.ok ? `Scheduled: ${action.label}` : 'Could not set schedule.');
 
       } else if (action.type === 'pause_mission' && action.missionId) {
         const res = await fetch(`/api/missions/${action.missionId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pause' }) });
-        showToast(res.ok ? '⏸️ Mission paused.' : '❌ Could not pause.');
+        showToast(res.ok ? 'Mission paused.' : 'Could not pause.');
 
       } else if (action.type === 'unschedule_mission' && action.missionId) {
         const res = await fetch(`/api/missions/${action.missionId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unschedule' }) });
-        showToast(res.ok ? '🗑️ Schedule removed.' : '❌ Could not remove the schedule.');
+        showToast(res.ok ? 'Schedule removed.' : 'Could not remove the schedule.');
 
       } else if (action.type === 'resume_mission' && action.missionId) {
         const res = await fetch(`/api/missions/${action.missionId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'resume' }) });
-        showToast(res.ok ? '▶️ Mission resumed.' : '❌ Could not resume.');
+        showToast(res.ok ? 'Mission resumed.' : 'Could not resume.');
 
       } else if (action.type === 'suggest_connector' && action.provider) {
         router.push(`/connectors?search=${encodeURIComponent(action.provider)}`);
@@ -609,7 +612,7 @@ function CommandCenterPageInner() {
       } else if (action.type === 'show_usage') {
         router.push('/dashboard/usage');
       }
-    } catch { showToast('❌ Something went wrong.'); }
+    } catch { showToast('Something went wrong.'); }
     setApplyingAction(null);
   };
 
@@ -654,7 +657,7 @@ function CommandCenterPageInner() {
         } catch { /* non-fatal */ }
       };
       mr.start(); mediaRecorderRef.current = mr; setIsRecording(true);
-    } catch { showToast('❌ Microphone access denied.'); }
+    } catch { showToast('Microphone access denied.'); }
   };
 
   // ── Action Card Renderer ───────────────────────────────────────────────────
@@ -681,17 +684,17 @@ function CommandCenterPageInner() {
     return (
       <div style={{ marginTop: 10, maxWidth: 520, animation: 'slideIn 0.3s ease', fontFamily: 'var(--font-sans)' }}>
         <div style={{
-          background: 'var(--bg-card)', border: '1px solid hsla(217,91%,60%,0.2)',
+          background: 'var(--bg-card)', border: '1px solid color-mix(in srgb, var(--accent) 20%, transparent)',
           borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10,
         }}>
           {/* Header */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{
               width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-              background: 'linear-gradient(135deg,#3B82F6,#8B5CF6)',
+              background: 'var(--accent-subtle)', color: 'var(--accent)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: '0.9rem', animation: 'pulse 1.5s ease-in-out infinite',
-            }}>{c.icon}</div>
+            }}><Glyph e={c.icon} size={16} /></div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)' }}>{c.title}</div>
               <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', marginTop: 2 }}>{displaySub}</div>
@@ -700,7 +703,7 @@ function CommandCenterPageInner() {
             <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
               {[0, 1, 2].map(i => (
                 <div key={i} style={{
-                  width: 6, height: 6, borderRadius: '50%', background: '#3B82F6',
+                  width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)',
                   animation: `af-dot 1.2s ease-in-out ${i * 0.18}s infinite`,
                 }} />
               ))}
@@ -711,7 +714,7 @@ function CommandCenterPageInner() {
           <div style={{ position: 'relative', height: 3, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
             <div style={{
               position: 'absolute', top: 0, height: '100%',
-              background: 'linear-gradient(90deg,#3B82F6,#8B5CF6)',
+              background: 'linear-gradient(90deg,var(--accent),var(--purple))',
               borderRadius: 99, animation: 'af-bar 1.6s cubic-bezier(0.4,0,0.6,1) infinite',
             }} />
           </div>
@@ -723,7 +726,7 @@ function CommandCenterPageInner() {
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{
                     width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-                    background: i === 0 ? '#3B82F6' : 'var(--border)',
+                    background: i === 0 ? 'var(--accent)' : 'var(--border)',
                     animation: i === 0 ? 'pulse 1s ease-in-out infinite' : undefined,
                   }} />
                   <div style={{
@@ -743,7 +746,7 @@ function CommandCenterPageInner() {
   const renderActionCard = (action: ActionPayload, msgIndex: number) => {
     const applying = applyingAction === msgIndex;
     const btnStyle: React.CSSProperties = {
-      background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)',
+      background: 'var(--accent)', color: 'var(--on-accent)', border: 'none', borderRadius: 'var(--radius-sm)',
       padding: '6px 14px', fontSize: '0.78rem', fontWeight: 600, cursor: applying ? 'not-allowed' : 'pointer',
       opacity: applying ? 0.6 : 1,
     };
@@ -752,7 +755,7 @@ function CommandCenterPageInner() {
 
     if (action.type === 'run_mission') return (
       <div style={card}>
-        <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>▶ Run "{action.missionTitle}"</div>
+        <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}><Glyph e="▶" /> Run "{action.missionTitle}"</div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button style={btnStyle} onClick={() => applyAction(action, msgIndex)} disabled={applying}>{applying ? 'Starting…' : 'Run Now'}</button>
           <button style={ghostBtn} onClick={() => router.push(`/dashboard/missions/${action.missionId}`)}>View Mission</button>
@@ -772,7 +775,7 @@ function CommandCenterPageInner() {
 
     if (action.type === 'schedule_mission') return (
       <div style={card}>
-        <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>📅 Schedule "{action.missionTitle}"</div>
+        <div style={{ fontSize: '0.8rem', fontWeight: 600 }}><Glyph e="📅" /> Schedule "{action.missionTitle}"</div>
         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{action.label ?? action.cron}</div>
         <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => applyAction(action, msgIndex)} disabled={applying}>{applying ? 'Applying…' : 'Apply Schedule'}</button>
       </div>
@@ -780,14 +783,14 @@ function CommandCenterPageInner() {
 
     if (action.type === 'pause_mission' || action.type === 'resume_mission' || action.type === 'unschedule_mission') return (
       <div style={card}>
-        <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{action.type === 'pause_mission' ? '⏸ Pause' : action.type === 'unschedule_mission' ? '🗑 Remove schedule for' : '▶ Resume'} "{action.missionTitle}"</div>
+        <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{action.type === 'pause_mission' ? 'Pause' : action.type === 'unschedule_mission' ? 'Remove schedule for' : 'Resume'} "{action.missionTitle}"</div>
         <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => applyAction(action, msgIndex)} disabled={applying}>{applying ? 'Working…' : 'Confirm'}</button>
       </div>
     );
 
     if (action.type === 'suggest_connector') return (
       <div style={card}>
-        <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>🔗 Connect {CONNECTOR_LABELS[action.provider ?? ''] ?? action.provider}</div>
+        <div style={{ fontSize: '0.8rem', fontWeight: 600 }}><Glyph e="🔗" /> Connect {CONNECTOR_LABELS[action.provider ?? ''] ?? action.provider}</div>
         {action.reason && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{action.reason}</div>}
         <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => applyAction(action, msgIndex)}>Connect Now →</button>
       </div>
@@ -802,7 +805,7 @@ function CommandCenterPageInner() {
       // Historical message — job is no longer active
       return (
         <div style={card}>
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>✨ Blueprint job has ended. Check your Missions list.</div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}><Glyph e="✨" /> Blueprint job has ended. Check your Missions list.</div>
           <button style={ghostBtn} onClick={() => router.push('/dashboard/missions')}>View Missions →</button>
         </div>
       );
@@ -815,10 +818,10 @@ function CommandCenterPageInner() {
         orchestrator_worker: 'Orchestrator + Workers', hierarchical: 'Hierarchical',
       };
       const agentAccent = (icon?: string): string => ({
-        '🧠': '#3B82F6', '🎨': '#8B5CF6', '📲': '#22C55E', '📧': '#F59E0B',
-        '🎬': '#F43F5E', '🔍': '#06B6D4', '📊': '#6366F1', '🎯': '#F97316',
-        '🔔': '#EC4899',
-      }[icon ?? ''] ?? '#64748B');
+        '🧠': 'var(--accent)', '🎨': 'var(--purple)', '📲': 'var(--emerald)', '📧': 'var(--amber)',
+        '🎬': 'var(--rose)', '🔍': 'var(--info)', '📊': 'var(--purple)', '🎯': 'var(--amber)',
+        '🔔': 'var(--purple)',
+      }[icon ?? ''] ?? 'var(--text-muted)');
 
       return (
         <div style={{ marginTop: 14, maxWidth: 520, animation: 'slideIn 0.3s ease', fontFamily: 'var(--font-sans)' }}>
@@ -833,9 +836,9 @@ function CommandCenterPageInner() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{
                 width: 30, height: 30, borderRadius: 8, flexShrink: 0,
-                background: 'linear-gradient(135deg,#3B82F6,#8B5CF6)',
+                background: 'linear-gradient(135deg,var(--accent),var(--purple))',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem',
-              }}>✨</div>
+              }}><Glyph e="✨" /></div>
               <div>
                 <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>Mission Blueprint Ready</div>
                 <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', marginTop: 1 }}>{action.missionTitle}</div>
@@ -843,8 +846,8 @@ function CommandCenterPageInner() {
             </div>
             {action.orchestrationPattern && (
               <div style={{
-                fontSize: '0.58rem', fontWeight: 800, color: '#3B82F6',
-                background: 'hsla(217,91%,60%,0.1)', border: '1px solid hsla(217,91%,60%,0.25)',
+                fontSize: '0.58rem', fontWeight: 800, color: 'var(--accent)',
+                background: 'color-mix(in srgb, var(--accent) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)',
                 borderRadius: 99, padding: '3px 10px', textTransform: 'uppercase',
                 letterSpacing: '0.6px', flexShrink: 0,
               }}>
@@ -856,7 +859,7 @@ function CommandCenterPageInner() {
           {/* ── Pipeline Canvas ── */}
           <div style={{
             background: 'var(--bg-secondary)',
-            border: '1px solid hsla(217,91%,60%,0.22)',
+            border: '1px solid color-mix(in srgb, var(--accent) 22%, transparent)',
             padding: '14px 14px 10px',
           }}>
 
@@ -864,23 +867,23 @@ function CommandCenterPageInner() {
             <div style={{
               display: 'flex', alignItems: 'center', gap: 10,
               background: 'var(--bg-card)',
-              border: '1px solid hsla(38,92%,55%,0.35)',
-              borderLeft: '3px solid #F59E0B',
+              border: '1px solid color-mix(in srgb, var(--amber) 35%, transparent)',
+              borderLeft: '3px solid var(--amber)',
               borderRadius: 10, padding: '10px 12px',
-              boxShadow: '0 0 0 3px hsla(38,92%,55%,0.05)',
+              boxShadow: '0 0 0 3px color-mix(in srgb, var(--amber) 5%, transparent)',
             }}>
               <div style={{
                 width: 36, height: 36, borderRadius: 8, flexShrink: 0,
-                background: 'hsla(38,92%,55%,0.12)',
+                background: 'color-mix(in srgb, var(--amber) 12%, transparent)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem',
-              }}>⏰</div>
+              }}><Glyph e="⏰" /></div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '0.59rem', fontWeight: 800, color: '#F59E0B', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 2 }}>Entry Point · Trigger</div>
+                <div style={{ fontSize: '0.59rem', fontWeight: 800, color: 'var(--amber)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 2 }}>Entry Point · Trigger</div>
                 <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>Scheduled + Manual Run</div>
               </div>
               <div style={{
-                fontSize: '0.59rem', fontWeight: 800, color: '#F59E0B',
-                background: 'hsla(38,92%,55%,0.1)', border: '1px solid hsla(38,92%,55%,0.25)',
+                fontSize: '0.59rem', fontWeight: 800, color: 'var(--amber)',
+                background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--amber) 25%, transparent)',
                 borderRadius: 99, padding: '2px 8px', letterSpacing: '0.4px',
               }}>ACTIVE</div>
             </div>
@@ -921,7 +924,7 @@ function CommandCenterPageInner() {
                       width: 36, height: 36, borderRadius: 8, flexShrink: 0,
                       background: `${accent}18`, border: `1px solid ${accent}35`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem',
-                    }}>{agent.icon ?? '🤖'}</div>
+                    }}><Glyph e={agent.icon ?? '🤖'} size={18} /></div>
 
                     {/* Info */}
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -966,8 +969,8 @@ function CommandCenterPageInner() {
               background: 'var(--bg-card)',
               border: '1px solid var(--border)',
               borderTop: action.requiredConnectors.some(c => !c.connected && !connectedInSession.has(c.service))
-                ? '1px solid hsla(0,84%,60%,0.18)'
-                : '1px solid hsla(142,71%,45%,0.2)',
+                ? '1px solid color-mix(in srgb, var(--rose) 18%, transparent)'
+                : '1px solid color-mix(in srgb, var(--emerald) 20%, transparent)',
               padding: '12px 14px',
             }}>
               <div style={{ fontSize: '0.59rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 8 }}>
@@ -975,8 +978,8 @@ function CommandCenterPageInner() {
               </div>
 
               {action.requiredConnectors.length === 0 || action.requiredConnectors.every(c => c.connected || connectedInSession.has(c.service)) ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: '0.78rem', color: '#22C55E', fontWeight: 600 }}>
-                  <span>✅</span> All connectors ready — you can run now
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: '0.78rem', color: 'var(--emerald)', fontWeight: 600 }}>
+                  <span><Glyph e="✅" /></span> All connectors ready — you can run now
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -989,24 +992,24 @@ function CommandCenterPageInner() {
                       <div key={idx} style={{
                         display: 'flex', alignItems: 'center', gap: 10,
                         padding: '8px 10px', borderRadius: 8,
-                        background: isConnected ? 'hsla(142,71%,45%,0.05)' : 'hsla(0,84%,60%,0.04)',
-                        border: `1px solid ${isConnected ? 'hsla(142,71%,45%,0.2)' : 'hsla(0,84%,60%,0.13)'}`,
+                        background: isConnected ? 'color-mix(in srgb, var(--emerald) 5%, transparent)' : 'color-mix(in srgb, var(--rose) 4%, transparent)',
+                        border: `1px solid ${isConnected ? 'color-mix(in srgb, var(--emerald) 20%, transparent)' : 'color-mix(in srgb, var(--rose) 13%, transparent)'}`,
                       }}>
-                        <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>{meta.icon}</span>
+                        <span style={{ flexShrink: 0, display: 'inline-flex' }}><ConnectorLogo id={c.service} size={20} /></span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-primary)' }}>{meta.label}</div>
                           <div style={{ fontSize: '0.63rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.reason}</div>
                         </div>
                         {isConnected ? (
-                          <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#22C55E', background: 'hsla(142,71%,45%,0.1)', border: '1px solid hsla(142,71%,45%,0.3)', borderRadius: 99, padding: '2px 10px', flexShrink: 0 }}>✓ Connected</span>
+                          <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--emerald)', background: 'color-mix(in srgb, var(--emerald) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--emerald) 30%, transparent)', borderRadius: 99, padding: '2px 10px', flexShrink: 0 }}>✓ Connected</span>
                         ) : (
                           <button
                             onClick={() => handleConnectInChat(c.service)}
                             disabled={isConnectingThis}
                             style={{
-                              background: isApiKey ? 'hsla(38,92%,55%,0.08)' : 'hsla(217,91%,60%,0.08)',
-                              border: `1px solid ${isApiKey ? 'hsla(38,92%,55%,0.3)' : 'hsla(217,91%,60%,0.3)'}`,
-                              color: isApiKey ? '#F59E0B' : '#3B82F6',
+                              background: isApiKey ? 'color-mix(in srgb, var(--amber) 8%, transparent)' : 'color-mix(in srgb, var(--accent) 8%, transparent)',
+                              border: `1px solid ${isApiKey ? 'color-mix(in srgb, var(--amber) 30%, transparent)' : 'color-mix(in srgb, var(--accent) 30%, transparent)'}`,
+                              color: isApiKey ? 'var(--amber)' : 'var(--accent)',
                               borderRadius: 6, padding: '4px 12px',
                               fontSize: '0.7rem', fontWeight: 700,
                               cursor: isConnectingThis ? 'not-allowed' : 'pointer',
@@ -1014,15 +1017,15 @@ function CommandCenterPageInner() {
                               opacity: isConnectingThis ? 0.6 : 1,
                             }}
                           >
-                            {isConnectingThis ? 'Connecting…' : isApiKey ? '🔑 API Key' : 'Connect →'}
+                            {isConnectingThis ? 'Connecting…' : isApiKey ? 'Add API key' : 'Connect →'}
                           </button>
                         )}
                       </div>
                     );
                   })}
                   {action.requiredConnectors.some(c => !c.connected && !connectedInSession.has(c.service)) && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.67rem', color: '#F59E0B', marginTop: 2 }}>
-                      <span>⚠️</span> Connect the above before running this mission
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.67rem', color: 'var(--amber)', marginTop: 2 }}>
+                      <span><Glyph e="⚠️" /></span> Connect the above before running this mission
                     </div>
                   )}
                 </div>
@@ -1039,7 +1042,7 @@ function CommandCenterPageInner() {
             <button
               style={{
                 flex: 2, padding: '9px 0', borderRadius: 8,
-                background: 'linear-gradient(135deg,#3B82F6,#8B5CF6)', color: '#fff',
+                background: 'linear-gradient(135deg,var(--accent),var(--purple))', color: 'var(--on-accent)',
                 border: 'none', fontSize: '0.82rem', fontWeight: 700,
                 cursor: 'pointer', fontFamily: 'var(--font-sans)',
               }}
@@ -1058,7 +1061,7 @@ function CommandCenterPageInner() {
               onClick={() => applyAction({ type: 'run_mission', missionId: action.missionId, missionTitle: action.missionTitle, missionStatus: 'active' }, msgIndex)}
               disabled={applying}
             >
-              {applying ? 'Starting…' : '▶ Run'}
+              {applying ? 'Starting…' : 'Run'}
             </button>
           </div>
         </div>
@@ -1079,13 +1082,13 @@ function CommandCenterPageInner() {
 
     if (action.type === 'blueprint_question') return (
       <div style={card}>
-        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>💬 Reply below and the mission will be built with your answer.</div>
+        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}><Glyph e="💬" /> Reply below and the mission will be built with your answer.</div>
       </div>
     );
 
     if (action.type === 'mission_create_error') return (
-      <div style={{ ...card, borderColor: 'var(--red,#ef4444)' }}>
-        <div style={{ fontSize: '0.78rem', color: 'var(--red,#ef4444)' }}>⚠️ Could not create mission. Try describing it differently or add more detail.</div>
+      <div style={{ ...card, borderColor: 'var(--red,var(--rose))' }}>
+        <div style={{ fontSize: '0.78rem', color: 'var(--red,var(--rose))' }}><Glyph e="⚠️" /> Could not create mission. Try describing it differently or add more detail.</div>
         <button style={{ ...btnStyle, alignSelf: 'flex-start', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }} onClick={() => { setInput('Create a mission that '); inputRef.current?.focus(); }}>Try Again →</button>
       </div>
     );
@@ -1093,11 +1096,11 @@ function CommandCenterPageInner() {
     if (action.type === 'key_connected') {
       const meta = connectorMeta(action.provider ?? '');
       return (
-        <div style={{ ...card, borderColor: 'hsla(142,71%,45%,0.35)', background: 'hsla(142,71%,45%,0.04)' }}>
+        <div style={{ ...card, borderColor: 'color-mix(in srgb, var(--emerald) 35%, transparent)', background: 'color-mix(in srgb, var(--emerald) 4%, transparent)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: '1.5rem', lineHeight: 1 }}>{meta.icon}</span>
+            <span style={{ lineHeight: 1, display: 'inline-flex' }}><ConnectorLogo id={action.provider ?? ''} size={26} /></span>
             <div>
-              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#22C55E' }}>✅ {meta.label} Connected</div>
+              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--emerald)' }}><Glyph e="✅" /> {meta.label} Connected</div>
               {action.accountInfo && (
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>{action.accountInfo}</div>
               )}
@@ -1110,10 +1113,10 @@ function CommandCenterPageInner() {
     if (action.type === 'key_connection_failed') {
       const meta = connectorMeta(action.provider ?? '');
       return (
-        <div style={{ ...card, borderColor: 'hsla(0,84%,60%,0.3)' }}>
+        <div style={{ ...card, borderColor: 'color-mix(in srgb, var(--rose) 30%, transparent)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: '1.3rem', lineHeight: 1 }}>{meta.icon}</span>
-            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#EF4444' }}>❌ {meta.label} key not valid</div>
+            <span style={{ lineHeight: 1, display: 'inline-flex' }}><ConnectorLogo id={action.provider ?? ''} size={22} /></span>
+            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--rose)' }}><Glyph e="❌" /> {meta.label} key not valid</div>
           </div>
           {action.error && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{action.error}</div>}
           <button
@@ -1140,12 +1143,12 @@ function CommandCenterPageInner() {
 
       {/* ── Inline API Key Modal (connect from blueprint card without leaving chat) ── */}
       {inlineApiKeyModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}
           onClick={() => setInlineApiKeyModal(null)}>
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, width: '100%', maxWidth: 420, padding: '20px 22px' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <span style={{ fontSize: '1.4rem' }}>{connectorMeta(inlineApiKeyModal.service).icon}</span>
+                <span style={{ display: 'inline-flex' }}><ConnectorLogo id={inlineApiKeyModal.service} size={24} /></span>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>Connect {connectorMeta(inlineApiKeyModal.service).label}</div>
                   <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>API Key · encrypted at rest</div>
@@ -1156,8 +1159,8 @@ function CommandCenterPageInner() {
 
             {inlineApiKeySuccess ? (
               <div style={{ padding: 20, textAlign: 'center' }}>
-                <div style={{ fontSize: '2rem', marginBottom: 8 }}>✅</div>
-                <div style={{ fontWeight: 700, color: '#22C55E' }}>{connectorMeta(inlineApiKeyModal.service).label} Connected!</div>
+                <div style={{ fontSize: '2rem', marginBottom: 8 }}><Glyph e="✅" /></div>
+                <div style={{ fontWeight: 700, color: 'var(--emerald)' }}>{connectorMeta(inlineApiKeyModal.service).label} Connected!</div>
               </div>
             ) : (
               <>
@@ -1174,8 +1177,8 @@ function CommandCenterPageInner() {
                   style={{ width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', fontSize: '0.85rem', color: 'var(--text-primary)', fontFamily: 'monospace', marginBottom: 10, boxSizing: 'border-box' }}
                 />
                 {inlineApiKeyError && (
-                  <div style={{ padding: '8px 12px', background: 'hsla(0,84%,60%,0.07)', border: '1px solid hsla(0,84%,60%,0.2)', borderRadius: 8, fontSize: '0.78rem', color: '#EF4444', marginBottom: 10 }}>
-                    ❌ {inlineApiKeyError}
+                  <div style={{ padding: '8px 12px', background: 'color-mix(in srgb, var(--rose) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--rose) 20%, transparent)', borderRadius: 8, fontSize: '0.78rem', color: 'var(--rose)', marginBottom: 10 }}>
+                    <Glyph e="❌" /> {inlineApiKeyError}
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -1184,7 +1187,7 @@ function CommandCenterPageInner() {
                     Cancel
                   </button>
                   <button onClick={handleInlineApiKeySave} disabled={inlineApiKeySaving || !inlineApiKeyValue.trim()}
-                    style={{ background: 'linear-gradient(135deg,#3B82F6,#8B5CF6)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: '0.82rem', fontWeight: 700, cursor: inlineApiKeySaving || !inlineApiKeyValue.trim() ? 'not-allowed' : 'pointer', opacity: inlineApiKeySaving || !inlineApiKeyValue.trim() ? 0.6 : 1, fontFamily: 'var(--font-sans)' }}>
+                    style={{ background: 'linear-gradient(135deg,var(--accent),var(--purple))', color: 'var(--on-accent)', border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: '0.82rem', fontWeight: 700, cursor: inlineApiKeySaving || !inlineApiKeyValue.trim() ? 'not-allowed' : 'pointer', opacity: inlineApiKeySaving || !inlineApiKeyValue.trim() ? 0.6 : 1, fontFamily: 'var(--font-sans)' }}>
                     {inlineApiKeySaving ? 'Saving…' : 'Save & Connect →'}
                   </button>
                 </div>
@@ -1221,7 +1224,7 @@ function CommandCenterPageInner() {
 
           {/* Live run ticker */}
           {liveRun && !liveRunDismissed && (
-            <div style={{ background: liveRun.run.status === 'completed' ? 'hsla(152,69%,50%,0.1)' : liveRun.run.status === 'failed' ? 'hsla(0,80%,60%,0.1)' : 'hsla(258,90%,66%,0.1)', borderBottom: '1px solid var(--border)', padding: '7px 20px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            <div style={{ background: liveRun.run.status === 'completed' ? 'color-mix(in srgb, var(--emerald) 10%, transparent)' : liveRun.run.status === 'failed' ? 'color-mix(in srgb, var(--rose) 10%, transparent)' : 'color-mix(in srgb, var(--purple) 10%, transparent)', borderBottom: '1px solid var(--border)', padding: '7px 20px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
               {liveRun.run.status !== 'completed' && liveRun.run.status !== 'failed'
                 ? <span style={{ width: 13, height: 13, borderRadius: '50%', border: '2px solid var(--accent)', borderTopColor: 'transparent', display: 'inline-block', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
                 : <span style={{ fontSize: '0.8rem' }}>{liveRun.run.status === 'completed' ? '✓' : '✕'}</span>}
@@ -1232,7 +1235,7 @@ function CommandCenterPageInner() {
                 {liveRun.run.agents_total > 0 && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
                     <div style={{ flex: 1, height: 3, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', background: liveRun.run.status === 'failed' ? '#ef4444' : 'var(--accent)', width: `${Math.round(liveRun.run.agents_done / liveRun.run.agents_total * 100)}%`, transition: 'width 0.4s ease', borderRadius: 4 }} />
+                      <div style={{ height: '100%', background: liveRun.run.status === 'failed' ? 'var(--rose)' : 'var(--accent)', width: `${Math.round(liveRun.run.agents_done / liveRun.run.agents_total * 100)}%`, transition: 'width 0.4s ease', borderRadius: 4 }} />
                     </div>
                     <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)', flexShrink: 0 }}>{liveRun.run.agents_done}/{liveRun.run.agents_total} agents</span>
                   </div>
@@ -1252,9 +1255,8 @@ function CommandCenterPageInner() {
               {/* Welcome state — shown whenever the conversation is empty */}
               {messages.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '56px 20px 48px' }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/logo.png" alt="Agentic Factor" style={{ height: 52, objectFit: 'contain', marginBottom: 20, display: 'inline-block' }} />
-                  <h2 style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>
+                  <div style={{ display: 'inline-flex', marginBottom: 22 }}><LogoMark size={44} title="Agentic Factor" /></div>
+                  <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '2.4rem', fontWeight: 400, lineHeight: 1.08, letterSpacing: '-0.01em', color: 'var(--text-primary)', marginBottom: 14 }}>
                     What shall we automate today?
                   </h2>
                   {welcomeMessage && (
@@ -1262,7 +1264,7 @@ function CommandCenterPageInner() {
                       maxWidth: 520, margin: '0 auto 28px',
                       padding: '14px 20px',
                       background: 'var(--accent-subtle)',
-                      border: '1px solid hsla(152,69%,50%,0.18)',
+                      border: '1px solid color-mix(in srgb, var(--emerald) 18%, transparent)',
                       borderRadius: 'var(--radius-md)',
                       fontSize: '0.86rem',
                       color: 'var(--text-secondary)',
@@ -1322,10 +1324,10 @@ function CommandCenterPageInner() {
               {pendingFile && (
                 <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 20, padding: '4px 10px 4px 8px', fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: '100%' }}>
-                    <span>{pendingFile.uploading ? '⏳' : pendingFile.error ? '⚠️' : '📎'}</span>
+                    <span style={{ display: 'inline-flex' }}><Glyph e={pendingFile.uploading ? '⏳' : pendingFile.error ? '⚠️' : '📎'} size={14} /></span>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}>{pendingFile.name}</span>
                     {pendingFile.uploading && <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>uploading…</span>}
-                    {pendingFile.error && <span style={{ color: '#ef4444', fontSize: '0.75rem' }}>{pendingFile.error}</span>}
+                    {pendingFile.error && <span style={{ color: 'var(--rose)', fontSize: '0.75rem' }}>{pendingFile.error}</span>}
                     {!pendingFile.uploading && (
                       <button onClick={() => setPendingFile(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: 1, padding: '0 2px' }}>✕</button>
                     )}
@@ -1347,7 +1349,7 @@ function CommandCenterPageInner() {
                   disabled={isStreaming || (!!pendingFile && pendingFile.uploading)}
                   title="Attach a file"
                   style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: 'var(--bg-card)', border: '1px solid var(--border)', cursor: 'pointer', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: isStreaming ? 0.4 : 1, transition: 'all 0.15s' }}
-                >📎</button>
+                ><Glyph e="📎" /></button>
                 <textarea
                   ref={inputRef}
                   value={input}
@@ -1360,9 +1362,9 @@ function CommandCenterPageInner() {
                 />
                 <button
                   onClick={toggleVoice}
-                  style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: isRecording ? '#ef4444' : 'var(--bg-card)', border: '1px solid var(--border)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s', animation: isRecording ? 'pulse 1s infinite' : 'none' }}
+                  style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: isRecording ? 'var(--rose)' : 'var(--bg-card)', border: '1px solid var(--border)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s', animation: isRecording ? 'pulse 1s infinite' : 'none' }}
                   title="Voice input"
-                >🎤</button>
+                ><Glyph e="🎤" /></button>
                 <button
                   onClick={() => sendMessage(input)}
                   disabled={!input.trim() || isStreaming}

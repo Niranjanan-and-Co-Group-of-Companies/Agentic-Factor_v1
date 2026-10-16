@@ -2,6 +2,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
+import Glyph from "@/components/ui/Glyph";
+import ConnectorLogo from "@/components/ConnectorLogos";
 interface ApiCredential {
   provider: string;
   scopes: string[];
@@ -151,7 +153,7 @@ export default function PermissionsPage() {
 
         {credentials.length === 0 ? (
           <div style={{ textAlign: "center", padding: "var(--space-xl)", color: "var(--text-muted)" }}>
-            <div style={{ fontSize: "2rem", marginBottom: "var(--space-sm)" }}>🔌</div>
+            <div style={{ fontSize: "2rem", marginBottom: "var(--space-sm)" }}><Glyph e="🔌" /></div>
             <div>No API keys connected yet.</div>
             <a href="/connectors" style={{ color: "var(--accent)", fontSize: "0.9rem" }}>
               Go to Connectors →
@@ -166,8 +168,8 @@ export default function PermissionsPage() {
                 background: "var(--background)", borderRadius: "var(--radius-sm)",
                 border: "1px solid var(--border)",
               }}>
-                <div style={{ fontSize: "1.4rem", width: 32, textAlign: "center" }}>
-                  {PROVIDER_ICONS[cred.provider] ?? "🔑"}
+                <div style={{ width: 32, display: "flex", justifyContent: "center" }}>
+                  <ConnectorLogo id={cred.provider} size={28} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 500 }}>

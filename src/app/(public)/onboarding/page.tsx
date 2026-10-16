@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
+import Glyph from "@/components/ui/Glyph";
 interface Step {
   id: string;
   title: string;
@@ -143,7 +144,7 @@ export default function OnboardingPage() {
       {/* Header */}
       <div style={{ ...card, background: 'color-mix(in srgb, var(--accent) 8%, transparent)', borderColor: 'color-mix(in srgb, var(--accent) 25%, transparent)' }}>
         <div style={{ fontWeight: 700, fontSize: '1.4rem', marginBottom: 4 }}>
-          Welcome{user ? `, ${user.name}` : ''}! 👋
+          Welcome{user ? `, ${user.name}` : ''}.
         </div>
         <div style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-md)' }}>
           Let&apos;s get your first autonomous mission running in under 10 minutes.
@@ -211,7 +212,7 @@ export default function OnboardingPage() {
       {/* Done state */}
       {completedCount === totalSteps && (
         <div style={{ ...card, textAlign: 'center', background: 'color-mix(in srgb, var(--emerald) 8%, transparent)', borderColor: 'color-mix(in srgb, var(--emerald) 30%, transparent)' }}>
-          <div style={{ fontSize: '3rem', marginBottom: 12 }}>🎉</div>
+          <div style={{ fontSize: '3rem', marginBottom: 12 }}><Glyph e="🎉" /></div>
           <div style={{ fontWeight: 700, fontSize: '1.2rem', marginBottom: 8 }}>You&apos;re all set!</div>
           <div style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-md)' }}>
             Your first autonomous mission is live. Keep building on the dashboard.

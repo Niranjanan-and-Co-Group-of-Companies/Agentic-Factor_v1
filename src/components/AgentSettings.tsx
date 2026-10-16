@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 
+import Glyph from "@/components/ui/Glyph";
 // ============================================================
 // Agent Settings Gear — Live Governance Control
 // Opens a mini-panel for live trust-level switching during
@@ -48,13 +49,13 @@ export default function AgentSettings({ agentRole, currentTrust, onTrustChange, 
         onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
         title={`Settings: ${agentRole}`}
       >
-        ⚙️
+        <Glyph e="⚙️" size={14} />
       </button>
 
       {open && (
         <div className="agent-settings-panel animate-slide-in" onClick={(e) => e.stopPropagation()} style={{ zIndex: 9999 }}>
           <div style={{ marginBottom: "var(--space-md)" }}>
-            <div style={{ fontWeight: 700, fontSize: "0.9rem" }}>⚙️ {agentRole}</div>
+            <div style={{ fontWeight: 700, fontSize: "0.9rem" }}><Glyph e="⚙️" /> {agentRole}</div>
             {status && (
               <span className={`badge ${status === "running" ? "badge-green" : status === "paused" ? "badge-amber" : "badge-red"}`}
                 style={{ fontSize: "0.6rem", marginTop: "4px" }}>{status}</span>

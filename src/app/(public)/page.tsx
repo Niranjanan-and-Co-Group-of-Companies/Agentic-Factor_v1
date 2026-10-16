@@ -1,34 +1,40 @@
-"use client";
-import { useEffect, useRef } from "react";
+import { ArrowRight, Check, Eye, FileCheck2, History, Lock, Mail, Minus, Plus, ShieldCheck, Share2 } from "lucide-react";
+import HeroDemo from "@/components/landing/HeroDemo";
+import HowItWorks from "@/components/landing/HowItWorks";
+import Reveal from "@/components/landing/Reveal";
+import { BRAND, BrandGlyph, type BrandKey } from "@/components/landing/brandIcons";
+import s from "@/components/landing/landing.module.css";
 
 // ============================================================
-// Welcome / Landing Page — Premium scrolling marketing page
-// Section order: Hero, How It Works, For Individuals, For Companies,
-// Features, Pricing, CTA Banner, Testimonials, FAQ
+// Landing page — Hero, proof, how it works, safety, integrations,
+// use cases, pricing, stories, FAQ, final call to action.
 // ============================================================
 
-const FEATURES = [
-  { icon: "🤖", title: "AI Agent Teams", desc: "Autonomous multi-agent systems that decompose and execute complex goals" },
-  { icon: "🧠", title: "Powered by Claude", desc: "Claude writes and repairs your agents' code — its most capable model on paid plans — with Gemini & GPT as fallback" },
-  { icon: "🔌", title: "850+ Integrations", desc: "Google, Slack, GitHub, Notion, HubSpot, Salesforce and 844 more — OAuth or API key, no code required" },
-  { icon: "📚", title: "RAG Memory", desc: "Vector-powered knowledge base with PDF/DOCX ingestion" },
-  { icon: "⚡", title: "Secure Sandbox Execution", desc: "Every agent runs in an isolated, ephemeral cloud environment — no cross-tenant access, no residual data" },
-  { icon: "💳", title: "Credit-Based Billing", desc: "Pay only for what your agents consume — no waste" },
-  { icon: "🔒", title: "Enterprise Security", desc: "AES-256 encryption, RLS, OAuth 2.0, RBAC governance" },
-  { icon: "⏸️", title: "Human In The Loop (HITL)", desc: "Agents automatically pause and wait for your manual approval before performing any high-risk actions or sending emails." },
-  { icon: "⚙️", title: "100% Automated Agents", desc: "Set it and forget it. Run fully autonomous background agents for monitoring, data syncing, and continuous repetitive operations." },
-  { icon: "📊", title: "Real-Time Dashboard", desc: "Live agent status, token usage, mission timeline" },
-  { icon: "📧", title: "Agent Email Inbox", desc: "Email your agents tasks — they read, process, and reply" },
+const PROOF: BrandKey[] = ["gmail", "sheets", "zoho", "hubspot", "shopify", "razorpay", "notion", "whatsapp"];
+
+const WALL: BrandKey[][] = [
+  ["gmail", "sheets", "drive", "calendar", "docs", "slides", "forms", "meet", "analytics", "youtube", "zoho", "hubspot", "shopify", "razorpay", "stripe", "quickbooks", "xero", "paypal"],
+  ["notion", "airtable", "trello", "asana", "clickup", "jira", "linear", "todoist", "basecamp", "confluence", "github", "gitlab", "vercel", "supabase", "sentry", "posthog", "mixpanel", "perplexity"],
+  ["mailchimp", "brevo", "instagram", "facebook", "x", "reddit", "figma", "miro", "dropbox", "box", "typeform", "calendly", "zoom", "discord", "telegram", "whatsapp", "intercom", "zendesk", "wix", "webflow"],
+];
+
+const CASES: { tag: string; apps: BrandKey[]; ask: string; outcome: string }[] = [
+  { tag: "Finance", apps: ["zoho", "drive", "gmail"], ask: "“Every month, export our P&L, balance sheet and cash flow from Zoho Books to Excel and email me the link.”", outcome: "Statements pulled straight from your books, formatted and filed — on the 5th, every month." },
+  { tag: "Sales", apps: ["typeform", "hubspot", "gmail"], ask: "“When someone fills our website form, add them to HubSpot and send a personal welcome email.”", outcome: "Every lead captured and greeted within minutes, with nothing copied by hand." },
+  { tag: "Operations", apps: ["shopify", "sheets", "whatsapp"], ask: "“Each evening, summarise today's Shopify orders and post the totals to our team.”", outcome: "One message the whole team reads, logged to a sheet for the month-end." },
+  { tag: "Reporting", apps: ["analytics", "sheets", "slides"], ask: "“Every Monday at 9, send me last week's numbers with the three biggest changes.”", outcome: "A short, readable report — not a dashboard you have to remember to open." },
+  { tag: "Marketing", apps: ["notion", "instagram", "facebook"], ask: "“Turn our latest blog post into this week's social posts and queue them for my approval.”", outcome: "Drafts ready to approve, in your voice, on the days you choose." },
+  { tag: "Admin", apps: ["zoho", "sheets", "gmail"], ask: "“Find duplicate expenses this quarter and clean them up — show me the list first.”", outcome: "Duplicates found, every deletion listed for you to approve before anything changes." },
 ];
 
 const PLANS = [
-  { name: "Free Trial", price: "₹0", period: "", credits: "30 credits", features: ["1 active mission", "Claude for code generation (Gemini & GPT fallback)", "100 MB storage", "2 discovery questions", "No scheduling", "No multi-role agents"], cta: "Start Free", href: "/login", highlight: false },
+  { name: "Free Trial", price: "₹0", period: "", credits: "30 credits", features: ["1 active mission", "Claude for code generation (Gemini & GPT fallback)", "100 MB storage", "2 discovery questions", "No scheduling", "No multi-role agents"], cta: "Start free", href: "/login", highlight: false },
   { name: "Individual", price: "₹2,499", period: "/month", credits: "1,000 credits", features: ["5 active missions", "Claude's most capable model for code generation", "10 GB storage", "3-4 discovery questions", "Agent email inbox", "Up to 2 parallel roles"], cta: "Upgrade", href: "/pricing", highlight: true },
-  { name: "Pro", price: "From ₹2,999", period: "/seat/mo", credits: "2,500 credits/seat", features: ["50 active missions", "Claude's most capable model for code generation", "100 GB storage", "5-6 discovery questions", "Unlimited multi-role agents", "Credit top-ups available"], cta: "Configure", href: "/pricing", highlight: false },
-  { name: "Enterprise", price: "Custom", period: "", credits: "Unlimited credits", features: ["Unlimited missions", "Claude's most capable model + custom models", "1 TB storage", "8-10 discovery questions", "Dedicated support"], cta: "Contact Sales", href: "/contact", highlight: false },
+  { name: "Pro", price: "₹2,999", period: "/seat/mo", credits: "2,500 credits / seat", features: ["50 active missions", "Claude's most capable model for code generation", "100 GB storage", "5-6 discovery questions", "Unlimited multi-role agents", "Credit top-ups available"], cta: "Configure", href: "/pricing", highlight: false },
+  { name: "Enterprise", price: "Custom", period: "", credits: "Unlimited credits", features: ["Unlimited missions", "Claude's most capable model + custom models", "1 TB storage", "8-10 discovery questions", "Dedicated support"], cta: "Contact sales", href: "/contact", highlight: false },
 ];
 
-const TESTIMONIALS = [
+const STORIES = [
   { name: "Arjun S", role: "Founder, D2C Brand", text: "I used to spend 3 hours every Monday pulling sales reports and sending updates. Now one mission does it automatically — I just check my phone.", avatar: "AS" },
   { name: "Emin M", role: "Marketing Head", text: "We connected our CRM and the agents started writing follow-up emails for every new lead. It genuinely feels like we hired someone just for that.", avatar: "EM" },
   { name: "Nitto Raju", role: "Workshop Owner", text: "I told it to find local businesses in my area and send them an intro. It pulled the list, wrote the emails, and sent them — I didn't touch anything.", avatar: "NR" },
@@ -36,225 +42,252 @@ const TESTIMONIALS = [
 ];
 
 const FAQS = [
-  { q: "What is Agentic Factor?", a: "Agentic Factor is a SaaS platform that lets you design, deploy, and manage autonomous AI agent teams. You describe a mission in plain English, and our AI builds a team of specialized agents to execute it." },
-  { q: "How do credits work?", a: "Every agent action (LLM call, code execution, file processing) costs credits from your pool. Free trial gives you 30 credits. Paid plans refill monthly. You only pay for what your agents consume." },
-  { q: "Is my data secure?", a: "Absolutely. All credentials are AES-256-GCM encrypted. We use enterprise-grade Row Level Security, OAuth 2.0, and isolated cloud sandboxes for every agent execution. Your data never leaves your tenant." },
-  { q: "Can I connect my own tools?", a: "Yes! We support 850+ integrations including Google, Slack, GitHub, Notion, HubSpot, Salesforce, Airtable, and hundreds more. OAuth is handled automatically with zero configuration, and API key connectors are encrypted at rest." },
-  { q: "What happens when I run out of credits?", a: "Agents will pause and notify you. You can upgrade your plan or wait for the monthly refill. No data is lost." },
-  { q: "Do you offer refunds?", a: "All sales are final. Credits are non-refundable. Cancelling your plan stops future billing but doesn't refund the current period." },
+  { q: "What is Agentic Factor?", a: "An AI operations team you hire by typing. Describe the work in plain language and Agentic Factor designs a team of specialised agents, connects your apps, and runs the work — on demand or on a schedule." },
+  { q: "Will agents act without my permission?", a: "Not on anything that matters. Every mission first runs as a rehearsal that changes nothing, and actions that send, post, pay or delete wait for your one-click approval — with the exact details in front of you." },
+  { q: "How do credits work?", a: "Every agent action — AI work, code execution, file processing — uses credits from your plan. The free trial includes 30 credits; paid plans refill monthly. You only pay for what your agents actually use." },
+  { q: "Is my data secure?", a: "Credentials are encrypted with AES-256-GCM. Each workspace is isolated, every run executes in its own short-lived sandbox, and files open only for your team through links that expire in minutes." },
+  { q: "Which apps can I connect?", a: "More than 1,600 — Google Workspace, Slack, HubSpot, Zoho, Shopify, Razorpay, Notion, Airtable and many more. Sign-in is handled securely, and API keys are encrypted at rest." },
+  { q: "What happens when I run out of credits?", a: "Agents pause and let you know. Top up or wait for your monthly refill — nothing is lost." },
+  { q: "Do you offer refunds?", a: "All sales are final and credits are non-refundable. Cancelling stops future billing but doesn't refund the current period." },
 ];
 
-function useScrollReveal() {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          el.style.opacity = "1";
-          el.style.transform = "translateY(0)";
-        }
-      },
-      { threshold: 0.15 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  return ref;
-}
-
-function ScrollSection({ children, id }: { children: React.ReactNode; id?: string }) {
-  const ref = useScrollReveal();
+export default function LandingPage() {
   return (
-    <div ref={ref} id={id} className="welcome-section" style={{ opacity: 0, transform: "translateY(30px)", transition: "all 0.7s cubic-bezier(0.4, 0, 0.2, 1)" }}>
-      {children}
-    </div>
-  );
-}
-
-export default function WelcomePage() {
-  return (
-    <>
-      {/* ═══════ SECTION 1: HERO ═══════ */}
-      <section style={{ position: "relative", overflow: "hidden", padding: "100px 24px 80px", textAlign: "center" }}>
-        {/* Animated gradient BG */}
-        <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at 30% 20%, hsla(217,91%,60%,0.12) 0%, transparent 60%), radial-gradient(ellipse at 70% 80%, hsla(270,70%,60%,0.08) 0%, transparent 60%)", pointerEvents: "none" }} />
-        <div style={{ position: "relative", maxWidth: 800, margin: "0 auto" }}>
-          <div style={{ display: "inline-block", padding: "4px 16px", borderRadius: 99, background: "hsla(217,91%,60%,0.1)", border: "1px solid hsla(217,91%,60%,0.2)", fontSize: "0.78rem", fontWeight: 600, color: "hsl(217,91%,60%)", marginBottom: 24, letterSpacing: "0.5px" }}>
-            🚀 Now in Public Beta
+    <div className={s.page}>
+      {/* ═══ Hero ═══ */}
+      <section className={s.hero}>
+        <div className={`${s.container} ${s.heroGrid}`}>
+          <div>
+            <span className={`${s.eyebrow} ${s.fadeUp}`} style={{ ["--d" as string]: 60 }}>The AI operations team for lean businesses</span>
+            <h1 className={s.heroTitle}>
+              <span className={s.heroLine}><span style={{ ["--i" as string]: 0 }}>Describe the work.</span></span>
+              <span className={s.heroLine}><span style={{ ["--i" as string]: 1 }}>Agents do{" "}
+                <span className={s.heroAccent}>the rest.
+                  <svg className={s.heroUnderline} viewBox="0 0 300 16" preserveAspectRatio="none" aria-hidden><path d="M3 11 C 70 4, 150 3, 297 8" /></svg>
+                </span>
+              </span></span>
+            </h1>
+            <p className={`${s.heroSub} ${s.fadeUp}`} style={{ ["--d" as string]: 520 }}>
+              Agentic Factor turns a plain-language request into a team of AI agents that works across your apps, checks its own work, and asks before it changes anything that matters.
+            </p>
+            <div className={`${s.heroCtas} ${s.fadeUp}`} style={{ ["--d" as string]: 660 }}>
+              <a href="/dashboard" className={`${s.btn} ${s.btnPrimary}`}>Try it free <ArrowRight size={17} strokeWidth={2} aria-hidden /></a>
+              <a href="/signup" className={`${s.btn} ${s.btnGhost}`}>Create an account</a>
+            </div>
+            <p className={`${s.heroNote} ${s.fadeUp}`} style={{ ["--d" as string]: 780 }}><Check size={15} strokeWidth={2.4} aria-hidden /> 30 free credits · No credit card required</p>
           </div>
-          <h1 style={{ fontSize: "clamp(2.2rem, 5vw, 3.5rem)", fontWeight: 800, lineHeight: 1.15, letterSpacing: "-1px", marginBottom: 20 }}>
-            Build <span style={{ background: "linear-gradient(135deg, hsl(217,91%,60%), hsl(270,70%,60%))", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Autonomous AI</span> Agent Teams
-          </h1>
-          <p style={{ fontSize: "1.1rem", color: "hsl(215,15%,60%)", lineHeight: 1.7, maxWidth: 600, margin: "0 auto 32px" }}>
-            Describe your mission in plain English. Our AI designs the optimal agent team, builds the blueprint, and executes autonomously — with human-in-the-loop approval.
-          </p>
-          <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
-            <a href="/dashboard" className="btn btn-primary btn-lg" style={{ fontSize: "1rem", padding: "14px 32px" }}>🎯 Test Me Free</a>
-            <a href="/login" className="btn btn-ghost btn-lg" style={{ fontSize: "1rem", padding: "14px 32px" }}>Create Account →</a>
+          <div className={s.heroVisual}><HeroDemo /></div>
+        </div>
+      </section>
+
+      {/* ═══ Proof ═══ */}
+      <section className={s.proof} aria-label="Works with">
+        <div className={s.container}>
+          <Reveal><p className={s.proofLabel}>Works with the apps your business already runs on</p></Reveal>
+          <Reveal i={1}>
+            <div className={s.proofLogos}>
+              {PROOF.map(k => <span key={k} className={s.proofLogo}><BrandGlyph icon={BRAND[k]} size={20} color="currentColor" />{BRAND[k].title}</span>)}
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ═══ How it works ═══ */}
+      <section id="how-it-works" className={s.section}>
+        <div className={s.container}>
+          <Reveal className={s.sectionHead}>
+            <span className={s.eyebrow}>How it works</span>
+            <h2 className={s.h2}>From a sentence to a <em>running operation.</em></h2>
+            <p className={s.lead}>No flowcharts to draw, no code to maintain. You describe the outcome; the platform designs, tests and runs the work — and keeps it running.</p>
+          </Reveal>
+          <HowItWorks />
+        </div>
+      </section>
+
+      {/* ═══ Safety ═══ */}
+      <section id="safety" className={`${s.section} ${s.safety}`}>
+        <div className={`${s.container} ${s.safetyGrid}`}>
+          <div>
+            <Reveal>
+              <span className={s.eyebrow}>Safety</span>
+              <h2 className={s.h2}>Nothing important happens <em>without you.</em></h2>
+              <p className={s.lead}>Agents do the busywork. You keep the final say — with a full record of what happened and why.</p>
+            </Reveal>
+            <div className={s.safetyList}>
+              {[
+                { icon: Eye, title: "Rehearsal first", text: "Every mission runs once as a preview that touches nothing real." },
+                { icon: ShieldCheck, title: "Approval on every change", text: "Emails, payments, posts and deletions wait for your one-click approval — exact details in front of you." },
+                { icon: Lock, title: "Private by default", text: "Isolated workspaces, encrypted credentials, and files that open only for your team through expiring links." },
+                { icon: History, title: "A record of everything", text: "Every run, approval and change is logged — who did what, and when." },
+              ].map((f, i) => (
+                <Reveal key={f.title} i={i}>
+                  <div className={s.safetyIcon}><f.icon size={19} strokeWidth={1.75} /></div>
+                  <div className={s.safetyTitle}>{f.title}</div>
+                  <p className={s.safetyText}>{f.text}</p>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+          <Reveal i={2}>
+            <div className={s.safetyCard} aria-label="Example approval request">
+              <div className={s.safetyCardTop}><span>Approval needed</span><span>Monthly statements</span></div>
+              <div className={s.safetyChange}><Mail size={16} /><div>Send 1 email to finance@yourcompany.com<small>“Statements for September” · 1 link attached</small></div></div>
+              <div className={s.safetyChange}><Share2 size={16} /><div>Share “Financial Statements.xlsx” with 1 person<small>View only · finance@yourcompany.com</small></div></div>
+              <div className={s.safetyChange}><FileCheck2 size={16} /><div>Rehearsal passed — totals reconcile<small>9 sheets · 0 warnings</small></div></div>
+              <div className={s.safetyActions}>
+                <span className={s.safetyApprove}><Check size={16} strokeWidth={2.2} /> Approve both</span>
+                <span className={s.safetyReject}>Reject</span>
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ═══ Integrations ═══ */}
+      <section id="integrations" className={s.section}>
+        <div className={s.container}>
+          <Reveal className={s.sectionHeadCenter}>
+            <span className={s.eyebrow}>Integrations</span>
+            <h2 className={s.h2}>1,600+ apps. <em>One sentence away.</em></h2>
+            <p className={s.lead}>Connect once with secure sign-in, and every agent can use them — Google Workspace, HubSpot, Zoho, Shopify, Razorpay, Notion and the rest of your stack.</p>
+          </Reveal>
+        </div>
+        <div className={s.wall} aria-label="Some of the apps you can connect">
+          {WALL.map((row, r) => (
+            <div key={r} className={s.wallRow}>
+              <div className={`${s.wallTrack} ${r % 2 ? s.wallReverse : ""}`} style={{ ["--speed" as string]: `${64 + r * 14}s` }}>
+                {[...row, ...row].map((k, i) => (
+                  <span key={`${k}-${i}`} className={s.wallItem} aria-hidden={i >= row.length}>
+                    <BrandGlyph icon={BRAND[k]} size={20} color="currentColor" />{BRAND[k].title}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className={s.container}>
+          <div className={s.wallStat}>
+            <Reveal className={s.stat}><div className={s.statNum}>1,600+</div><div className={s.statLabel}>apps to connect</div></Reveal>
+            <Reveal className={s.stat} i={1}><div className={s.statNum}>60,000+</div><div className={s.statLabel}>actions agents can take</div></Reveal>
+            <Reveal className={s.stat} i={2}><div className={s.statNum}>1</div><div className={s.statLabel}>sentence to start</div></Reveal>
           </div>
         </div>
       </section>
 
-      {/* ═══════ SECTION 2: HOW IT WORKS ═══════ */}
-      <ScrollSection id="how-it-works">
-        <h2 className="welcome-section-title">How It Works</h2>
-        <p className="welcome-section-subtitle">Three steps from idea to autonomous execution</p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 24 }}>
-          {[
-            { step: "01", icon: "💬", title: "Describe Your Mission", desc: "Tell us what you need in natural language. Our AI asks smart clarifying questions to understand exactly what you want." },
-            { step: "02", icon: "🏗️", title: "Review the Blueprint", desc: "AI designs an optimal team of specialized agents — with roles, tools, scripts, and orchestration. Edit before deploying." },
-            { step: "03", icon: "⚡", title: "Agents Execute", desc: "Your agents run autonomously in secure sandboxes, requesting approval when needed. Get real-time progress in the dashboard." },
-          ].map(s => (
-            <div key={s.step} className="card" style={{ textAlign: "center", padding: 32, position: "relative" }}>
-              <div style={{ position: "absolute", top: 16, left: 20, fontSize: "0.7rem", fontWeight: 800, color: "hsl(217,91%,60%)", letterSpacing: 1 }}>{s.step}</div>
-              <div style={{ fontSize: "2.5rem", marginBottom: 16 }}>{s.icon}</div>
-              <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: 8 }}>{s.title}</h3>
-              <p style={{ fontSize: "0.85rem", color: "hsl(215,15%,60%)", lineHeight: 1.7 }}>{s.desc}</p>
-            </div>
-          ))}
-        </div>
-      </ScrollSection>
-
-      {/* ═══════ SECTION 3: FOR INDIVIDUALS ═══════ */}
-      <ScrollSection id="for-individuals">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 48, alignItems: "center" }}>
-          <div>
-            <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "hsl(152,69%,50%)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>For Individuals</div>
-            <h2 style={{ fontSize: "1.8rem", fontWeight: 800, letterSpacing: "-0.5px", marginBottom: 16 }}>Your Personal AI Workforce</h2>
-            <p style={{ fontSize: "0.9rem", color: "hsl(215,15%,60%)", lineHeight: 1.8, marginBottom: 24 }}>
-              Automate research, content creation, data analysis, and monitoring tasks. One person, unlimited output. Deploy agents for social media analysis, lead generation, competitor monitoring, and more.
-            </p>
-            <a href="/dashboard" className="btn btn-primary">🎯 Try It Now</a>
-          </div>
-          <div className="card" style={{ padding: 0, overflow: "hidden", aspectRatio: "16/9", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, hsla(152,69%,50%,0.05), hsla(217,91%,60%,0.05))" }}>
-            {/* Video placeholder */}
-            <div style={{ textAlign: "center", color: "hsl(215,15%,60%)" }}>
-              <div style={{ fontSize: "3rem", marginBottom: 8 }}>▶️</div>
-              <p style={{ fontSize: "0.85rem" }}>Demo Video — Coming Soon</p>
-            </div>
+      {/* ═══ Use cases ═══ */}
+      <section id="use-cases" className={s.section} style={{ paddingTop: 0 }}>
+        <div className={s.container}>
+          <Reveal className={s.sectionHead}>
+            <span className={s.eyebrow}>What teams hand over</span>
+            <h2 className={s.h2}>Work your team <em>stops doing by hand.</em></h2>
+          </Reveal>
+          <div className={s.caseGrid}>
+            {CASES.map((c, i) => (
+              <Reveal key={c.tag} i={i % 3} style={{ height: "100%" }}>
+                <article className={s.case}>
+                  <div className={s.caseTop}>
+                    <span className={s.caseTag}>{c.tag}</span>
+                    <span className={s.caseApps}>{c.apps.map(a => <span key={a} className={s.caseApp}><BrandGlyph icon={BRAND[a]} size={15} /></span>)}</span>
+                  </div>
+                  <p className={s.caseQuote}>{c.ask}</p>
+                  <p className={s.caseOutcome}><Check size={16} strokeWidth={2.2} /> {c.outcome}</p>
+                </article>
+              </Reveal>
+            ))}
           </div>
         </div>
-      </ScrollSection>
+      </section>
 
-      {/* ═══════ SECTION 4: FOR COMPANIES ═══════ */}
-      <ScrollSection id="for-companies">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 48, alignItems: "center" }}>
-          <div className="card" style={{ padding: 0, overflow: "hidden", aspectRatio: "16/9", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, hsla(270,70%,60%,0.05), hsla(217,91%,60%,0.05))" }}>
-            <div style={{ textAlign: "center", color: "hsl(215,15%,60%)" }}>
-              <div style={{ fontSize: "3rem", marginBottom: 8 }}>▶️</div>
-              <p style={{ fontSize: "0.85rem" }}>Enterprise Demo — Coming Soon</p>
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "hsl(270,70%,60%)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>For Companies</div>
-            <h2 style={{ fontSize: "1.8rem", fontWeight: 800, letterSpacing: "-0.5px", marginBottom: 16 }}>Scale Your Operations with AI</h2>
-            <p style={{ fontSize: "0.9rem", color: "hsl(215,15%,60%)", lineHeight: 1.8, marginBottom: 24 }}>
-              Deploy agent teams across departments — marketing, engineering, sales, support. Multi-seat licensing, RBAC governance, full audit trails, and Zoho/Google/Slack integrations for your entire organization.
-            </p>
-            <a href="/contact" className="btn btn-primary">📞 Contact Sales</a>
-          </div>
-        </div>
-      </ScrollSection>
-
-      {/* ═══════ SECTION 5: FEATURES GRID ═══════ */}
-      <ScrollSection id="features">
-        <h2 className="welcome-section-title">Everything You Need</h2>
-        <p className="welcome-section-subtitle">Enterprise-grade capabilities at every tier</p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20 }}>
-          {FEATURES.map(f => (
-            <div key={f.title} className="card" style={{ padding: 24 }}>
-              <div style={{ fontSize: "1.8rem", marginBottom: 12 }}>{f.icon}</div>
-              <h3 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: 6 }}>{f.title}</h3>
-              <p style={{ fontSize: "0.82rem", color: "hsl(215,15%,60%)", lineHeight: 1.6 }}>{f.desc}</p>
-            </div>
-          ))}
-        </div>
-      </ScrollSection>
-
-      {/* ═══════ SECTION 6: PRICING ═══════ */}
-      <ScrollSection id="pricing">
-        <h2 className="welcome-section-title">Simple, Credit-Based Pricing</h2>
-        <p className="welcome-section-subtitle">Powered by Claude, with Gemini & GPT as fallback. Pay for what your agents consume.</p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 20 }}>
-          {PLANS.map(p => (
-            <div key={p.name} className="card" style={{ padding: 28, position: "relative", border: p.highlight ? "1px solid hsl(217,91%,60%)" : undefined, boxShadow: p.highlight ? "0 0 30px hsla(217,91%,60%,0.15)" : undefined }}>
-              {p.highlight && <div style={{ position: "absolute", top: -10, left: "50%", transform: "translateX(-50%)", background: "linear-gradient(135deg, hsl(217,91%,60%), hsl(230,80%,55%))", color: "white", padding: "3px 14px", borderRadius: 99, fontSize: "0.68rem", fontWeight: 700, letterSpacing: "0.5px" }}>MOST POPULAR</div>}
-              <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: 4 }}>{p.name}</h3>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
-                <span style={{ fontSize: "1.8rem", fontWeight: 800 }}>{p.price}</span>
-                <span style={{ fontSize: "0.8rem", color: "hsl(215,15%,60%)" }}>{p.period}</span>
-              </div>
-              <div style={{ fontSize: "0.78rem", color: "hsl(217,91%,60%)", fontWeight: 600, marginBottom: 16 }}>{p.credits}</div>
-              <ul style={{ listStyle: "none", padding: 0, marginBottom: 20, display: "flex", flexDirection: "column", gap: 8 }}>
-                {p.features.map(f => (
-                  <li key={f} style={{ fontSize: "0.82rem", color: "hsl(215,15%,60%)", display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ color: "hsl(152,69%,50%)", fontSize: "0.9rem" }}>✓</span> {f}
-                  </li>
-                ))}
-              </ul>
-              <a href={p.href} className={`btn ${p.highlight ? "btn-primary" : "btn-ghost"}`} style={{ width: "100%", textAlign: "center", textDecoration: "none" }}>
-                {p.cta}
-              </a>
-            </div>
-          ))}
-        </div>
-      </ScrollSection>
-
-      {/* ═══════ SECTION 7: CTA BANNER ═══════ */}
-      <ScrollSection>
-        <div style={{ background: "linear-gradient(135deg, hsla(217,91%,60%,0.1), hsla(270,70%,60%,0.08))", border: "1px solid hsla(217,91%,60%,0.2)", borderRadius: 20, padding: "48px 32px", textAlign: "center" }}>
-          <h2 style={{ fontSize: "1.6rem", fontWeight: 800, marginBottom: 12 }}>Ready to Build Your AI Team?</h2>
-          <p style={{ color: "hsl(215,15%,60%)", fontSize: "0.95rem", marginBottom: 24, maxWidth: 500, margin: "0 auto 24px" }}>
-            Start with 30 free credits. No credit card required.
-          </p>
-          <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
-            <a href="/signup" className="btn btn-primary btn-lg" style={{ textDecoration: "none" }}>Create Free Account</a>
-            <a href="/dashboard" className="btn btn-ghost btn-lg" style={{ textDecoration: "none" }}>🎯 Test Me</a>
-          </div>
-        </div>
-      </ScrollSection>
-
-      {/* ═══════ SECTION 8: TESTIMONIALS ═══════ */}
-      <ScrollSection id="testimonials">
-        <h2 className="welcome-section-title">What People Are Saying</h2>
-        <p className="welcome-section-subtitle">Trusted by teams building the future with AI</p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 20 }}>
-          {TESTIMONIALS.map(t => (
-            <div key={t.name} className="card" style={{ padding: 24 }}>
-              <p style={{ fontSize: "0.88rem", color: "hsl(215,15%,60%)", lineHeight: 1.7, marginBottom: 16, fontStyle: "italic" }}>&ldquo;{t.text}&rdquo;</p>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 40, height: 40, borderRadius: "50%", background: "linear-gradient(135deg, hsl(217,91%,60%), hsl(270,70%,60%))", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 700, fontSize: "0.8rem", flexShrink: 0 }}>
-                  {t.avatar}
+      {/* ═══ Pricing ═══ */}
+      <section id="pricing" className={s.section} style={{ paddingTop: 0 }}>
+        <div className={s.container}>
+          <Reveal className={s.sectionHeadCenter}>
+            <span className={s.eyebrow}>Pricing</span>
+            <h2 className={s.h2}>Simple, <em>usage-based</em> pricing.</h2>
+            <p className={s.lead}>Start free. Pay for what your agents actually use — Claude writes and repairs your agents&apos; code, with Gemini &amp; GPT as fallback.</p>
+          </Reveal>
+          <div className={s.planGrid}>
+            {PLANS.map((p, i) => (
+              <Reveal key={p.name} i={i} style={{ display: "flex" }}>
+                <div className={`${s.plan} ${p.highlight ? s.planFeatured : ""}`} style={{ width: "100%" }}>
+                  {p.highlight && <span className={s.planBadge}>Most popular</span>}
+                  <div className={s.planName}>{p.name}</div>
+                  <div className={s.planPrice}>{p.price}<span className={s.planPeriod}>{p.period}</span></div>
+                  <div className={s.planCredits}>{p.credits}</div>
+                  <ul className={s.featureList}>
+                    {p.features.map(f => f.startsWith("No ")
+                      ? <li key={f} className={s.planNo}><Minus size={15} strokeWidth={2} aria-hidden /> {f}</li>
+                      : <li key={f}><Check size={15} strokeWidth={2.2} aria-hidden /> {f}</li>)}
+                  </ul>
+                  <a href={p.href} className={`${s.btn} ${p.highlight ? s.btnPrimary : s.btnGhost} ${s.planCta}`}>{p.cta}</a>
                 </div>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>{t.name}</div>
-                  <div style={{ fontSize: "0.75rem", color: "hsl(215,15%,60%)" }}>{t.role}</div>
-                </div>
-              </div>
+              </Reveal>
+            ))}
+          </div>
+          <p className={s.pricingNote}>Prices in INR. Annual plans include two months free.</p>
+        </div>
+      </section>
+
+      {/* ═══ Stories ═══ */}
+      <section id="stories" className={s.section} style={{ paddingTop: 0 }}>
+        <div className={s.container}>
+          <Reveal className={s.sectionHead}>
+            <span className={s.eyebrow}>From the people using it</span>
+            <h2 className={s.h2}>Less busywork. <em>More business.</em></h2>
+          </Reveal>
+          <div className={s.storyGrid}>
+            {STORIES.map((t, i) => (
+              <Reveal key={t.name} i={i % 2}>
+                <figure className={s.story}>
+                  <div>
+                    <div className={s.storyMark} aria-hidden>“</div>
+                    <blockquote className={s.storyQuote}>{t.text}</blockquote>
+                  </div>
+                  <figcaption className={s.storyPerson}>
+                    <span className={s.storyAvatar} aria-hidden>{t.avatar}</span>
+                    <span><div className={s.storyName}>{t.name}</div><div className={s.storyRole}>{t.role}</div></span>
+                  </figcaption>
+                </figure>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ═══ FAQ ═══ */}
+      <section id="faq" className={s.section} style={{ paddingTop: 0 }}>
+        <div className={`${s.container} ${s.faqGrid}`}>
+          <Reveal>
+            <span className={s.eyebrow}>FAQ</span>
+            <h2 className={s.h2}>Questions, <em>answered.</em></h2>
+            <p className={s.lead}>Anything else? Write to <a href="mailto:hello@agenticfactor.io" style={{ color: "var(--accent)" }}>hello@agenticfactor.io</a>.</p>
+          </Reveal>
+          <Reveal i={1}>
+            <div className={s.faqList}>
+              {FAQS.map(f => (
+                <details key={f.q} className={s.faqItem}>
+                  <summary>{f.q}<span className={s.faqIcon} aria-hidden><Plus size={15} strokeWidth={1.75} /></span></summary>
+                  <p className={s.faqA}>{f.a}</p>
+                </details>
+              ))}
             </div>
-          ))}
+          </Reveal>
         </div>
-      </ScrollSection>
+      </section>
 
-      {/* ═══════ SECTION 9: FAQ ═══════ */}
-      <ScrollSection id="faq">
-        <h2 className="welcome-section-title">Frequently Asked Questions</h2>
-        <p className="welcome-section-subtitle">Everything you need to know</p>
-        <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", flexDirection: "column", gap: 12 }}>
-          {FAQS.map(f => (
-            <details key={f.q} className="card" style={{ padding: "16px 24px", cursor: "pointer" }}>
-              <summary style={{ fontWeight: 600, fontSize: "0.92rem", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                {f.q} <span style={{ color: "hsl(217,91%,60%)", fontSize: "1.2rem" }}>+</span>
-              </summary>
-              <p style={{ marginTop: 12, fontSize: "0.85rem", color: "hsl(215,15%,60%)", lineHeight: 1.7 }}>{f.a}</p>
-            </details>
-          ))}
+      {/* ═══ Final call to action ═══ */}
+      <section className={s.final}>
+        <div className={s.container}>
+          <Reveal>
+            <h2 className={s.finalTitle}>Hire your first agent <em>in a sentence.</em></h2>
+            <p className={s.finalSub}>Start with 30 free credits. No credit card required.</p>
+            <div className={s.finalCtas}>
+              <a href="/dashboard" className={`${s.btn} ${s.btnPrimary}`}>Try it free <ArrowRight size={17} strokeWidth={2} aria-hidden /></a>
+              <a href="/signup" className={`${s.btn} ${s.btnGhost}`}>Create an account</a>
+            </div>
+          </Reveal>
         </div>
-      </ScrollSection>
-
-      <div style={{ height: 48 }} />
-    </>
+      </section>
+    </div>
   );
 }

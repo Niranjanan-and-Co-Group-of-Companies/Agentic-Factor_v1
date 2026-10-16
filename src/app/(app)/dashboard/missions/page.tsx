@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 
+import Glyph from "@/components/ui/Glyph";
 interface Mission {
   id: string;
   title: string;
@@ -24,10 +25,10 @@ interface MissionRun {
 
 const STATUS_COLORS: Record<string, string> = {
   active: 'var(--emerald)',
-  failed: '#ef4444',
-  paused: '#f59e0b',
+  failed: 'var(--rose)',
+  paused: 'var(--amber)',
   draft: 'var(--text-muted)',
-  completed: '#6366f1',
+  completed: 'var(--purple)',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -102,9 +103,9 @@ export default function MissionsPage() {
         ? `/api/missions/${mission.id}/run`
         : `/api/missions/${mission.id}/execute`;
       const res = await fetch(ep, { method: 'POST', credentials: 'include' });
-      if (res.ok) { showToast('🚀 Mission started!'); loadMissions(); }
-      else { const e = await res.json() as { error?: string }; showToast(`❌ ${e.error ?? 'Could not start.'}`); }
-    } catch { showToast('❌ Connection error.'); }
+      if (res.ok) { showToast('Mission started!'); loadMissions(); }
+      else { const e = await res.json() as { error?: string }; showToast(`${e.error ?? 'Could not start.'}`); }
+    } catch { showToast('Connection error.'); }
     setActionLoading(null);
   };
 
@@ -114,8 +115,8 @@ export default function MissionsPage() {
       method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'pause' }),
     });
-    if (res.ok) { showToast('⏸ Mission paused.'); loadMissions(); }
-    else showToast('❌ Could not pause.');
+    if (res.ok) { showToast('Mission paused.'); loadMissions(); }
+    else showToast('Could not pause.');
     setActionLoading(null);
   };
 
@@ -195,7 +196,7 @@ export default function MissionsPage() {
       {/* Empty state */}
       {missions.length === 0 && (
         <div style={{ textAlign: 'center', padding: '80px 20px', color: 'var(--text-muted)' }}>
-          <div style={{ fontSize: '3rem', marginBottom: 16 }}>🎯</div>
+          <div style={{ fontSize: '3rem', marginBottom: 16 }}><Glyph e="🎯" /></div>
           <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>No missions yet</h3>
           <p style={{ fontSize: '0.88rem', marginBottom: 24 }}>Create your first AI automation in minutes.</p>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
@@ -239,7 +240,7 @@ export default function MissionsPage() {
                 {/* Last run info */}
                 {lastRun ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', fontSize: '0.72rem' }}>
-                    <span style={{ color: lastRun.status === 'completed' ? 'var(--emerald)' : lastRun.status === 'failed' ? '#ef4444' : 'var(--text-muted)' }}>
+                    <span style={{ color: lastRun.status === 'completed' ? 'var(--emerald)' : lastRun.status === 'failed' ? 'var(--rose)' : 'var(--text-muted)' }}>
                       {lastRun.status === 'completed' ? '✓' : lastRun.status === 'failed' ? '✕' : lastRun.status === 'active' ? '⟳' : '◌'} Run #{lastRun.run_number}
                     </span>
                     <span style={{ color: 'var(--text-muted)' }}>·</span>
@@ -265,17 +266,17 @@ export default function MissionsPage() {
                       disabled={isLoading}
                       onClick={() => handleStart(mission)}
                     >
-                      {isLoading ? '…' : mission.status === 'draft' ? '▶ Run' : '↺ Re-run'}
+                      {isLoading ? '…' : mission.status === 'draft' ? 'Run' : 'Re-run'}
                     </button>
                   )}
                   {mission.status === 'active' && (
                     <button
                       className="btn btn-ghost btn-sm"
-                      style={{ fontSize: '0.75rem', flex: 1, borderColor: '#f59e0b', color: '#f59e0b' }}
+                      style={{ fontSize: '0.75rem', flex: 1, borderColor: 'var(--amber)', color: 'var(--amber)' }}
                       disabled={isLoading}
                       onClick={() => handlePause(mission)}
                     >
-                      {isLoading ? '…' : '⏸ Pause'}
+                      {isLoading ? '…' : 'Pause'}
                     </button>
                   )}
                   <button
@@ -333,10 +334,10 @@ function TemplatesPreview({ onFork }: { onFork: () => void }) {
       const res = await fetch('/api/templates', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) });
       if (res.ok) {
         const d = await res.json() as { mission_id: string };
-        setToast('✅ Mission created!');
+        setToast('Mission created!');
         setTimeout(() => { onFork(); router.push(`/dashboard/missions/${d.mission_id}`); }, 800);
-      } else { setToast('❌ Could not create from template.'); }
-    } catch { setToast('❌ Connection error.'); }
+      } else { setToast('Could not create from template.'); }
+    } catch { setToast('Connection error.'); }
     setForking(null);
   };
 
@@ -348,7 +349,7 @@ function TemplatesPreview({ onFork }: { onFork: () => void }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
         {templates.map(t => (
           <div key={t.id} className="card" style={{ padding: 14, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            <div style={{ fontSize: '1.6rem', flexShrink: 0 }}>{t.icon ?? '🎯'}</div>
+            <div style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-secondary)', color: 'var(--accent)' }}><Glyph e={t.icon ?? '🎯'} size={20} /></div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: 3 }}>{t.title}</div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.4, marginBottom: 8, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{t.description}</div>

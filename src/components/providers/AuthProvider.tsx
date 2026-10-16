@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import ConnectorLogo from "@/components/ConnectorLogos";
 
+import Glyph from "@/components/ui/Glyph";
 // ── API Key connector definitions (for self-serve modal from mission page) ──
 interface ApiKeyField { key: string; label: string; placeholder: string; type?: "text" | "password"; }
 interface ApiKeyConnectorDef { label: string; logoId: string; fields: ApiKeyField[]; helpText: string; }
@@ -215,7 +216,7 @@ export function AuthPopupProvider({ children }: { children: React.ReactNode }) {
           <div className="auth-overlay" onClick={() => setShow(false)} style={{ zIndex: 9999 }}>
             <div className="auth-popup" onClick={(e) => e.stopPropagation()}>
               <div style={{ textAlign: "center", marginBottom: "var(--space-lg)" }}>
-                <div style={{ fontSize: "2rem", marginBottom: "var(--space-sm)" }}>🔒</div>
+                <div style={{ fontSize: "2rem", marginBottom: "var(--space-sm)" }}><Glyph e="🔒" /></div>
                 <h2 style={{ fontSize: "1.3rem", fontWeight: 700 }}>
                   {displayName ? `Connect ${displayName}` : "Sign In to Continue"}
                 </h2>
@@ -275,7 +276,7 @@ export function AuthPopupProvider({ children }: { children: React.ReactNode }) {
                     setShow(false);
                     if (successCallback) successCallback();
                   }}>
-                    ⚡ Continue as Demo User
+                    Continue as demo user
                   </button>
                 </>
               )}
@@ -291,7 +292,7 @@ export function AuthPopupProvider({ children }: { children: React.ReactNode }) {
       {/* ── API Key Popup ── */}
       {showApiKey && apiKeyDef && (
         <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000, padding: "1rem" }}
+          style={{ position: "fixed", inset: 0, background: "var(--overlay)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000, padding: "1rem" }}
           onClick={() => { if (!apiKeySaving) { setShowApiKey(false); setApiKeyValues({}); } }}
         >
           <div
@@ -306,7 +307,7 @@ export function AuthPopupProvider({ children }: { children: React.ReactNode }) {
                 <div>
                   <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>Connect {apiKeyDef.label}</div>
                   <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                    🔑 API Key — your mission needs this to continue
+                    <Glyph e="🔑" size={14} /> API key — your mission needs this to continue
                   </div>
                 </div>
               </div>
@@ -327,7 +328,7 @@ export function AuthPopupProvider({ children }: { children: React.ReactNode }) {
             {/* Verified state */}
             {apiKeyVerified ? (
               <div style={{ padding: "var(--space-lg)", textAlign: "center" }}>
-                <div style={{ fontSize: "2.5rem", marginBottom: "var(--space-sm)" }}>✅</div>
+                <div style={{ fontSize: "2.5rem", marginBottom: "var(--space-sm)" }}><Glyph e="✅" /></div>
                 <div style={{ fontWeight: 700, fontSize: "1rem", color: "var(--emerald)", marginBottom: 4 }}>
                   {apiKeyDef.label} Connected!
                 </div>
@@ -362,8 +363,8 @@ export function AuthPopupProvider({ children }: { children: React.ReactNode }) {
 
                 {/* Error */}
                 {apiKeyError && (
-                  <div style={{ padding: "var(--space-sm) var(--space-md)", background: "hsla(0,84%,60%,0.1)", borderRadius: "var(--radius-sm)", border: "1px solid hsla(0,84%,60%,0.3)", fontSize: "0.8rem", color: "hsl(0,84%,70%)", marginBottom: "var(--space-md)" }}>
-                    ❌ {apiKeyError}
+                  <div style={{ padding: "var(--space-sm) var(--space-md)", background: "color-mix(in srgb, var(--rose) 10%, transparent)", borderRadius: "var(--radius-sm)", border: "1px solid color-mix(in srgb, var(--rose) 30%, transparent)", fontSize: "0.8rem", color: "var(--rose)", marginBottom: "var(--space-md)" }}>
+                    <Glyph e="❌" size={14} /> {apiKeyError}
                   </div>
                 )}
 

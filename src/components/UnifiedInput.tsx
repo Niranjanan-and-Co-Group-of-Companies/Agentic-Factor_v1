@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useCallback, useEffect } from "react";
 
+import Glyph from "@/components/ui/Glyph";
 // ============================================================
 // Unified Input Console
 // A single bar combining: Text Input + File Upload + Voice (Gemini)
@@ -111,7 +112,7 @@ export default function UnifiedInput({
     if (recording) { recognitionRef.current?.stop(); setRecording(false); }
   };
 
-  const label = submitLabel || (context === "command" ? (compact ? "➤" : `Send to ${agentRole || "Agent"}`) : context === "clarification" ? "↵ Answer" : "⚡ Generate Blueprint");
+  const label = submitLabel || (context === "command" ? (compact ? "→" : `Send to ${agentRole || "Agent"}`) : context === "clarification" ? "↵ Answer" : "⚡ Generate Blueprint");
 
   return (
     <div className="unified-bar-wrap">
@@ -120,7 +121,7 @@ export default function UnifiedInput({
         <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginBottom: "var(--space-xs)" }}>
           {files.map((f, i) => (
             <span key={i} className="file-chip">
-              📄 {f.name.length > 20 ? f.name.slice(0, 18) + "…" : f.name}
+              <Glyph e="📄" size={13} /> {f.name.length > 20 ? f.name.slice(0, 18) + "…" : f.name}
               <button onClick={() => removeFile(i)}>✕</button>
             </span>
           ))}
@@ -131,7 +132,7 @@ export default function UnifiedInput({
       <div className={`unified-bar ${compact ? "compact" : ""} ${recording ? "recording" : ""}`}>
         {/* File trigger */}
         <button className="ub-icon-btn" title="Attach file" onClick={() => fileRef.current?.click()}>
-          📎
+          <Glyph e="📎" size={16} />
         </button>
         <input ref={fileRef} type="file" multiple accept=".pdf,.csv,.json,.txt,.md,.xlsx,.docx,.png,.jpg"
           style={{ display: "none" }} onChange={(e) => e.target.files && handleFiles(e.target.files)} />
@@ -158,7 +159,7 @@ export default function UnifiedInput({
           title={recording ? "Stop recording" : "Voice input"}
           onClick={toggleVoice}
         >
-          {recording ? "⏹" : "🎙️"}
+          <Glyph e={recording ? "⏹" : "🎙️"} size={16} />
         </button>
 
         {/* Submit */}

@@ -6,7 +6,7 @@ export const metadata = {
 export default function TermsPage() {
   return (
     <div className="welcome-section" style={{ maxWidth: 800 }}>
-      <h1 className="welcome-section-title" style={{ textAlign: "left", fontSize: "1.5rem", marginBottom: 32 }}>📜 Terms &amp; Conditions</h1>
+      <h1 className="welcome-section-title" style={{ textAlign: "left", fontSize: "2.6rem", marginBottom: 32 }}>Terms &amp; Conditions</h1>
       <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 32 }}>Last updated: June 2026</p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 28, fontSize: "0.88rem", color: "var(--text-secondary)", lineHeight: 1.8 }}>

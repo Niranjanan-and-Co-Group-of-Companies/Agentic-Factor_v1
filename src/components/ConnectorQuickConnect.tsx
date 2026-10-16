@@ -1,6 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 
+import Glyph from "@/components/ui/Glyph";
+import ConnectorLogo from "@/components/ConnectorLogos";
 // All OAuth-based providers now connect through Composio.
 // Composio manages token storage, refresh, and retries — no direct OAuth flow needed.
 // Only pure API-key providers (Stripe, Twilio, etc.) bypass Composio.
@@ -105,7 +107,6 @@ export default function ConnectorQuickConnect({ provider, onConnected, onClose }
   const [done, setDone] = useState(false);
 
   const label = info?.label ?? (isCustom ? baseProvider : provider);
-  const icon = info?.icon ?? '🔌';
 
   // Listen for Composio OAuth popup success/failure
   useEffect(() => {
@@ -204,14 +205,14 @@ export default function ConnectorQuickConnect({ provider, onConnected, onClose }
   const card: React.CSSProperties = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 'var(--space-xl)' };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '1rem' }}
+    <div style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '1rem' }}
       onClick={onClose}>
       <div style={{ ...card, width: '100%', maxWidth: 440 }} onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: '1.5rem' }}>{icon}</span>
+            <span style={{ display: 'inline-flex' }}><ConnectorLogo id={baseProvider} size={28} /></span>
             <div>
               <div style={{ fontWeight: 700 }}>Connect {label}</div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Required by this mission</div>
@@ -222,7 +223,7 @@ export default function ConnectorQuickConnect({ provider, onConnected, onClose }
 
         {done ? (
           <div style={{ textAlign: 'center', padding: 'var(--space-xl)' }}>
-            <div style={{ fontSize: '2.5rem', marginBottom: 8 }}>✅</div>
+            <div style={{ fontSize: '2.5rem', marginBottom: 8 }}><Glyph e="✅" /></div>
             <div style={{ fontWeight: 700, color: 'var(--emerald)' }}>{label} Connected!</div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>You can now re-run the mission.</div>
           </div>
@@ -240,7 +241,7 @@ export default function ConnectorQuickConnect({ provider, onConnected, onClose }
             )}
             {error && (
               <div style={{ padding: 'var(--space-sm) var(--space-md)', background: 'var(--rose-bg)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: 'var(--rose)', marginBottom: 'var(--space-md)' }}>
-                ❌ {error}
+                <Glyph e="❌" size={14} /> {error}
               </div>
             )}
             <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleComposioOAuth} disabled={saving}>
@@ -274,7 +275,7 @@ export default function ConnectorQuickConnect({ provider, onConnected, onClose }
                 </select>
               </div>
             </div>
-            {error && <div style={{ padding: 'var(--space-sm)', color: 'hsl(0,84%,70%)', fontSize: '0.8rem', marginTop: 'var(--space-md)' }}>❌ {error}</div>}
+            {error && <div style={{ padding: 'var(--space-sm)', color: 'var(--rose)', fontSize: '0.8rem', marginTop: 'var(--space-md)' }}><Glyph e="❌" /> {error}</div>}
             <button className="btn btn-primary" style={{ width: '100%', marginTop: 'var(--space-lg)' }} onClick={handleCustom} disabled={saving}>
               {saving ? 'Saving…' : 'Save & Connect →'}
             </button>
@@ -299,7 +300,7 @@ export default function ConnectorQuickConnect({ provider, onConnected, onClose }
                 </div>
               ))}
             </div>
-            {error && <div style={{ padding: 'var(--space-sm)', color: 'hsl(0,84%,70%)', fontSize: '0.8rem', marginTop: 'var(--space-md)' }}>❌ {error}</div>}
+            {error && <div style={{ padding: 'var(--space-sm)', color: 'var(--rose)', fontSize: '0.8rem', marginTop: 'var(--space-md)' }}><Glyph e="❌" /> {error}</div>}
             <button className="btn btn-primary" style={{ width: '100%', marginTop: 'var(--space-lg)' }} onClick={handleApiKey} disabled={saving}>
               {saving ? 'Verifying…' : 'Verify & Connect →'}
             </button>

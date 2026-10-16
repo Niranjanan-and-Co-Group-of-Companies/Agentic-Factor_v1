@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import { useAuthPopup } from "@/components/providers/AuthProvider";
 
+import Glyph from "@/components/ui/Glyph";
 // ============================================================
 // Types
 // ============================================================
@@ -124,12 +125,12 @@ export default function ApprovalsPage() {
         setActions((prev) => prev.map((a) => a.id === id ? { ...a, status: "pending" } : a));
         
         if (res.status === 403 && data.error === 'missing_permission') {
-          showToast(`⚡ Missing permissions for ${data.providers.join(', ')}`, "error");
+          showToast(`Missing permissions for ${data.providers.join(', ')}`, "error");
           triggerAuth(data.providers[0], () => handleDecision(id, decision));
           return;
         }
         
-        showToast(`⚡ ${data.reason || data.error}`, "error");
+        showToast(`${data.reason || data.error}`, "error");
         if (data.circuitState) setCircuitState(data.circuitState);
         return;
       }
@@ -153,7 +154,7 @@ export default function ApprovalsPage() {
     return (
       <>
         <div className="page-header">
-          <h1 className="page-title">✅ Approval Queue</h1>
+          <h1 className="page-title"><Glyph e="✅" /> Approval Queue</h1>
           <p className="page-subtitle">Loading proposed actions...</p>
         </div>
         <div className="stack" style={{ gap: "var(--space-md)" }}>
@@ -175,19 +176,19 @@ export default function ApprovalsPage() {
         <div className="page-header">
           <div className="row" style={{ justifyContent: "space-between" }}>
             <div>
-              <h1 className="page-title">✅ Approval Queue</h1>
+              <h1 className="page-title"><Glyph e="✅" /> Approval Queue</h1>
               <p className="page-subtitle">Review and approve proposed agent actions before execution</p>
             </div>
-            <span className={`badge ${circuitState === "CLOSED" ? "badge-green" : "badge-red"}`}>⚡ {circuitState}</span>
+            <span className={`badge ${circuitState === "CLOSED" ? "badge-green" : "badge-red"}`}><Glyph e="⚡" /> {circuitState}</span>
           </div>
         </div>
         <div className="card" style={{ textAlign: "center", padding: "var(--space-2xl)" }}>
-          <div style={{ fontSize: "3rem", marginBottom: "var(--space-md)" }}>✅</div>
+          <div style={{ fontSize: "3rem", marginBottom: "var(--space-md)" }}><Glyph e="✅" /></div>
           <h2 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}>All Clear</h2>
           <p style={{ color: "var(--text-secondary)", marginBottom: "var(--space-lg)" }}>
             No pending actions. Agents will post here when they need approval to proceed.
           </p>
-          <a href="/" className="btn btn-primary">🎯 Create a Mission</a>
+          <a href="/" className="btn btn-primary"><Glyph e="🎯" /> Create a Mission</a>
         </div>
       </>
     );
@@ -198,12 +199,12 @@ export default function ApprovalsPage() {
       <div className="page-header">
         <div className="row" style={{ justifyContent: "space-between" }}>
           <div>
-            <h1 className="page-title">✅ Approval Queue</h1>
+            <h1 className="page-title"><Glyph e="✅" /> Approval Queue</h1>
             <p className="page-subtitle">Review and approve proposed agent actions before execution</p>
           </div>
           <div className="row">
             <div className="status-pill"><span className="status-dot active" /> Live</div>
-            <span className={`badge ${circuitState === "CLOSED" ? "badge-green" : circuitState === "OPEN" ? "badge-red" : "badge-amber"}`}>⚡ {circuitState}</span>
+            <span className={`badge ${circuitState === "CLOSED" ? "badge-green" : circuitState === "OPEN" ? "badge-red" : "badge-amber"}`}><Glyph e="⚡" /> {circuitState}</span>
             <span className="badge badge-amber">{pendingCount} Pending</span>
           </div>
         </div>
@@ -224,16 +225,16 @@ export default function ApprovalsPage() {
             <div key={action.id} className="card animate-slide-in" style={{ padding: "var(--space-lg)" }}>
               <div className="row" style={{ justifyContent: "space-between", marginBottom: "var(--space-md)" }}>
                 <div className="row" style={{ gap: "var(--space-sm)" }}>
-                  <span className="badge badge-purple" style={{ fontSize: "0.75rem" }}>🤖 {action.agentRole}</span>
+                  <span className="badge badge-purple" style={{ fontSize: "0.75rem" }}><Glyph e="🤖" /> {action.agentRole}</span>
                   <span className={`badge ${riskColors[action.riskLevel]}`} style={{ fontSize: "0.7rem", textTransform: "uppercase" }}>{action.riskLevel}</span>
-                  {!action.reversible && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}>⚠ Irreversible</span>}
+                  {!action.reversible && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}><Glyph e="⚠" /> Irreversible</span>}
                 </div>
                 <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{action.missionTitle}</span>
               </div>
 
               {/* Simple icon + label card */}
               <div style={{ display: "flex", alignItems: "center", gap: "var(--space-md)", padding: "var(--space-md) var(--space-lg)", background: "var(--bg-glass)", borderRadius: "var(--radius-md)", marginBottom: "var(--space-md)", border: "1px solid var(--border)" }}>
-                <span style={{ fontSize: "2rem" }}>{display.icon}</span>
+                <span style={{ display: "inline-flex", width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", background: "var(--bg-secondary)", color: "var(--text-primary)" }}><Glyph e={display.icon} size={20} /></span>
                 <div>
                   <div style={{ fontSize: "1rem", fontWeight: 600, marginBottom: 2 }}>{display.label}</div>
                   <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>{action.description || `This agent needs permission to proceed.`}</div>
@@ -248,7 +249,7 @@ export default function ApprovalsPage() {
                 return (
                   <details style={{ marginBottom: "var(--space-md)" }}>
                     <summary style={{ cursor: "pointer", fontSize: "0.82rem", fontWeight: 600 }}>
-                      🔍 What it will do{actions.length > 0 ? ` — ${actions.join(", ")}` : ""}
+                      <Glyph e="🔍" size={14} /> What it will do{actions.length > 0 ? ` — ${actions.join(", ")}` : ""}
                     </summary>
                     {preview && (
                       <pre style={{ fontSize: "0.75rem", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 320, overflow: "auto", padding: "var(--space-sm) var(--space-md)", background: "var(--bg-glass)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", marginTop: "var(--space-sm)" }}>
@@ -263,7 +264,7 @@ export default function ApprovalsPage() {
               {action.explanation && (
                 <button className="btn btn-ghost btn-sm" style={{ marginBottom: "var(--space-md)" }}
                   onClick={() => setShowExplanation(showExplanation === action.id ? null : action.id)}>
-                  {showExplanation === action.id ? "▼ Hide" : "ℹ️ Why this agent needs this"}
+                  {showExplanation === action.id ? "Hide" : "Why this agent needs this"}
                 </button>
               )}
               {showExplanation === action.id && (
@@ -276,13 +277,13 @@ export default function ApprovalsPage() {
               <div className="row" style={{ gap: "var(--space-sm)" }}>
                 {action.status === "pending" ? (
                   <>
-                    <button className="btn btn-success" style={{ padding: "8px 24px", fontSize: "0.9rem" }} onClick={() => handleDecision(action.id, "approved")}>✅ Allow</button>
-                    <button className="btn btn-danger" style={{ padding: "8px 24px", fontSize: "0.9rem" }} onClick={() => handleDecision(action.id, "rejected")}>❌ Deny</button>
+                    <button className="btn btn-success" style={{ padding: "8px 24px", fontSize: "0.9rem" }} onClick={() => handleDecision(action.id, "approved")}><Glyph e="✅" /> Allow</button>
+                    <button className="btn btn-danger" style={{ padding: "8px 24px", fontSize: "0.9rem" }} onClick={() => handleDecision(action.id, "rejected")}><Glyph e="❌" /> Deny</button>
                   </>
                 ) : (
                   <>
                     <span className={`badge ${action.status === "approved" ? "badge-green" : "badge-red"}`} style={{ padding: "6px 16px" }}>
-                      {action.status === "approved" ? "✅ Allowed" : "❌ Denied"}
+                      {action.status === "approved" ? "Allowed" : "Denied"}
                     </span>
                     <button className="btn btn-ghost btn-sm" onClick={() => handleUndo(action.id)}>↩ Undo</button>
                   </>

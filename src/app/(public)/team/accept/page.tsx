@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 
+import Glyph from "@/components/ui/Glyph";
 interface InviteDetails {
   inviteId: string;
   ownerName: string;
@@ -79,7 +80,7 @@ function AcceptInviteContent() {
     return (
       <div style={containerStyle}>
         <div style={cardStyle}>
-          <div style={{ fontSize: "2rem", marginBottom: 16 }}>⏳</div>
+          <div style={{ fontSize: "2rem", marginBottom: 16 }}><Glyph e="⏳" /></div>
           <div style={{ color: "var(--text-muted)" }}>Loading invite...</div>
         </div>
       </div>
@@ -90,7 +91,7 @@ function AcceptInviteContent() {
     return (
       <div style={containerStyle}>
         <div style={cardStyle}>
-          <div style={{ fontSize: "2.5rem", marginBottom: 16 }}>❌</div>
+          <div style={{ fontSize: "2.5rem", marginBottom: 16 }}><Glyph e="❌" /></div>
           <div style={{ fontWeight: 700, fontSize: "1.2rem", marginBottom: 8 }}>Invite Invalid</div>
           <div style={{ color: "var(--text-muted)", marginBottom: 24 }}>{error}</div>
           <a href="/dashboard" className="btn btn-primary" style={{ textDecoration: "none", display: "inline-block" }}>
@@ -106,7 +107,7 @@ function AcceptInviteContent() {
     return (
       <div style={containerStyle}>
         <div style={cardStyle}>
-          <div style={{ fontSize: "2.5rem", marginBottom: 16 }}>🎉</div>
+          <div style={{ fontSize: "2.5rem", marginBottom: 16 }}><Glyph e="🎉" /></div>
           <div style={{ fontWeight: 700, fontSize: "1.2rem", marginBottom: 8 }}>You're in!</div>
           <div style={{ color: "var(--text-muted)", marginBottom: 24 }}>
             {isWorkspace
@@ -126,7 +127,7 @@ function AcceptInviteContent() {
   return (
     <div style={containerStyle}>
       <div style={cardStyle}>
-        <div style={{ fontSize: "2.5rem", marginBottom: 20 }}>🤖</div>
+        <div style={{ fontSize: "2.5rem", marginBottom: 20 }}><Glyph e="🤖" /></div>
         <div style={{ fontWeight: 700, fontSize: "1.25rem", marginBottom: 8 }}>
           {isMission ? "Mission Access Invite" : "Team Invite"}
         </div>

@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import Link from "next/link";
 
+import Glyph from "@/components/ui/Glyph";
 // ============================================================
 // Pricing Page — Credit-Based Plans + Razorpay Checkout
 // ============================================================
@@ -67,7 +68,7 @@ const plans = [
       { label: "50 active missions", detail: "concurrent" },
       { label: "All models", detail: "Claude Sonnet 4, Gemini Pro, GPT-4o + Premium" },
       { label: "100GB storage", detail: "for RAG documents" },
-      { label: "850+ integrations", detail: "all available connectors" },
+      { label: "1,600+ integrations", detail: "all available connectors" },
       { label: "✓ Scheduling", detail: "cron, daily, weekly (1 cr/day)" },
       { label: "Unlimited parallel roles", detail: "multi-role fan-out missions" },
       { label: "✓ Credit top-ups", detail: "buy more when needed" },
@@ -191,7 +192,7 @@ export default function PricingPage() {
         description: `${planLabel} Plan — ${billingPeriod === 'annual' ? 'Annual' : 'Monthly'}`,
         image: "https://agenticfactor.io/favicon.ico",
         handler: function () {
-          setToast("🎉 Payment successful! Your plan will activate in a few seconds…");
+          setToast("Payment successful. Your plan will activate in a few seconds…");
           // Give the webhook ~4s to land before reloading so the updated plan shows immediately
           setTimeout(() => window.location.reload(), 4000);
         },
@@ -201,7 +202,7 @@ export default function PricingPage() {
           },
           confirm_close: true,
         },
-        theme: { color: "#6366f1" },
+        theme: { color: "var(--purple)" },
       });
       rzp.open();
     } catch {
@@ -230,8 +231,8 @@ export default function PricingPage() {
               <span className={`badge ${currentPlan === 'free' ? 'badge-amber' : 'badge-green'}`} style={{ fontSize: "0.7rem" }}>{currentPlan.toUpperCase()}</span>
             </div>
             {billingStatus === 'cancelled' && creditsTopup > 0 && (
-              <div style={{ marginTop: "var(--space-sm)", padding: "8px 16px", background: "hsla(45,90%,50%,0.1)", borderRadius: "var(--radius-sm)", border: "1px solid hsla(45,90%,50%,0.3)", fontSize: "0.78rem", color: "hsla(45,90%,70%,1)" }}>
-                🔒 You have <strong>{creditsTopup}</strong> frozen top-up credits. Resubscribe to unlock them.
+              <div style={{ marginTop: "var(--space-sm)", padding: "8px 16px", background: "color-mix(in srgb, var(--amber) 10%, transparent)", borderRadius: "var(--radius-sm)", border: "1px solid color-mix(in srgb, var(--amber) 30%, transparent)", fontSize: "0.78rem", color: "var(--amber)" }}>
+                <Glyph e="🔒" size={14} /> You have <strong>{creditsTopup}</strong> frozen top-up credits. Resubscribe to unlock them.
               </div>
             )}
           </>
@@ -239,8 +240,8 @@ export default function PricingPage() {
       </div>
 
       {/* Usage-based credit explainer */}
-      <div className="card" style={{ maxWidth: 800, margin: "0 auto var(--space-xl)", padding: "var(--space-lg)", background: "hsla(231,97%,68%,0.05)", borderColor: "hsla(231,97%,68%,0.2)" }}>
-        <h3 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}>💡 How Credits Work</h3>
+      <div className="card" style={{ maxWidth: 800, margin: "0 auto var(--space-xl)", padding: "var(--space-lg)", background: "color-mix(in srgb, var(--accent) 5%, transparent)", borderColor: "color-mix(in srgb, var(--accent) 20%, transparent)" }}>
+        <h3 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: "var(--space-sm)" }}><Glyph e="💡" /> How Credits Work</h3>
         <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.7, margin: 0 }}>
           Credits are deducted proportionally based on what your agents actually consume — the complexity of the task, the models chosen, and the volume of work processed. Lightweight tasks use fewer credits; deeper, multi-step missions with large context use more. You only ever pay for what runs, nothing more.
         </p>
@@ -256,7 +257,7 @@ export default function PricingPage() {
           <div style={{ position: "absolute", top: 3, left: billingPeriod === "annual" ? 25 : 3, width: 20, height: 20, borderRadius: "50%", background: "white", transition: "left 0.2s" }} />
         </div>
         <span style={{ fontSize: "0.88rem", fontWeight: billingPeriod === "annual" ? 700 : 400 }}>
-          Annual <span style={{ background: "var(--emerald)", color: "white", fontSize: "0.68rem", fontWeight: 700, padding: "2px 8px", borderRadius: 10, marginLeft: 4 }}>2 months free</span>
+          Annual <span style={{ background: "var(--emerald)", color: "var(--on-strong)", fontSize: "0.68rem", fontWeight: 700, padding: "2px 8px", borderRadius: 10, marginLeft: 4 }}>2 months free</span>
         </span>
       </div>
 
@@ -266,13 +267,13 @@ export default function PricingPage() {
           <div key={plan.id} className="card" style={{
             position: "relative", padding: "var(--space-xl)",
             border: plan.highlight ? "2px solid var(--accent)" : "1px solid var(--border)",
-            background: plan.highlight ? "linear-gradient(180deg, hsla(231,97%,68%,0.08) 0%, var(--bg-card) 100%)" : "var(--bg-card)",
+            background: plan.highlight ? "linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, transparent) 0%, var(--bg-card) 100%)" : "var(--bg-card)",
             transform: plan.highlight ? "scale(1.03)" : undefined,
             transition: "all 0.3s ease",
             display: "flex", flexDirection: "column",
           }}>
             {plan.badge && (
-              <div style={{ position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)", background: "var(--accent)", color: "white", padding: "4px 16px", borderRadius: 20, fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+              <div style={{ position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)", background: "var(--accent)", color: "var(--on-accent)", padding: "4px 16px", borderRadius: 20, fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>
                 {plan.badge}
               </div>
             )}
@@ -306,20 +307,20 @@ export default function PricingPage() {
                    plan.period}
                 </span>
               </div>
-              <div style={{ marginTop: 8, padding: "6px 12px", background: "hsla(155,80%,40%,0.1)", borderRadius: "var(--radius-sm)", border: "1px solid hsla(155,80%,40%,0.2)", display: "inline-block" }}>
-                <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--emerald)" }}>🪙 {plan.credits}</span>
+              <div style={{ marginTop: 8, padding: "6px 12px", background: "color-mix(in srgb, var(--emerald) 10%, transparent)", borderRadius: "var(--radius-sm)", border: "1px solid color-mix(in srgb, var(--emerald) 20%, transparent)", display: "inline-block" }}>
+                <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--emerald)" }}><Glyph e="🪙" /> {plan.credits}</span>
               </div>
             </div>
 
             {/* Features list — flex-grow to push bottom items down */}
             <ul style={{ listStyle: "none", padding: 0, margin: "0 0 var(--space-lg) 0", flex: 1 }}>
               {plan.features.map((f, i) => (
-                <li key={i} style={{ fontSize: "0.8rem", padding: "6px 0", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                  <span style={{ display: "flex", gap: 6, alignItems: "flex-start", minWidth: 0 }}>
-                    <span style={{ color: "var(--emerald)", fontSize: "0.75rem", flexShrink: 0, marginTop: 2 }}>✓</span>
-                    <span style={{ wordBreak: "break-word" }}>{f.label}</span>
+                <li key={i} style={{ fontSize: "0.82rem", padding: "7px 0", borderBottom: "1px solid var(--border)", display: "grid", gridTemplateColumns: "14px minmax(0, 1fr)", columnGap: 8, alignItems: "start" }}>
+                  <span style={{ color: "var(--emerald)", fontSize: "0.75rem", marginTop: 2 }}>✓</span>
+                  <span style={{ overflowWrap: "anywhere", hyphens: "auto" }}>
+                    {f.label}
+                    {f.detail && <span style={{ display: "block", fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 2 }}>{f.detail}</span>}
                   </span>
-                  {f.detail && <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", textAlign: "right", minWidth: 60, wordBreak: "break-word" }}>{f.detail}</span>}
                 </li>
               ))}
             </ul>
@@ -334,7 +335,7 @@ export default function PricingPage() {
                 <input
                   type="range" min={1} max={50} value={seatCount}
                   onChange={e => setSeatCount(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: "hsl(217,91%,60%)" }}
+                  style={{ width: "100%", accentColor: "var(--accent)" }}
                 />
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 4 }}>
                   <span>1</span><span>50</span>
@@ -368,8 +369,8 @@ export default function PricingPage() {
             {plan.id === "enterprise" && (
               <div style={{ marginBottom: "var(--space-md)", padding: "var(--space-md)", background: "var(--bg-glass)", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }}>
                 <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.7 }}>
-                  <p style={{ marginBottom: 8 }}>📧 <a href="mailto:enterprise@agenticfactor.io" style={{ color: "var(--accent)" }}>enterprise@agenticfactor.io</a></p>
-                  <p style={{ marginBottom: 8 }}>📞 <a href="tel:+919446415489" style={{ color: "var(--accent)" }}>+91 94464 15489</a></p>
+                  <p style={{ marginBottom: 8 }}><Glyph e="📧" /> <a href="mailto:enterprise@agenticfactor.io" style={{ color: "var(--accent)" }}>enterprise@agenticfactor.io</a></p>
+                  <p style={{ marginBottom: 8 }}><Glyph e="📞" /> <a href="tel:+919446415489" style={{ color: "var(--accent)" }}>+91 94464 15489</a></p>
                   <p style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Custom pricing, SLA, dedicated support, SSO/SAML, on-premise options.</p>
                 </div>
               </div>
@@ -395,7 +396,7 @@ export default function PricingPage() {
 
       {/* ═══════ CREDIT TOP-UP PACKS ═══════ */}
       <div style={{ maxWidth: 800, margin: "var(--space-2xl) auto 0" }}>
-        <h2 style={{ fontSize: "1.4rem", fontWeight: 700, textAlign: "center", marginBottom: "var(--space-sm)" }}>⚡ Credit Top-Up Packs</h2>
+        <h2 style={{ fontSize: "1.4rem", fontWeight: 700, textAlign: "center", marginBottom: "var(--space-sm)" }}><Glyph e="⚡" /> Credit Top-Up Packs</h2>
         <p style={{ textAlign: "center", color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: "var(--space-lg)" }}>
           Need more credits mid-month? Buy top-up packs. Available for Individual &amp; Pro plans only.
         </p>
@@ -407,11 +408,11 @@ export default function PricingPage() {
           ].map((pack, i) => (
             <div key={i} className="card" style={{ padding: "var(--space-lg)", textAlign: "center", position: "relative" }}>
               {pack.discount && (
-                <div style={{ position: "absolute", top: -10, right: 12, background: "var(--emerald)", color: "white", padding: "2px 10px", borderRadius: 12, fontSize: "0.65rem", fontWeight: 700 }}>
+                <div style={{ position: "absolute", top: -10, right: 12, background: "var(--emerald)", color: "var(--on-strong)", padding: "2px 10px", borderRadius: 12, fontSize: "0.65rem", fontWeight: 700 }}>
                   {pack.discount} OFF
                 </div>
               )}
-              <div style={{ fontSize: "1.5rem", marginBottom: 4 }}>{i === 0 ? "🔋" : i === 1 ? "⚡" : "🚀"}</div>
+              <div style={{ marginBottom: 6, color: "var(--accent)" }}><Glyph e={i === 0 ? "🪙" : i === 1 ? "⚡" : "🚀"} size={22} /></div>
               <div style={{ fontWeight: 700, fontSize: "0.95rem", marginBottom: 8 }}>{pack.name}</div>
               <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--accent)", marginBottom: 4 }}>
                 {pack.credits.toLocaleString()} credits
@@ -433,8 +434,8 @@ export default function PricingPage() {
                 disabled={loading === pack.packId}
                 onClick={async () => {
                   if (!isLoggedIn) { window.location.href = "/login?returnTo=/pricing"; return; }
-                  if (currentPlan === "free") { setToast("⚠️ Top-ups are for paid plans only. Please upgrade first."); return; }
-                  if (billingStatus === "cancelled") { setToast("⚠️ Your subscription is cancelled. Resubscribe first to buy top-ups."); return; }
+                  if (currentPlan === "free") { setToast("Top-ups are for paid plans only. Please upgrade first."); return; }
+                  if (billingStatus === "cancelled") { setToast("Your subscription is cancelled. Resubscribe first to buy top-ups."); return; }
                   setLoading(pack.packId);
                   try {
                     const res = await fetch("/api/razorpay/create-order", {
@@ -452,10 +453,10 @@ export default function PricingPage() {
                       name: "Agentic Factor",
                       description: `${pack.name} — ${pack.credits} Credits`,
                       handler: function () {
-                        setToast(`🎉 ${pack.credits} credits added to your account!`);
+                        setToast(`${pack.credits} credits added to your account.`);
                         setTimeout(() => { fetchBilling(); }, 2000);
                       },
-                      theme: { color: "#6366f1" },
+                      theme: { color: "var(--purple)" },
                     };
                     const rzp = new (window as any).Razorpay(options);
                     rzp.open();
