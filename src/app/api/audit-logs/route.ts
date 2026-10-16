@@ -37,6 +37,8 @@ export async function GET(request: NextRequest) {
     .from('events')
     .select('id, event_type, entity_type, entity_id, payload, created_at', { count: 'exact' })
     .eq('tenant_id', tenantId)
+    // Live-progress markers for the run card, not something anyone audits.
+    .neq('event_type', 'agent.progress')
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 

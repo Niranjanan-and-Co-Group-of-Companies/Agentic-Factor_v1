@@ -920,6 +920,14 @@ export async function executeAgent(
     run_id: runId ?? null,
     payload: { missionId, role: agent.role, inputContext },
   });
+  // What the agent is doing now, for the live run card (best-effort, never blocks the run).
+  const markProgress = (phase: 'checking' | 'acting') => {
+    if (!runId) return;
+    supabase.from('events').insert({
+      tenant_id: tenantId, event_type: 'agent.progress', entity_type: 'agent', entity_id: agent.id,
+      run_id: runId, payload: { missionId, phase },
+    }).then(() => {}, () => {});
+  };
 
   // Resolve the mission title and training-mode status once up front — title
   // gives the /approvals queue real context, training status decides whether
@@ -1148,6 +1156,7 @@ export async function executeAgent(
         // This step does nothing but the live run, so it gets most of the step's time — a cleanup of
         // 35 deletes and 5 updates passed its preview (writes deferred) but ran out of 90s for real.
         let realOutput: string;
+        markProgress('acting');
         try {
           realOutput = await runRealSideEffects(approvedCode, resumeEnvs, existingAction.payload.output, agent.id, tenantId, APPROVED_RUN_TIMEOUT_MS);
         } catch (realErr) {
@@ -2074,6 +2083,7 @@ ${pythonCode}`;
         // on format — this is a correctness check, not a style check.
         {
           console.log(`[Agent ${agent.id}] Running critic pass on output...`);
+          markProgress('checking');
           const criticPrompt = `You are a strict but fair Critic reviewing an AI agent's work — not just whether its output is shaped correctly, but whether it actually accomplishes the task.
 Today is ${new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}. Dates up to today are past or present — never fail an output for using "future" dates that are not after today.
 ${hasWriteOps ? `
@@ -2245,12 +2255,12 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
             mission_title: missionTitle,
             action_type: actionType,
             description: isTrainingMode
-              ? `🎓 Training run ${trainingRunNumber} — review what agent "${agent.role}" would do.`
+              ? `Rehearsal — review what agent "${agent.role}" would do.`
               : agent.trustLevel === 'manual'
                 ? `Review the proposed action for agent ${agent.role} before it runs.`
                 : `⚠️ Irreversible action detected in agent "${agent.role}". Please review before it runs.`,
             explanation: isTrainingMode
-              ? `This mission is in Training Mode — nothing actually sends or fires yet. This is a preview only; approving it just confirms the result looks right and continues the rehearsal.`
+              ? `This is the mission's rehearsal — nothing is sent, created or changed yet. This is a preview only; approving it confirms the result looks right and finishes the rehearsal. After the rehearsal, the mission runs for real.`
               : agent.trustLevel === 'manual'
                 ? `This agent's trust level is set to Manual, so every action it takes is reviewed before it runs — regardless of risk.`
                 : `This action can't be meaningfully undone once it runs (e.g. sending, posting, or deleting something external) — irreversible actions always require your review, even on agents you otherwise trust.`,
@@ -2279,6 +2289,7 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
         // (read-only agents and reversible-write agents under conditional
         // trust, plus any agent under autonomous trust, land here directly).
         if (hasWriteOps) {
+          markProgress('acting');
           finalOutputJSON = await runRealSideEffects(pythonCode, sandboxEnvs, finalOutputJSON, agent.id, tenantId);
         } else {
           console.log(`[Agent ${agent.id}] No write operations detected — skipping Phase 2.`);

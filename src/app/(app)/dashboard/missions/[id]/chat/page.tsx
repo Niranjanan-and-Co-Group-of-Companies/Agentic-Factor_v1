@@ -10,6 +10,8 @@ import { sanitizeTitle } from '@/lib/utils/sanitize-title';
 
 import Glyph from "@/components/ui/Glyph";
 import { LogoMark } from "@/components/brand/Logo";
+import LiveRunCard, { RunStrip } from '@/components/runs/LiveRunCard';
+import { kickLive, useMissionLive } from '@/components/runs/useLiveRun';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ChatSession {
@@ -22,12 +24,6 @@ interface RequiredConnector {
   service: string;
   reason: string;
   connected: boolean;
-}
-
-interface RunAgent {
-  id: string;
-  role: string;
-  status: 'queued' | 'running' | 'done' | 'failed' | 'skipped';
 }
 
 interface BlueprintStep {
@@ -47,13 +43,8 @@ interface ChatMessage {
   agentError?: string;
   ts?: number;
   toolCards?: ToolCard[];
-  runMonitor?: {
-    runId: string;
-    agents: RunAgent[];
-    status: 'queued' | 'running' | 'completed' | 'failed';
-    agentsDone: number;
-    agentsTotal: number;
-  };
+  /** A live run card for this run (client-only, not saved with the chat). */
+  runMonitor?: { runId: string };
   blueprintUpdate?: {
     jobId: string;
     steps: BlueprintStep[];
@@ -75,16 +66,6 @@ interface ActionPayload {
   versionNumber?: number; // used by revert_version
 }
 
-interface LiveRun {
-  run_number: number;
-  status: string;
-  agents_total: number;
-  agents_done: number;
-  agents_failed: number;
-  started_at: string;
-  duration_ms: number | null;
-}
-
 // ── ToolCallCards component ───────────────────────────────────────────────────
 
 interface ToolCard {
@@ -95,93 +76,6 @@ interface ToolCard {
   label: string;
   summary?: string;
   logoUrl?: string | null;
-}
-
-// ── RunMonitorCard — live per-agent progress inside a chat bubble ─────────────
-
-function RunMonitorCard({ monitor }: { monitor: NonNullable<ChatMessage['runMonitor']> }) {
-  const { agents, status, agentsDone, agentsTotal } = monitor;
-  const isFinished = status === 'completed' || status === 'failed';
-  const headerColor = status === 'completed' ? 'var(--emerald)'
-    : status === 'failed' ? 'var(--rose)'
-    : 'var(--accent)';
-  const headerIcon = status === 'completed' ? '✅' : status === 'failed' ? '❌' : '🚀';
-  const headerLabel = status === 'completed' ? 'Mission completed'
-    : status === 'failed' ? 'Mission failed'
-    : status === 'running' ? 'Mission running…'
-    : 'Mission queued…';
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        {!isFinished && (
-          <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--border)', borderTopColor: headerColor, display: 'inline-block', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
-        )}
-        {isFinished && headerIcon && <span style={{ display: 'inline-flex' }}><Glyph e={headerIcon} size={15} /></span>}
-        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: headerColor }}>{headerLabel}</span>
-        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-          {agentsDone}/{agentsTotal} agents
-        </span>
-      </div>
-
-      {/* Progress bar */}
-      {agentsTotal > 0 && (
-        <div style={{ height: 4, background: 'var(--border)', borderRadius: 4, overflow: 'hidden', marginBottom: 6 }}>
-          <div style={{
-            height: '100%', borderRadius: 4,
-            background: status === 'failed' ? 'var(--rose)' : headerColor,
-            width: `${Math.round((agentsDone / agentsTotal) * 100)}%`,
-            transition: 'width 0.5s ease',
-          }} />
-        </div>
-      )}
-
-      {/* Per-agent rows */}
-      {agents.map((agent, i) => {
-        const agentStatus = agent.status;
-        const statusColor = agentStatus === 'done' ? 'var(--emerald)'
-          : agentStatus === 'failed' ? 'var(--rose)'
-          : agentStatus === 'running' ? 'var(--accent)'
-          : 'var(--text-muted)';
-        const statusIcon = agentStatus === 'done' ? '✓'
-          : agentStatus === 'failed' ? '✗'
-          : agentStatus === 'running' ? null
-          : '○';
-
-        return (
-          <div key={agent.id} style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '6px 10px', borderRadius: 8,
-            background: agentStatus === 'queued' ? 'transparent' : 'var(--bg-secondary)',
-            border: `1px solid ${agentStatus === 'queued' ? 'transparent' : agentStatus === 'done' ? 'color-mix(in srgb, var(--emerald) 20%, transparent)' : agentStatus === 'failed' ? 'color-mix(in srgb, var(--rose) 20%, transparent)' : 'var(--border)'}`,
-            opacity: agentStatus === 'queued' ? 0.5 : 1,
-            transition: 'all 0.2s',
-          }}>
-            <div style={{ width: 18, height: 18, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {agentStatus === 'running' ? (
-                <span style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid var(--border)', borderTopColor: 'var(--accent)', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
-              ) : (
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: statusColor }}>{statusIcon}</span>
-              )}
-            </div>
-            <span style={{ fontSize: '0.8rem', color: agentStatus === 'queued' ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: agentStatus === 'running' ? 600 : 400 }}>
-              Agent {i + 1} — {agent.role}
-            </span>
-            {agentStatus === 'running' && (
-              <span style={{ fontSize: '0.7rem', color: 'var(--accent)', marginLeft: 'auto', fontWeight: 600 }}>Running</span>
-            )}
-            {agentStatus === 'done' && (
-              <span style={{ fontSize: '0.7rem', color: 'var(--emerald)', marginLeft: 'auto' }}>Done</span>
-            )}
-            {agentStatus === 'failed' && (
-              <span style={{ fontSize: '0.7rem', color: 'var(--rose)', marginLeft: 'auto' }}>Failed</span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 // ── BlueprintUpdateCard — live step-by-step progress for mission updates ─────
@@ -465,8 +359,6 @@ export default function MissionChatPage() {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [applyingAction, setApplyingAction] = useState<number | null>(null);
-  const [liveRun, setLiveRun] = useState<LiveRun | null>(null);
-  const [liveRunDismissed, setLiveRunDismissed] = useState(false);
   const [toolStatusLines, setToolStatusLines] = useState<Array<{ name: string; provider: string; displayName: string; status: 'running' | 'done' | 'error'; label: string; summary?: string; logoUrl?: string | null }>>([]);
 
   // ── Connector state ──────────────────────────────────────────
@@ -489,7 +381,6 @@ export default function MissionChatPage() {
   const [shareResult, setShareResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const runPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -631,30 +522,37 @@ export default function MissionChatPage() {
     return () => clearInterval(poll);
   }, [missionId]);
 
-  // ── Live run status polling ───────────────────────────────────
-  const startRunPolling = useCallback(() => {
-    if (runPollRef.current) clearInterval(runPollRef.current);
-    setLiveRunDismissed(false);
-    runPollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/missions/${missionId}/runs`, { credentials: 'include' });
-        if (!res.ok) return;
-        const { runs } = await res.json() as { runs: LiveRun[] };
-        const latest = runs[0];
-        if (!latest) return;
-        setLiveRun(latest);
-        if (latest.status === 'completed' || latest.status === 'failed') {
-          if (runPollRef.current) clearInterval(runPollRef.current);
-          setMissionStatus(latest.status === 'completed' ? 'completed' : 'failed');
-        } else {
-          setMissionStatus('active');
-        }
-      } catch { /* non-fatal */ }
-    }, 3000);
-    setTimeout(() => { if (runPollRef.current) clearInterval(runPollRef.current); }, 15 * 60 * 1000);
+  // ── Live runs: one shared view feeds the strip, the run cards and the header ──
+  const live = useMissionLive(missionId);
+  const latestRun = live?.latest?.run ?? null;
+  const rehearsalNext = live?.latest?.mission.rehearsal ?? false;
+
+  // Follow a run in the chat with a live card (once per run), polling quickly while it starts.
+  const showRunCard = useCallback((runId: string) => {
+    setMessages(prev => prev.some(m => m.runMonitor?.runId === runId)
+      ? prev
+      : [...prev, { role: 'assistant', content: '', ts: Date.now(), runMonitor: { runId } }]);
+    kickLive(missionId);
   }, [missionId]);
 
-  useEffect(() => () => { if (runPollRef.current) clearInterval(runPollRef.current); }, []);
+  // A run already going when the page opens (a schedule, a webhook, another tab) gets its card too.
+  const activeRunId = latestRun && latestRun.status !== 'completed' && latestRun.status !== 'failed' ? latestRun.id : null;
+  if (activeRunId && !messages.some(m => m.runMonitor?.runId === activeRunId)) {
+    setMessages(prev => prev.some(m => m.runMonitor?.runId === activeRunId)
+      ? prev
+      : [...prev, { role: 'assistant', content: '', runMonitor: { runId: activeRunId } }]);
+  }
+
+  // The header follows the latest run without waiting for the mission poll.
+  const latestRunStatus = latestRun?.status;
+  const displayStatus = latestRunStatus === 'failed' ? 'failed'
+    : latestRunStatus && (missionStatus === 'failed' || missionStatus === 'draft') ? 'active'
+    : missionStatus;
+
+  const scrollToRunCard = useCallback(() => {
+    const cards = document.querySelectorAll('[data-run-card]');
+    cards[cards.length - 1]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
 
   // Clean up Realtime subscription and audio on unmount
   useEffect(() => {
@@ -1283,126 +1181,39 @@ export default function MissionChatPage() {
       return u;
     });
 
-    // ── Shared helper: insert RunMonitorCard + subscribe to Realtime ──
-    const subscribeToRun = (runId: string, agents: Array<{ id: string; role: string }>) => {
-      const runAgents: RunAgent[] = agents.map(a => ({ ...a, status: 'queued' as const }));
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: '',
-          ts: Date.now(),
-          runMonitor: {
-            runId,
-            agents: runAgents,
-            status: 'queued' as const,
-            agentsDone: 0,
-            agentsTotal: agents.length,
-          },
-        },
-      ]);
-      const supabase = getSupabase();
-      const ch = supabase
-        .channel(`run-monitor-${runId}`)
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'mission_runs', filter: `id=eq.${runId}` },
-          (payload) => {
-            const row = payload.new as { status: string; agents_done: number; agents_total: number };
-            setMessages(prev => prev.map(m => {
-              if (!m.runMonitor || m.runMonitor.runId !== runId) return m;
-              return { ...m, runMonitor: { ...m.runMonitor, status: row.status as 'queued' | 'running' | 'completed' | 'failed', agentsDone: row.agents_done, agentsTotal: row.agents_total } };
-            }));
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'events', filter: `run_id=eq.${runId}` },
-          (payload) => {
-            const row = payload.new as { event_type: string; entity_id: string };
-            setMessages(prev => prev.map(m => {
-              if (!m.runMonitor || m.runMonitor.runId !== runId) return m;
-              const updatedAgents = m.runMonitor.agents.map(a => {
-                if (a.id !== row.entity_id) return a;
-                if (row.event_type === 'agent.started') return { ...a, status: 'running' as const };
-                if (row.event_type === 'agent.completed') return { ...a, status: 'done' as const };
-                if (row.event_type === 'agent.failed') return { ...a, status: 'failed' as const };
-                return a;
-              });
-              const runStatus: 'queued' | 'running' | 'completed' | 'failed' =
-                row.event_type === 'mission.completed' ? 'completed'
-                : row.event_type === 'mission.failed' ? 'failed'
-                : m.runMonitor.status;
-              return { ...m, runMonitor: { ...m.runMonitor, agents: updatedAgents, status: runStatus } };
-            }));
-          }
-        )
-        .subscribe();
-      setTimeout(() => supabase.removeChannel(ch), 30 * 60 * 1000);
+    // Starts a run and follows it with a live card. A run that is already going shows its card instead.
+    const startRun = async (body?: Record<string, unknown>) => {
+      const endpoint = missionStatus === 'draft'
+        ? `/api/missions/${missionId}/run`
+        : `/api/missions/${missionId}/execute`;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        credentials: 'include',
+        ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+      });
+      const data = await res.json().catch(() => ({})) as { runId?: string; error?: string; message?: string; code?: string };
+      if (res.ok && data.runId) {
+        setMissionStatus(prev => (prev === 'draft' || prev === 'failed' ? 'active' : prev));
+        showRunCard(data.runId);
+      } else if (res.status === 409 && data.code === 'run_in_progress' && data.runId) {
+        showToast(data.message ?? 'This mission is already running.');
+        showRunCard(data.runId);
+      } else if (res.ok) {
+        kickLive(missionId);
+      } else {
+        showToast(`${data.message ?? data.error ?? 'Could not start the run.'}`);
+      }
     };
 
     try {
       if (action.type === 'run_now') {
-        showToast('Starting mission run…');
-        const endpoint = missionStatus === 'draft'
-          ? `/api/missions/${missionId}/run`
-          : `/api/missions/${missionId}/execute`;
-        const res = await fetch(endpoint, { method: 'POST', credentials: 'include' });
-        if (res.ok) {
-          const runData = await res.json() as { runId?: string; agents?: Array<{ id: string; role: string }> };
-          startRunPolling();
-          if (runData.runId && runData.agents) {
-            subscribeToRun(runData.runId, runData.agents);
-          } else {
-            showToast('Mission started!');
-          }
-        } else {
-          const err = await res.json().catch(() => ({})) as { error?: string; message?: string };
-          showToast(`${err.message ?? err.error ?? 'Could not start run.'}`);
-        }
+        await startRun();
 
       } else if (action.type === 'run_selective') {
-        showToast(`Starting selective run…`);
-        const endpoint = missionStatus === 'draft'
-          ? `/api/missions/${missionId}/run`
-          : `/api/missions/${missionId}/execute`;
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            selectedAgents: action.agents,
-            executionMode: action.executionMode ?? 'sequential',
-          }),
-        });
-        if (res.ok) {
-          const runData = await res.json() as { runId?: string; agents?: Array<{ id: string; role: string }> };
-          startRunPolling();
-          if (runData.runId && runData.agents) {
-            subscribeToRun(runData.runId, runData.agents);
-          } else {
-            showToast('Selective run started!');
-          }
-        } else {
-          const err = await res.json().catch(() => ({})) as { error?: string; message?: string };
-          showToast(`${err.message ?? err.error ?? 'Could not start selective run.'}`);
-        }
+        await startRun({ selectedAgents: action.agents, executionMode: action.executionMode ?? 'sequential' });
 
       } else if (action.type === 'resume_run') {
-        showToast('Resuming from the failed step…');
-        const res = await fetch(`/api/missions/${missionId}/execute`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ mode: 'resume' }),
-        });
-        if (res.ok) {
-          showToast('Mission resuming!');
-          startRunPolling();
-        } else {
-          const err = await res.json() as { error?: string };
-          showToast(`${err.error ?? 'Could not resume.'}`);
-        }
+        await startRun({ mode: 'resume' });
 
       } else if (action.type === 'go_live') {
         showToast('Going live…');
@@ -1411,8 +1222,9 @@ export default function MissionChatPage() {
           credentials: 'include',
         });
         if (res.ok) {
-          showToast('Mission is now live! Real actions will execute.');
+          showToast('Mission is now live — runs will make real changes.');
           setMissionStatus('active');
+          kickLive(missionId);
         } else {
           const err = await res.json() as { error?: string };
           showToast(`${err.error ?? 'Could not go live.'}`);
@@ -1692,24 +1504,42 @@ export default function MissionChatPage() {
               <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>AI Mission Assistant</div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
-              <span style={{
-                fontSize: '0.65rem', fontWeight: 600, padding: '2px 8px', borderRadius: 20,
-                background: missionStatus === 'active' ? 'color-mix(in srgb, var(--emerald) 12%, transparent)' : missionStatus === 'draft' ? 'color-mix(in srgb, var(--purple) 12%, transparent)' : 'var(--bg-card)',
-                color: missionStatus === 'active' ? 'var(--emerald)' : missionStatus === 'draft' ? 'var(--purple)' : 'var(--text-muted)',
-                border: '1px solid currentColor', opacity: 0.8,
-              }}>
-                {missionStatus}
-              </span>
+              {/* Rehearsal or live: what the next run will do. Other states (draft, paused, failed) show as they are. */}
+              {live && (
+                <span
+                  title={rehearsalNext
+                    ? 'The next run is a rehearsal: nothing is sent or changed, and you check what it would do. After that, it runs for real.'
+                    : 'Runs make real changes. Anything risky still asks you first.'}
+                  style={{
+                    fontFamily: 'var(--font-mono)', fontSize: '0.62rem', fontWeight: 500, letterSpacing: '0.1em', textTransform: 'uppercase',
+                    padding: '3px 9px', borderRadius: 20, display: 'inline-flex', alignItems: 'center', gap: 6,
+                    color: rehearsalNext ? 'var(--amber)' : 'var(--emerald)',
+                    background: rehearsalNext ? 'var(--amber-bg)' : 'var(--emerald-bg)',
+                    border: `1px ${rehearsalNext ? 'dashed' : 'solid'} color-mix(in srgb, currentColor 45%, transparent)`,
+                  }}>
+                  {!rehearsalNext && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />}
+                  {rehearsalNext ? 'Rehearsal' : 'Live'}
+                </span>
+              )}
+              {(displayStatus === 'draft' || displayStatus === 'paused' || displayStatus === 'failed') && (
+                <span style={{
+                  fontSize: '0.65rem', fontWeight: 600, padding: '2px 8px', borderRadius: 20, textTransform: 'capitalize',
+                  color: displayStatus === 'failed' ? 'var(--rose)' : displayStatus === 'paused' ? 'var(--amber)' : 'var(--purple)',
+                  border: '1px solid currentColor', opacity: 0.8,
+                }}>
+                  {displayStatus === 'failed' ? 'Last run failed' : displayStatus}
+                </span>
+              )}
               {/* A mission could only be started from a chat card or the "Run now" chip — there was no Run button. */}
               <button
                 onClick={() => applyAction({ type: 'run_now', label: 'Run now' }, -1)}
                 disabled={applyingAction !== null || hasUnconnected}
                 title={hasUnconnected
                   ? `Connect ${requiredConnectors.filter(c => !c.connected).map(c => c.service).join(', ')} first`
-                  : 'Start a run of this mission'}
+                  : rehearsalNext ? 'Rehearse this mission: nothing is sent or changed' : 'Start a run of this mission'}
                 className="btn btn-primary btn-sm"
                 style={{ fontSize: '0.78rem' }}>
-                {missionStatus === 'draft' ? 'Run' : 'Run again'}
+                {rehearsalNext ? 'Start rehearsal' : missionStatus === 'draft' ? 'Run' : 'Run again'}
               </button>
               <button
                 onClick={() => setShareOpen(v => !v)}
@@ -1794,56 +1624,8 @@ export default function MissionChatPage() {
             </div>
           )}
 
-          {/* Live run ticker */}
-          {liveRun && !liveRunDismissed && (
-            <div style={{
-              background: liveRun.status === 'completed' ? 'color-mix(in srgb, var(--emerald) 10%, transparent)' : liveRun.status === 'failed' ? 'color-mix(in srgb, var(--rose) 10%, transparent)' : 'color-mix(in srgb, var(--purple) 10%, transparent)',
-              borderBottom: `1px solid ${liveRun.status === 'completed' ? 'color-mix(in srgb, var(--emerald) 25%, transparent)' : liveRun.status === 'failed' ? 'color-mix(in srgb, var(--rose) 25%, transparent)' : 'color-mix(in srgb, var(--purple) 25%, transparent)'}`,
-              padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
-            }}>
-              {liveRun.status !== 'completed' && liveRun.status !== 'failed' ? (
-                <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--accent)', borderTopColor: 'transparent', display: 'inline-block', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
-              ) : liveRun.status === 'completed' ? (
-                <span style={{ color: 'var(--emerald)', fontSize: '0.85rem', flexShrink: 0 }}>✓</span>
-              ) : (
-                <span style={{ color: 'var(--red)', fontSize: '0.85rem', flexShrink: 0 }}>✕</span>
-              )}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {liveRun.status === 'completed' ? 'Run completed' : liveRun.status === 'failed' ? 'Run failed' : 'Run in progress'} — #{liveRun.run_number}
-                </div>
-                {liveRun.agents_total > 0 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
-                    <div style={{ flex: 1, height: 4, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
-                      <div style={{
-                        height: '100%', borderRadius: 4,
-                        background: liveRun.status === 'failed' ? 'var(--red)' : 'var(--accent)',
-                        width: `${Math.round((liveRun.agents_done / liveRun.agents_total) * 100)}%`,
-                        transition: 'width 0.4s ease',
-                      }} />
-                    </div>
-                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', flexShrink: 0 }}>
-                      {liveRun.agents_done}/{liveRun.agents_total} agents
-                      {liveRun.agents_failed > 0 && ` · ${liveRun.agents_failed} failed`}
-                    </span>
-                  </div>
-                )}
-              </div>
-              {(liveRun.status === 'completed' || liveRun.status === 'failed') && (
-                <button
-                  onClick={() => sendMessage(liveRun.status === 'failed' ? 'Explain what failed and how to fix it' : 'What did the mission accomplish in that run?')}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}
-                >
-                  {liveRun.status === 'failed' ? 'Diagnose →' : 'Summary →'}
-                </button>
-              )}
-              <button
-                onClick={() => setLiveRunDismissed(true)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1rem', lineHeight: 1, padding: '0 4px', flexShrink: 0 }}
-                aria-label="Dismiss"
-              >×</button>
-            </div>
-          )}
+          {/* Live run strip — same view as the run card below, so the two always agree */}
+          <RunStrip missionId={missionId} onView={scrollToRunCard} />
 
           {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '24px 0' }}>
@@ -1973,7 +1755,7 @@ export default function MissionChatPage() {
 
                   <div style={{ flex: 1, minWidth: 0, maxWidth: '84%' }}>
                     {/* Message bubble */}
-                    <div style={{
+                    <div data-run-card={msg.runMonitor ? msg.runMonitor.runId : undefined} style={msg.runMonitor ? { maxWidth: 560 } : {
                       background: msg.role === 'user' ? 'var(--accent)' : 'var(--bg-card)',
                       border: msg.role === 'assistant' ? '1px solid var(--border)' : 'none',
                       borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
@@ -1981,8 +1763,15 @@ export default function MissionChatPage() {
                       color: msg.role === 'user' ? '#fff' : 'var(--text-primary)',
                       fontSize: '0.88rem', lineHeight: 1.65,
                     }}>
-                      {/* Run monitor — live per-agent progress card */}
-                      {msg.runMonitor && <RunMonitorCard monitor={msg.runMonitor} />}
+                      {/* Live run card — every agent's step, any approval, rehearsal or live */}
+                      {msg.runMonitor && (
+                        <LiveRunCard
+                          missionId={missionId}
+                          runId={msg.runMonitor.runId}
+                          onAsk={text => sendMessage(text)}
+                          onRun={() => applyAction({ type: 'run_now', label: 'Run now' }, -1)}
+                        />
+                      )}
                       {/* Blueprint update — live step-by-step progress card */}
                       {msg.blueprintUpdate && <BlueprintUpdateCard update={msg.blueprintUpdate} />}
                       {/* Tool call cards — live while streaming, persisted in completed messages */}

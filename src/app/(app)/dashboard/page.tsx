@@ -11,6 +11,8 @@ import { withArchitectQuestion } from '@/lib/utils/architect-question';
 import Glyph from "@/components/ui/Glyph";
 import ConnectorLogo from "@/components/ConnectorLogos";
 import { LogoMark } from "@/components/brand/Logo";
+import LiveRunCard, { RunStrip } from '@/components/runs/LiveRunCard';
+import { kickLive } from '@/components/runs/useLiveRun';
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface ChatSession { id: string; title: string; updated_at: string; }
@@ -22,6 +24,8 @@ interface ChatMessage {
   isStreaming?: boolean;
   processingAction?: string;
   ts?: number;
+  /** A live card for a run started from here (client-only, not saved with the chat). */
+  run?: { missionId: string; runId: string };
 }
 interface AgentCard { name: string; icon?: string; role: string; tool?: string; trustLevel?: string; }
 interface RequiredConnector { service: string; reason: string; connected: boolean; }
@@ -45,10 +49,6 @@ interface ActionPayload {
   requiredConnectors?: RequiredConnector[];
 }
 interface MissionShortcut { id: string; title: string; status: string; }
-interface LiveRun {
-  run_number: number; status: string; agents_total: number;
-  agents_done: number; agents_failed: number; started_at: string;
-}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -146,8 +146,8 @@ function CommandCenterPageInner() {
   const [welcomeMessage, setWelcomeMessage] = useState<string>('');
   const [toast, setToast] = useState<string | null>(null);
   const [applyingAction, setApplyingAction] = useState<number | null>(null);
-  const [liveRun, setLiveRun] = useState<{ missionId: string; run: LiveRun } | null>(null);
-  const [liveRunDismissed, setLiveRunDismissed] = useState(false);
+  // The mission whose run was last started from here: its progress shows in the strip.
+  const [trackedMissionId, setTrackedMissionId] = useState<string | null>(null);
 
   // Voice
   const [isRecording, setIsRecording] = useState(false);
@@ -171,7 +171,6 @@ function CommandCenterPageInner() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const runPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const blueprintPollsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
@@ -236,7 +235,6 @@ function CommandCenterPageInner() {
 
   // ── Cleanup polling ────────────────────────────────────────────────────────
   useEffect(() => () => {
-    if (runPollRef.current) clearInterval(runPollRef.current);
     for (const poll of blueprintPollsRef.current.values()) clearInterval(poll);
   }, []);
 
@@ -342,23 +340,13 @@ function CommandCenterPageInner() {
     loadSessions();
   };
 
-  // ── Start run polling ──────────────────────────────────────────────────────
-  const startRunPolling = useCallback((missionId: string) => {
-    if (runPollRef.current) clearInterval(runPollRef.current);
-    setLiveRunDismissed(false);
-    runPollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/missions/${missionId}/runs`, { credentials: 'include' });
-        if (!res.ok) return;
-        const { runs } = await res.json() as { runs: LiveRun[] };
-        const latest = runs[0]; if (!latest) return;
-        setLiveRun({ missionId, run: latest });
-        if (latest.status === 'completed' || latest.status === 'failed') {
-          if (runPollRef.current) clearInterval(runPollRef.current);
-        }
-      } catch { /* non-fatal */ }
-    }, 3000);
-    setTimeout(() => { if (runPollRef.current) clearInterval(runPollRef.current); }, 15 * 60 * 1000);
+  // ── Follow a run with a live card in the chat ─────────────────────────────
+  const followRun = useCallback((missionId: string, runId: string) => {
+    setMessages(prev => prev.some(m => m.run?.runId === runId)
+      ? prev
+      : [...prev, { role: 'assistant', content: '', ts: Date.now(), run: { missionId, runId } }]);
+    setTrackedMissionId(missionId);
+    kickLive(missionId);
   }, []);
 
   // ── Blueprint polling: pick up Inngest progress + completion ──────────────
@@ -574,8 +562,13 @@ function CommandCenterPageInner() {
           ? `/api/missions/${action.missionId}/run`
           : `/api/missions/${action.missionId}/execute`;
         const res = await fetch(ep, { method: 'POST', credentials: 'include' });
-        if (res.ok) { showToast('Mission started!'); startRunPolling(action.missionId); }
-        else { const e = await res.json() as { error?: string }; showToast(`${e.error ?? 'Could not start.'}`); }
+        const data = await res.json().catch(() => ({})) as { runId?: string; error?: string; message?: string; code?: string };
+        if (res.ok && data.runId) followRun(action.missionId, data.runId);
+        else if (res.status === 409 && data.code === 'run_in_progress' && data.runId) {
+          showToast(data.message ?? 'This mission is already running.');
+          followRun(action.missionId, data.runId);
+        } else if (res.ok) showToast('Mission started!');
+        else showToast(`${data.message ?? data.error ?? 'Could not start.'}`);
 
       } else if (action.type === 'schedule_mission' && action.missionId && action.cron) {
         showToast('Setting schedule…');
@@ -1222,31 +1215,14 @@ function CommandCenterPageInner() {
             <button onClick={() => { setInput('Create a new mission: '); inputRef.current?.focus(); }} className="btn btn-primary btn-sm" style={{ fontSize: '0.75rem', flexShrink: 0, whiteSpace: 'nowrap' }}>+ New Mission</button>
           </div>
 
-          {/* Live run ticker */}
-          {liveRun && !liveRunDismissed && (
-            <div style={{ background: liveRun.run.status === 'completed' ? 'color-mix(in srgb, var(--emerald) 10%, transparent)' : liveRun.run.status === 'failed' ? 'color-mix(in srgb, var(--rose) 10%, transparent)' : 'color-mix(in srgb, var(--purple) 10%, transparent)', borderBottom: '1px solid var(--border)', padding: '7px 20px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-              {liveRun.run.status !== 'completed' && liveRun.run.status !== 'failed'
-                ? <span style={{ width: 13, height: 13, borderRadius: '50%', border: '2px solid var(--accent)', borderTopColor: 'transparent', display: 'inline-block', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
-                : <span style={{ fontSize: '0.8rem' }}>{liveRun.run.status === 'completed' ? '✓' : '✕'}</span>}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.77rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {liveRun.run.status === 'completed' ? 'Run completed' : liveRun.run.status === 'failed' ? 'Run failed' : 'Running…'} — #{liveRun.run.run_number}
-                </div>
-                {liveRun.run.agents_total > 0 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
-                    <div style={{ flex: 1, height: 3, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', background: liveRun.run.status === 'failed' ? 'var(--rose)' : 'var(--accent)', width: `${Math.round(liveRun.run.agents_done / liveRun.run.agents_total * 100)}%`, transition: 'width 0.4s ease', borderRadius: 4 }} />
-                    </div>
-                    <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)', flexShrink: 0 }}>{liveRun.run.agents_done}/{liveRun.run.agents_total} agents</span>
-                  </div>
-                )}
-              </div>
-              {(liveRun.run.status === 'completed' || liveRun.run.status === 'failed') && (
-                <button onClick={() => router.push(`/dashboard/missions/${liveRun.missionId}`)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: '0.75rem', fontWeight: 600 }}>View →</button>
-              )}
-              <button onClick={() => setLiveRunDismissed(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1rem', lineHeight: 1 }}>×</button>
-            </div>
+          {/* Live run strip — the run started from here, same view as its card in the chat */}
+          {trackedMissionId && (
+            <RunStrip
+              missionId={trackedMissionId}
+              onView={() => { const cards = document.querySelectorAll('[data-run-card]'); cards[cards.length - 1]?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}
+            />
           )}
+
 
           {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '24px 0' }}>
@@ -1285,7 +1261,11 @@ function CommandCenterPageInner() {
               )}
 
               {/* Chat messages */}
-              {messages.map((msg, i) => (
+              {messages.map((msg, i) => msg.run ? (
+                <div key={i} data-run-card={msg.run.runId} style={{ maxWidth: 520, width: '100%' }}>
+                  <LiveRunCard compact missionId={msg.run.missionId} runId={msg.run.runId} />
+                </div>
+              ) : (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div style={{
                     maxWidth: '82%',

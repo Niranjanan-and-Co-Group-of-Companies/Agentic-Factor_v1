@@ -175,8 +175,8 @@ export async function transitionMissionStatus(
     throw new Error(`Failed to transition mission ${missionId} to ${newStatus}: ${error.message}`);
   }
 
-  // 1.5 Training Mode: a completed run counts toward the rehearsal total, and
-  // the mission auto-graduates to live once it hits the configured max.
+  // 1.5 Training Mode: one completed rehearsal is enough — the customer has reviewed every write
+  // it would make — so the mission goes live after it (older missions were created with up to 5).
   // Non-fatal — a failure here must never block the real status transition.
   if (newStatus === 'completed') {
     try {
@@ -188,7 +188,7 @@ export async function transitionMissionStatus(
 
       if (trainingRow?.training_enabled) {
         const newRunCount = (trainingRow.training_runs_completed ?? 0) + 1;
-        const maxRuns = trainingRow.training_runs_max ?? 1;
+        const maxRuns = 1;
         const graduated = newRunCount >= maxRuns;
 
         await supabase

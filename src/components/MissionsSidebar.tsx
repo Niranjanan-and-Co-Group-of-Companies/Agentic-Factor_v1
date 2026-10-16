@@ -6,6 +6,8 @@ import { createBrowserClient } from '@supabase/ssr';
 import { sanitizeTitle } from '@/lib/utils/sanitize-title';
 
 import { LogoMark } from "@/components/brand/Logo";
+import { RunDot } from '@/components/runs/LiveRunCard';
+import { useActiveRuns } from '@/components/runs/useLiveRun';
 interface Mission {
   id: string;
   title: string;
@@ -35,6 +37,8 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
   const router = useRouter();
   const [missions, setMissions] = useState<Mission[]>([]);
   const [credits, setCredits] = useState<Credits | null>(null);
+  // Missions with a run going now (pulsing dot) or waiting on an approval (amber dot).
+  const activeRuns = useActiveRuns();
 
   const load = useCallback(async () => {
     const supabase = getSupabase();
@@ -150,6 +154,7 @@ export default function MissionsSidebar({ activeMissionId }: Props) {
                   }}>
                     {sanitizeTitle(m.title)}
                   </span>
+                  <RunDot state={activeRuns[m.id]} />
                 </button>
               );
             })}
