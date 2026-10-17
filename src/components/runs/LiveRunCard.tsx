@@ -6,8 +6,12 @@ import { useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Check, CircleCheck, CircleX, ShieldCheck, X } from 'lucide-react';
 import { LogoMark } from '@/components/brand/Logo';
-import { kickLive, useMissionLive, useNow, useRunView, type AgentStep, type LiveAgent, type LiveRunView } from './useLiveRun';
+import { useMissionLive, useNow, useRunView, type AgentStep, type LiveAgent, type LiveRunView } from './useLiveRun';
+import { ApprovalPanel, type ApprovalRecordPayload } from './Approval';
+import { appName } from '@/lib/utils/app-name';
 import s from './runs.module.css';
+
+export { appName };
 
 const ACTIVE_STEPS: AgentStep[] = ['working', 'repairing', 'checking', 'acting'];
 const isFinished = (status?: string) => status === 'completed' || status === 'failed';
@@ -19,14 +23,6 @@ export function fmtDuration(ms: number | null | undefined): string {
   const min = Math.floor(sec / 60);
   if (min < 60) return `${min}m ${String(sec % 60).padStart(2, '0')}s`;
   return `${Math.floor(min / 60)}h ${min % 60}m`;
-}
-
-/** "googlesheets" → "Google Sheets", "zoho_books" → "Zoho Books". */
-export function appName(slug: string): string {
-  const lower = slug.toLowerCase();
-  const google = /^google([a-z]+)$/.exec(lower);
-  const words = (google ? `google ${google[1]}` : lower.replace(/[_-]+/g, ' ')).split(' ').filter(Boolean);
-  return words.map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
 }
 
 /** The server's clock now, from the moment its answer arrived. */
@@ -154,14 +150,14 @@ interface CardProps {
   onAsk?: (text: string) => void;
   /** Starts a new run. */
   onRun?: () => void;
+  /** Called with the saved record when the customer approves or rejects in this card. */
+  onDecided?: (record: ApprovalRecordPayload) => void;
 }
 
-export default function LiveRunCard({ missionId, runId, compact = false, onAsk, onRun }: CardProps) {
+export default function LiveRunCard({ missionId, runId, compact = false, onAsk, onRun, onDecided }: CardProps) {
   const { view, receivedAt } = useRunView(missionId, runId);
   const running = !!view?.run && !isFinished(view.run.status);
   const now = useNow(running);
-  const [deciding, setDeciding] = useState(false);
-  const [decisionError, setDecisionError] = useState<string | null>(null);
 
   if (!view?.run) {
     return (
@@ -182,27 +178,6 @@ export default function LiveRunCard({ missionId, runId, compact = false, onAsk, 
   const headline = runHeadline(view, nowMs);
   const agents = view.agents;
   const approval = view.approval;
-
-  const decide = async () => {
-    if (!approval) return;
-    setDeciding(true);
-    setDecisionError(null);
-    try {
-      const res = await fetch('/api/approvals', {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actionId: approval.id, decision: 'approved', missionId }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: string };
-        setDecisionError(err.error ?? 'Could not record that. Try again, or use the Approvals page.');
-      }
-    } catch {
-      setDecisionError('Could not reach the server. Try again.');
-    } finally {
-      setDeciding(false);
-      kickLive(missionId);
-    }
-  };
 
   const HeadIcon = run.status === 'completed' ? CircleCheck : run.status === 'failed' ? CircleX : approval ? ShieldCheck : null;
   const headIconColor = run.status === 'completed' ? 'var(--emerald)' : run.status === 'failed' ? 'var(--rose)' : 'var(--amber)';
@@ -265,33 +240,15 @@ export default function LiveRunCard({ missionId, runId, compact = false, onAsk, 
       </ol>
 
       {approval && run.status !== 'completed' && run.status !== 'failed' && (
-        <div className={s.approval}>
-          <div className={s.approvalTitle}>
-            <ShieldCheck size={15} strokeWidth={2} aria-hidden />
-            {approval.kind === 'rehearsal' ? 'Here’s what it would do' : 'It wants to make these changes'}
-          </div>
-          <div className={s.approvalText}>
-            {approval.kind === 'rehearsal'
-              ? 'Nothing has been sent or changed. If this looks right, continue and the rehearsal finishes.'
-              : 'These are real. Review them, then approve to let it go ahead.'}
-          </div>
-          {approval.actions.length > 0 && (
-            <div className={s.actions}>{approval.actions.map(act => <span key={act} className={s.action}>{act}</span>)}</div>
-          )}
-          {!compact && approval.preview && <div className={s.preview}>{approval.preview}</div>}
-          <div className={s.buttons}>
-            {approval.kind === 'rehearsal' && !compact ? (
-              <>
-                <button type="button" className={`${s.btn} ${s.btnPrimary}`} onClick={decide} disabled={deciding}>
-                  {deciding ? 'Continuing…' : <>Looks right — continue <ArrowRight size={14} aria-hidden /></>}
-                </button>
-                <Link href="/approvals" className={`${s.btn} ${s.btnGhost}`}>See full details</Link>
-              </>
-            ) : (
-              <Link href="/approvals" className={`${s.btn} ${s.btnPrimary}`}>Review {approval.kind === 'rehearsal' ? 'the preview' : 'and approve'} <ArrowRight size={14} aria-hidden /></Link>
-            )}
-          </div>
-          {decisionError && <div className={s.approvalText} style={{ color: 'var(--rose)' }}>{decisionError}</div>}
+        <div className={s.approvalSlot}>
+          <ApprovalPanel
+            key={approval.id}
+            approval={approval}
+            missionId={missionId}
+            via={compact ? 'command_center' : 'mission_chat'}
+            compact={compact}
+            onDecided={onDecided}
+          />
         </div>
       )}
 

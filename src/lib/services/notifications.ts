@@ -180,6 +180,8 @@ export async function notifyMissionStatus(
   }
 
   const dashboardUrl = `https://agenticfactor.io/dashboard/missions/${missionId}`;
+  // Approvals and questions are answered in the mission's chat.
+  const chatUrl = `https://agenticfactor.io/dashboard/missions/${missionId}/chat`;
 
   const templates: Record<string, { subject: string; body: string }> = {
     completed: {
@@ -217,13 +219,12 @@ export async function notifyMissionStatus(
       ].join('\n'),
     },
     needs_approval: {
-      subject: `🔔 Action Required: ${missionTitle}`,
+      subject: `🔔 Your approval is needed: ${missionTitle}`,
       body: [
-        `Your mission "${missionTitle}" needs your attention!`,
+        `Your mission "${missionTitle}" is waiting for your OK before it continues.`,
         ``,
-        `An agent has completed its work and is waiting for your approval before the output is handed off to the next agent.`,
-        ``,
-        `Review and approve: ${dashboardUrl}`,
+        `Open the mission chat to see exactly what it wants to do, then approve or reject it there (a reason helps it improve):`,
+        chatUrl,
       ].join('\n'),
     },
     awaiting_input: {
@@ -233,7 +234,7 @@ export async function notifyMissionStatus(
         ``,
         `One of your agents has a question that requires your answer before the mission can proceed.`,
         ``,
-        `Answer now: ${dashboardUrl}`,
+        `Answer now: ${chatUrl}`,
         ``,
         `You can respond directly on the mission page or via the Chief of Staff chat.`,
       ].join('\n'),

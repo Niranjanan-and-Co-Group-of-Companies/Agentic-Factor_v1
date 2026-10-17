@@ -12,6 +12,8 @@ import Glyph from "@/components/ui/Glyph";
 import { LogoMark } from "@/components/brand/Logo";
 import LiveRunCard, { RunStrip } from '@/components/runs/LiveRunCard';
 import { kickLive, useMissionLive } from '@/components/runs/useLiveRun';
+import { ApprovalRecord, recordOf, type ApprovalRecordPayload } from '@/components/runs/Approval';
+import { decisionText } from '@/lib/services/approval-records';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ChatSession {
@@ -535,6 +537,26 @@ export default function MissionChatPage() {
     kickLive(missionId);
   }, [missionId]);
 
+  // An approval decision, kept in the chat: added on the spot here (the server saved it already).
+  const appendRecord = useCallback((record: ApprovalRecordPayload) => {
+    setMessages(prev => prev.some(m => recordOf(m.action_payload)?.actionId === record.actionId)
+      ? prev
+      : [...prev, { role: 'assistant', content: decisionText(record), action_payload: record as unknown as ActionPayload, action_applied: true, ts: Date.now() }]);
+  }, []);
+
+  // Decided somewhere else (Command Center, another tab): when the pending approval goes away, show its record.
+  const pendingApprovalId = live?.latest?.approval?.id ?? null;
+  const seenApprovalRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = seenApprovalRef.current;
+    seenApprovalRef.current = pendingApprovalId;
+    if (!previous || previous === pendingApprovalId) return;
+    fetch(`/api/approvals?id=${encodeURIComponent(previous)}`, { credentials: 'include', cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then((d: { record?: ApprovalRecordPayload | null } | null) => { if (d?.record) appendRecord(d.record); })
+      .catch(() => { /* the record is in the chat history on the next load */ });
+  }, [pendingApprovalId, appendRecord]);
+
   // A run already going when the page opens (a schedule, a webhook, another tab) gets its card too.
   const activeRunId = latestRun && latestRun.status !== 'completed' && latestRun.status !== 'failed' ? latestRun.id : null;
   if (activeRunId && !messages.some(m => m.runMonitor?.runId === activeRunId)) {
@@ -928,7 +950,7 @@ export default function MissionChatPage() {
           if (!line.startsWith('data: ')) continue;
           try {
             const evt = JSON.parse(line.slice(6)) as {
-              type: string; text?: string; cleanText?: string; executionId?: string;
+              type: string; text?: string; cleanText?: string; executionId?: string; approvalRecord?: ApprovalRecordPayload | null;
               action?: ActionPayload | null; sessionId?: string; message?: string;
               name?: string; provider?: string; displayName?: string;
               status?: 'running' | 'done' | 'error'; label?: string; summary?: string; logoUrl?: string | null;
@@ -1031,6 +1053,7 @@ export default function MissionChatPage() {
                         (p.action as ActionPayload | null) ?? null,
                         p.sessionId as string | undefined,
                       );
+                      if (p.approvalRecord) appendRecord(p.approvalRecord as ApprovalRecordPayload);
                     }
 
                     if (row.event_type === 'agent_error') {
@@ -1057,6 +1080,8 @@ export default function MissionChatPage() {
                 return updated;
               });
               setToolStatusLines([]);
+              // A decision given by replying ("yes, send it"): its record follows the reply.
+              if (evt.approvalRecord) appendRecord(evt.approvalRecord as ApprovalRecordPayload);
               if (evt.sessionId && !activeSessionId) setActiveSessionId(evt.sessionId);
               if (evt.action?.type === 'suggest_connector') setQuickChips(QUICK_CHIPS_AFTER_CONNECT);
               else if (streamedText.toLowerCase().includes('fail') || streamedText.toLowerCase().includes('error'))
@@ -1755,7 +1780,7 @@ export default function MissionChatPage() {
 
                   <div style={{ flex: 1, minWidth: 0, maxWidth: '84%' }}>
                     {/* Message bubble */}
-                    <div data-run-card={msg.runMonitor ? msg.runMonitor.runId : undefined} style={msg.runMonitor ? { maxWidth: 560 } : {
+                    <div data-run-card={msg.runMonitor ? msg.runMonitor.runId : undefined} style={msg.runMonitor || recordOf(msg.action_payload) ? { maxWidth: 560 } : {
                       background: msg.role === 'user' ? 'var(--accent)' : 'var(--bg-card)',
                       border: msg.role === 'assistant' ? '1px solid var(--border)' : 'none',
                       borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
@@ -1770,7 +1795,12 @@ export default function MissionChatPage() {
                           runId={msg.runMonitor.runId}
                           onAsk={text => sendMessage(text)}
                           onRun={() => applyAction({ type: 'run_now', label: 'Run now' }, -1)}
+                          onDecided={appendRecord}
                         />
+                      )}
+                      {/* An approval decision — stays in the chat with its reason */}
+                      {recordOf(msg.action_payload) && (
+                        <ApprovalRecord record={recordOf(msg.action_payload)!} onAsk={text => sendMessage(text)} />
                       )}
                       {/* Blueprint update — live step-by-step progress card */}
                       {msg.blueprintUpdate && <BlueprintUpdateCard update={msg.blueprintUpdate} />}
@@ -1781,7 +1811,7 @@ export default function MissionChatPage() {
                       {!msg.runMonitor && !msg.blueprintUpdate && !msg.isStreaming && msg.toolCards && msg.toolCards.length > 0 && (
                         <ToolCallCards cards={msg.toolCards} />
                       )}
-                      {!msg.runMonitor && !msg.blueprintUpdate && (msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content)}
+                      {!msg.runMonitor && !msg.blueprintUpdate && !recordOf(msg.action_payload) && (msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content)}
                       {msg.isStreaming && !msg.isAgentRunning && (
                         <span style={{ display: 'inline-block', width: 2, height: 16, background: 'var(--accent)', borderRadius: 1, marginLeft: 3, animation: 'blink 0.7s step-end infinite', verticalAlign: 'text-bottom' }} />
                       )}
@@ -1827,7 +1857,7 @@ export default function MissionChatPage() {
                     )}
 
                     {/* Action card */}
-                    {msg.role === 'assistant' && msg.action_payload && !msg.action_applied && (() => {
+                    {msg.role === 'assistant' && msg.action_payload && !msg.action_applied && !recordOf(msg.action_payload) && (() => {
                       const a = msg.action_payload;
                       const isConnector = a.type === 'suggest_connector';
                       const connectorSlug = a.provider ?? '';
@@ -1917,7 +1947,7 @@ export default function MissionChatPage() {
                       );
                     })()}
 
-                    {msg.role === 'assistant' && msg.action_payload && msg.action_applied && (
+                    {msg.role === 'assistant' && msg.action_payload && msg.action_applied && !recordOf(msg.action_payload) && (
                       <div style={{ marginTop: 5, fontSize: '0.7rem', color: 'var(--emerald)', paddingLeft: 4 }}>✓ Applied</div>
                     )}
 

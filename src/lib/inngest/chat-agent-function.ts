@@ -308,14 +308,30 @@ export const executeChatAgent = inngest.createFunction(
         });
       }
 
+      // A decision given by replying ("yes, send it") is carried out, not shown as an Apply card.
+      const isDecision = actionPayload?.type === 'approval_decision';
+      const cardAction = isDecision ? null : actionPayload;
       const { data: savedMsg } = await supabase.from('mission_chat_messages').insert({
         chat_id: chatId, tenant_id: tenantId,
         role: 'assistant', content: cleanText,
-        action_payload: actionPayload,
+        action_payload: cardAction,
         input_tokens: totalInputTokens, output_tokens: totalOutputTokens,
       }).select('id').single();
 
       await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
+
+      // After the reply is saved, so the decision's record follows it in the chat history.
+      let finalText = cleanText;
+      let approvalRecord: unknown = null;
+      if (isDecision) {
+        const { applyChatDecision } = await import('@/lib/services/approvals');
+        const applied = await applyChatDecision(tenantId, missionId, tenantId, actionPayload);
+        approvalRecord = applied.record ?? null;
+        if (applied.note) {
+          finalText = `${cleanText}\n\n${applied.note}`;
+          if (savedMsg?.id) await supabase.from('mission_chat_messages').update({ content: finalText }).eq('id', savedMsg.id);
+        }
+      }
 
       // Write episode memory (fire-and-forget)
       const allMsgs = [
@@ -333,8 +349,9 @@ export const executeChatAgent = inngest.createFunction(
         event_type: 'agent_completed',
         payload: {
           messageId: savedMsg?.id ?? null,
-          cleanText,
-          action: actionPayload,
+          cleanText: finalText,
+          action: cardAction,
+          approvalRecord,
           sessionId: chatId,
         },
       });

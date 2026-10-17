@@ -1,24 +1,41 @@
 import { circuitBreaker } from '@/lib/services/circuit-breaker';
 import { createServiceClient } from '@/lib/supabase/server';
+import { missionToolkits, recordDecisionInChat, recordFromRow, type ApprovalRecordPayload, type ApprovalVia, type ProposedActionRow } from '@/lib/services/approval-records';
 
 // ============================================================
 // Shared approval-decision processing — used by both the
 // button-based /api/approvals route and the conversational
 // Chief of Staff chat, so there is exactly one place that knows
 // how to actually approve or reject a proposed action.
+// Every decision is also saved into the mission's chat, with the
+// reason and where it was made, so the mission keeps the record.
 // ============================================================
 
 export type ApprovalResult =
-  | { ok: true; actionId: string; decision: 'approved' | 'rejected'; missionId?: string; circuitState: string }
+  | { ok: true; actionId: string; decision: 'approved' | 'rejected'; missionId?: string; circuitState: string; record?: ApprovalRecordPayload }
   | { ok: false; reason: 'circuit_breaker'; circuitState: string; message: string }
   | { ok: false; reason: 'missing_permission'; providers: string[]; message: string }
+  | { ok: false; reason: 'already_decided'; decision: 'approved' | 'rejected'; record: ApprovalRecordPayload | null; message: string }
+  | { ok: false; reason: 'not_found'; message: string }
   | { ok: false; reason: 'error'; message: string };
+
+export interface DecisionContext {
+  /** Why — optional for approvals, asked for on rejections. Kept with the record. */
+  reason?: string;
+  /** Where the decision was made. */
+  via?: ApprovalVia;
+  /** Who made it (their email). */
+  decidedBy?: string;
+}
+
+const APPROVAL_COLUMNS = 'id, mission_id, agent_id, agent_role, target, action_type, status, submitted_at, mission_title, payload, payload_redacted';
 
 export async function processApprovalDecision(
   tenantId: string,
   actionId: string,
   decision: 'approved' | 'rejected',
-  missionIdHint?: string
+  missionIdHint?: string,
+  context: DecisionContext = {},
 ): Promise<ApprovalResult> {
   try {
     // ── Circuit breaker check ──
@@ -40,15 +57,29 @@ export async function processApprovalDecision(
 
     const supabase = createServiceClient();
 
-    // Find the mission_id first since the frontend might pass the title.
-    // Also grab the fields needed to compute this action's pattern key.
+    // The action itself (this tenant's only): its mission, what it asks for, and whether it is still open.
     const { data: actionData } = await supabase
       .from('proposed_actions')
-      .select('mission_id, agent_id, agent_role, target, action_type')
+      .select(APPROVAL_COLUMNS)
       .eq('id', actionId)
-      .single();
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (!actionData) return { ok: false, reason: 'not_found', message: 'That approval no longer exists.' };
 
-    const actualMissionId = actionData?.mission_id;
+    const actualMissionId = actionData.mission_id as string | undefined;
+    const { data: missionPerms } = actualMissionId
+      ? await supabase.from('missions').select('permissions:mission_json->permissions').eq('id', actualMissionId).maybeSingle()
+      : { data: null };
+    const toolkits = missionToolkits({ permissions: (missionPerms as { permissions?: unknown } | null)?.permissions });
+
+    // Decided already (another tab, the Command Center, a reply in chat): report it instead of deciding twice.
+    if (actionData.status === 'approved' || actionData.status === 'rejected') {
+      return {
+        ok: false, reason: 'already_decided', decision: actionData.status,
+        record: recordFromRow(actionData as ProposedActionRow, toolkits),
+        message: `This was already ${actionData.status}.`,
+      };
+    }
 
     // If approving, check if we have the required tokens BEFORE updating the DB
     if (decision === 'approved' && actualMissionId) {
@@ -65,19 +96,36 @@ export async function processApprovalDecision(
       }
     }
 
-    // Update the proposed_action status in the DB
-    const { error } = await supabase
+    // Decide it — only while it is still pending, so two places deciding at once can't both win.
+    const decidedAt = new Date().toISOString();
+    const reason = context.reason?.trim().slice(0, 1000) || undefined;
+    const via: ApprovalVia = context.via ?? 'api';
+    const { data: updated, error } = await supabase
       .from('proposed_actions')
       .update({
         status: decision,
         decided_by: tenantId,
-        decided_at: new Date().toISOString(),
+        decided_at: decidedAt,
+        payload: { ...(actionData.payload ?? {}), decision: { reason, via, by: context.decidedBy, at: decidedAt } },
       })
       .eq('id', actionId)
-      .eq('tenant_id', tenantId);
+      .eq('tenant_id', tenantId)
+      .eq('status', 'pending')
+      .select('id');
+
+    if (!error && (updated ?? []).length === 0) {
+      const { data: now } = await supabase.from('proposed_actions').select(APPROVAL_COLUMNS).eq('id', actionId).maybeSingle();
+      const settled = now?.status === 'approved' || now?.status === 'rejected' ? now.status : decision;
+      return {
+        ok: false, reason: 'already_decided', decision: settled,
+        record: now ? recordFromRow(now as ProposedActionRow, toolkits) : null,
+        message: `This was already ${settled}.`,
+      };
+    }
 
     if (error) {
       console.warn('[approvals] DB update skipped:', error.message);
+      return { ok: false, reason: 'error', message: 'Could not record the decision. Please try again.' };
     } else {
       // Log this decision against its action-pattern — the data foundation
       // for eventually letting an agent graduate to autonomous for a
@@ -136,7 +184,7 @@ export async function processApprovalDecision(
       const now = new Date().toISOString();
       await supabase
         .from('mission_runs')
-        .update({ status: 'failed', completed_at: now, summary: 'Stopped: the reviewer rejected a proposed action.' })
+        .update({ status: 'failed', completed_at: now, summary: `Stopped: the reviewer rejected a proposed action${reason ? ` — “${reason.slice(0, 300)}”` : ''}.` })
         .eq('mission_id', actualMissionId)
         .eq('tenant_id', tenantId)
         .eq('status', 'paused');
@@ -150,9 +198,13 @@ export async function processApprovalDecision(
         event_type: 'mission.action_rejected',
         entity_type: 'mission',
         entity_id: actualMissionId,
-        payload: { actionId, agentRole: actionData?.agent_role, rejectedAt: now },
+        payload: { actionId, agentRole: actionData?.agent_role, rejectedAt: now, reason },
       });
     }
+
+    // The permanent record in the mission's chat — whichever screen the decision came from.
+    const record = recordFromRow({ ...(actionData as ProposedActionRow), status: decision, payload: { ...(actionData.payload ?? {}), decision: { reason, via, by: context.decidedBy, at: decidedAt } } }, toolkits) ?? undefined;
+    if (record && actualMissionId) await recordDecisionInChat(supabase, tenantId, actualMissionId, record);
 
     return {
       ok: true,
@@ -160,9 +212,54 @@ export async function processApprovalDecision(
       decision,
       missionId: actualMissionId,
       circuitState: circuitBreaker.getState(),
+      record,
     };
   } catch (error) {
     console.error('[processApprovalDecision]', error);
     return { ok: false, reason: 'error', message: (error as Error).message };
   }
+}
+
+/** The signed-in person's email, for "decided by". */
+export async function userEmail(userId: string): Promise<string | undefined> {
+  try {
+    const { data } = await createServiceClient().auth.admin.getUserById(userId);
+    return data.user?.email ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A decision the customer gave by replying in the mission chat (the assistant emitted an
+ * approval_decision action). Applies it to the mission's pending approval, if there still is one.
+ * `note` is a sentence to add to the reply when the decision could not be recorded as asked.
+ */
+export async function applyChatDecision(
+  tenantId: string,
+  missionId: string,
+  userId: string,
+  action: Record<string, unknown> | null,
+): Promise<{ handled: boolean; record?: ApprovalRecordPayload; note?: string }> {
+  if (action?.type !== 'approval_decision') return { handled: false };
+  const decision = action.decision === 'approved' || action.decision === 'rejected' ? action.decision : null;
+  if (!decision) return { handled: true };
+  const { data: pending } = await createServiceClient()
+    .from('proposed_actions')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('mission_id', missionId)
+    .eq('status', 'pending')
+    .order('submitted_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!pending) return { handled: true, note: 'Nothing is waiting for approval any more, so nothing was changed.' };
+  const reason = typeof action.reason === 'string' && action.reason.trim() ? action.reason.trim() : undefined;
+  const result = await processApprovalDecision(tenantId, pending.id, decision, missionId, {
+    reason, via: 'chat_message', decidedBy: await userEmail(userId),
+  });
+  if (result.ok) return { handled: true, record: result.record };
+  if (result.reason === 'already_decided') return { handled: true, record: result.record ?? undefined, note: result.message };
+  if (result.reason === 'missing_permission') return { handled: true, note: `I couldn't approve it yet: connect ${result.providers.join(', ')} first, then tell me again.` };
+  return { handled: true, note: 'I couldn’t record that decision. Please use the buttons on the approval card.' };
 }

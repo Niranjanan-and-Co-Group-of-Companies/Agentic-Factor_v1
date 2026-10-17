@@ -13,6 +13,9 @@ import ConnectorLogo from "@/components/ConnectorLogos";
 import { LogoMark } from "@/components/brand/Logo";
 import LiveRunCard, { RunStrip } from '@/components/runs/LiveRunCard';
 import { kickLive } from '@/components/runs/useLiveRun';
+import PendingApprovals from '@/components/runs/PendingApprovals';
+import { ApprovalRecord, type ApprovalRecordPayload } from '@/components/runs/Approval';
+import { decisionText } from '@/lib/services/approval-records';
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface ChatSession { id: string; title: string; updated_at: string; }
@@ -26,6 +29,8 @@ interface ChatMessage {
   ts?: number;
   /** A live card for a run started from here (client-only, not saved with the chat). */
   run?: { missionId: string; runId: string };
+  /** An approval decided here; the server saved it into that mission's chat too. */
+  approval?: { record: ApprovalRecordPayload; missionId: string; missionTitle?: string };
 }
 interface AgentCard { name: string; icon?: string; role: string; tool?: string; trustLevel?: string; }
 interface RequiredConnector { service: string; reason: string; connected: boolean; }
@@ -339,6 +344,13 @@ function CommandCenterPageInner() {
     if (activeSessionId === sessionId) { setActiveSessionId(null); setMessages([]); }
     loadSessions();
   };
+
+  // ── An approval decided here shows in this chat (it is saved in the mission's chat too) ──
+  const addApprovalRecord = useCallback((record: ApprovalRecordPayload, missionId: string, missionTitle?: string) => {
+    setMessages(prev => prev.some(m => m.approval?.record.actionId === record.actionId)
+      ? prev
+      : [...prev, { role: 'assistant', content: decisionText(record), ts: Date.now(), approval: { record, missionId, missionTitle } }]);
+  }, []);
 
   // ── Follow a run with a live card in the chat ─────────────────────────────
   const followRun = useCallback((missionId: string, runId: string) => {
@@ -1216,6 +1228,9 @@ function CommandCenterPageInner() {
           </div>
 
           {/* Live run strip — the run started from here, same view as its card in the chat */}
+          {/* Everything waiting on your OK, across missions — decided right here */}
+          <PendingApprovals onDecided={(record, a) => addApprovalRecord(record, a.missionId, a.missionTitle)} />
+
           {trackedMissionId && (
             <RunStrip
               missionId={trackedMissionId}
@@ -1263,7 +1278,11 @@ function CommandCenterPageInner() {
               {/* Chat messages */}
               {messages.map((msg, i) => msg.run ? (
                 <div key={i} data-run-card={msg.run.runId} style={{ maxWidth: 520, width: '100%' }}>
-                  <LiveRunCard compact missionId={msg.run.missionId} runId={msg.run.runId} />
+                  <LiveRunCard compact missionId={msg.run.missionId} runId={msg.run.runId} onDecided={record => addApprovalRecord(record, msg.run!.missionId)} />
+                </div>
+              ) : msg.approval ? (
+                <div key={i} style={{ maxWidth: 520, width: '100%' }}>
+                  <ApprovalRecord record={msg.approval.record} missionId={msg.approval.missionId} missionTitle={msg.approval.missionTitle} />
                 </div>
               ) : (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>

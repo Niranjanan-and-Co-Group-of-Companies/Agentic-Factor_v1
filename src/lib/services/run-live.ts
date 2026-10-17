@@ -3,6 +3,10 @@
 // read this same view, so they can never disagree about how far a run has got.
 
 import { createServiceClient } from '@/lib/supabase/server';
+import { humanizeAction } from '@/lib/utils/app-name';
+import { describeApproval, type ProposedActionRow } from '@/lib/services/approval-records';
+
+export { humanizeAction };
 
 export type RunStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed';
 export type AgentStep = 'waiting' | 'working' | 'repairing' | 'checking' | 'acting' | 'approval' | 'paused' | 'done' | 'failed' | 'skipped';
@@ -27,10 +31,12 @@ export interface LiveAgent {
 export interface LiveApproval {
   id: string;
   agentId: string;
+  agentRole: string;
   /** rehearsal = a preview to check (nothing real happens); live = permission for a real action. */
   kind: 'rehearsal' | 'live';
   actions: string[];
   preview?: string;
+  submittedAt?: string;
 }
 
 export interface LiveRun {
@@ -84,17 +90,6 @@ export function appsInScript(script: string, toolkits: string[]): string[] {
   }
   for (const p of proxied) found.add(p);
   return [...found].slice(0, 3);
-}
-
-/** "GMAIL_SEND_EMAIL" → "Gmail: send email". */
-export function humanizeAction(slug: string, toolkits: string[] = []): string {
-  const upper = slug.toUpperCase();
-  const kit = [...toolkits].sort((a, b) => b.length - a.length).find(t => upper.startsWith(`${t.toUpperCase()}_`));
-  const app = kit ?? slug.split('_')[0].toLowerCase();
-  const rest = kit ? upper.slice(kit.length + 1) : upper.split('_').slice(1).join('_');
-  const appName = app.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  const verb = rest.toLowerCase().replace(/_/g, ' ').trim();
-  return verb ? `${appName}: ${verb}` : appName;
 }
 
 /** Plain, short error text for the card (the full text stays in the run log). */
@@ -235,7 +230,7 @@ export async function loadLiveRun(tenantId: string, missionId: string, runId?: s
   if (status === 'paused' || status === 'running') {
     const { data: pending } = await supabase
       .from('proposed_actions')
-      .select('id, agent_id, action_type, payload_redacted, run_id:payload->>runId')
+      .select('id, mission_id, agent_id, agent_role, mission_title, action_type, status, submitted_at, payload_redacted, run_id:payload->>runId')
       .eq('tenant_id', tenantId)
       .eq('mission_id', missionId)
       .eq('status', 'pending')
@@ -243,14 +238,8 @@ export async function loadLiveRun(tenantId: string, missionId: string, runId?: s
       .limit(1)
       .maybeSingle();
     if (pending && (!pending.run_id || pending.run_id === runRow.id)) {
-      const redacted = (pending.payload_redacted ?? {}) as { actions?: string[]; preview?: string };
-      approval = {
-        id: pending.id,
-        agentId: pending.agent_id,
-        kind: pending.action_type === 'training_review' ? 'rehearsal' : 'live',
-        actions: (redacted.actions ?? []).slice(0, 5).map(a => (/^[A-Z0-9_]+$/.test(a) ? humanizeAction(a, toolkits) : a)),
-        preview: typeof redacted.preview === 'string' ? redacted.preview.slice(0, 600) : undefined,
-      };
+      const a = describeApproval({ ...(pending as ProposedActionRow), payload: { runId: pending.run_id } }, toolkits, 600);
+      approval = { id: a.id, agentId: a.agentId, agentRole: a.agentRole, kind: a.kind, actions: a.actions, preview: a.preview || undefined, submittedAt: a.submittedAt };
     }
   }
 
@@ -270,7 +259,7 @@ export async function loadLiveRun(tenantId: string, missionId: string, runId?: s
     error: status === 'failed' ? shortError(runError ?? runRow.summary) : undefined,
     summary: runRow.summary ? String(runRow.summary).replace(REHEARSAL_PREFIX, '').slice(0, 400) : undefined,
   };
-  view.agents = deriveAgents({ agents: blueprintAgents, events: rows, runStatus: status, approvalAgentId: approval?.agentId, runError });
+  view.agents = deriveAgents({ agents: blueprintAgents, events: rows, runStatus: status, approvalAgentId: approval?.agentId, runError: runError ?? (status === 'failed' ? runRow.summary : null) });
   view.approval = approval;
   return view;
 }

@@ -1,32 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
+import { createServiceClient } from '@/lib/supabase/server';
 import { circuitBreaker } from '@/lib/services/circuit-breaker';
-import { processApprovalDecision } from '@/lib/services/approvals';
+import { processApprovalDecision, userEmail } from '@/lib/services/approvals';
+import { describeApproval, missionToolkits, recordFromRow, type ProposedActionRow } from '@/lib/services/approval-records';
 import { z } from 'zod';
 
 // ============================================================
-// POST /api/approvals — Process approval decisions
-// Connects the Approve/Reject buttons to the orchestrator.
-// Decision logic lives in lib/services/approvals.ts, shared with
-// the conversational Chief of Staff approval flow.
+// /api/approvals — approvals happen in the chat (mission chat
+// and Command Center). Decision logic lives in
+// lib/services/approvals.ts, which also saves every decision,
+// with its reason, into the mission's chat.
 // ============================================================
 
 const DecisionSchema = z.object({
   actionId: z.string(),
   decision: z.enum(['approved', 'rejected']),
   missionId: z.string().optional(),
+  reason: z.string().max(1000).optional(),
+  via: z.enum(['mission_chat', 'command_center', 'chat_message', 'approvals_page', 'api']).optional(),
 });
 
+const COLUMNS = 'id, mission_id, agent_id, agent_role, mission_title, action_type, status, submitted_at, payload, payload_redacted';
+
+// POST /api/approvals — approve or reject, with an optional reason
 export async function POST(request: NextRequest) {
   const authResult = await extractTenantContext(request);
   if (isAuthError(authResult)) return authResult;
-  const { tenantId } = authResult;
+  const { tenantId, userId } = authResult;
 
   try {
     const body = await request.json();
-    const { actionId, decision, missionId } = DecisionSchema.parse(body);
+    const { actionId, decision, missionId, reason, via } = DecisionSchema.parse(body);
 
-    const result = await processApprovalDecision(tenantId, actionId, decision, missionId);
+    const result = await processApprovalDecision(tenantId, actionId, decision, missionId, {
+      reason, via: via ?? 'api', decidedBy: await userEmail(userId),
+    });
 
     if (!result.ok) {
       if (result.reason === 'circuit_breaker') {
@@ -37,9 +46,15 @@ export async function POST(request: NextRequest) {
       }
       if (result.reason === 'missing_permission') {
         return NextResponse.json(
-          { error: 'missing_permission', providers: result.providers, message: result.message },
+          { error: 'missing_permission', providers: result.providers, message: `Connect ${result.providers.join(', ')} first, then approve again.` },
           { status: 403 }
         );
+      }
+      if (result.reason === 'already_decided') {
+        return NextResponse.json({ error: 'already_decided', message: result.message, decision: result.decision, record: result.record }, { status: 409 });
+      }
+      if (result.reason === 'not_found') {
+        return NextResponse.json({ error: 'not_found', message: result.message }, { status: 404 });
       }
       return NextResponse.json({ error: result.message }, { status: 500 });
     }
@@ -48,6 +63,7 @@ export async function POST(request: NextRequest) {
       success: true,
       actionId: result.actionId,
       decision: result.decision,
+      record: result.record,
       circuitState: result.circuitState,
       usage: circuitBreaker.getUsage(),
     });
@@ -60,12 +76,47 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// ============================================================
-// GET /api/approvals — Get circuit breaker status (admin/internal only)
-// ============================================================
+// GET /api/approvals?pending=1   — approvals waiting on this workspace (Command Center)
+// GET /api/approvals?id=<action> — one approval in full, with its decision record once decided
+// GET /api/approvals             — circuit breaker status (internal)
 export async function GET(request: NextRequest) {
   const authResult = await extractTenantContext(request);
   if (isAuthError(authResult)) return authResult;
+  const { tenantId } = authResult;
+  const params = request.nextUrl.searchParams;
+  const supabase = createServiceClient();
+
+  const toolkitsFor = async (missionIds: string[]) => {
+    const ids = [...new Set(missionIds)].filter(Boolean);
+    if (ids.length === 0) return new Map<string, string[]>();
+    const { data } = await supabase.from('missions').select('id, permissions:mission_json->permissions').in('id', ids).eq('tenant_id', tenantId);
+    return new Map((data ?? []).map(m => [m.id as string, missionToolkits({ permissions: (m as { permissions?: unknown }).permissions })]));
+  };
+
+  const id = params.get('id');
+  if (id) {
+    const { data: row } = await supabase.from('proposed_actions').select(COLUMNS).eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+    if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    const toolkits = (await toolkitsFor([row.mission_id])).get(row.mission_id) ?? [];
+    return NextResponse.json({
+      approval: describeApproval(row as ProposedActionRow, toolkits, 12_000),
+      record: recordFromRow(row as ProposedActionRow, toolkits),
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  }
+
+  if (params.get('pending')) {
+    const { data: rows } = await supabase
+      .from('proposed_actions')
+      .select(COLUMNS)
+      .eq('tenant_id', tenantId)
+      .eq('status', 'pending')
+      .order('submitted_at', { ascending: false })
+      .limit(20);
+    const kits = await toolkitsFor((rows ?? []).map(r => r.mission_id));
+    return NextResponse.json({
+      approvals: (rows ?? []).map(r => describeApproval(r as ProposedActionRow, kits.get(r.mission_id) ?? [], 600)),
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  }
 
   return NextResponse.json({
     circuitState: circuitBreaker.getState(),

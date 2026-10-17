@@ -15,6 +15,7 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { getMemoryContext } from '@/lib/services/agent-memory';
 import { cleanTenantFacts } from '@/lib/services/tenant-memory';
+import { describeApproval, missionToolkits, type ApprovalSummary, type ProposedActionRow } from '@/lib/services/approval-records';
 
 export interface ChatContext {
   systemPrompt: string;
@@ -179,6 +180,36 @@ export async function buildChatContext(
     }
   } catch { /* non-fatal */ }
 
+  // ── Pending approval: the run waits on the customer's decision ───────
+  let pendingApproval: ApprovalSummary | null = null;
+  try {
+    const { data: pending } = await supabase
+      .from('proposed_actions')
+      .select('id, mission_id, agent_id, agent_role, mission_title, action_type, status, submitted_at, payload_redacted')
+      .eq('tenant_id', tenantId)
+      .eq('mission_id', missionId)
+      .eq('status', 'pending')
+      .order('submitted_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (pending) pendingApproval = describeApproval(pending as ProposedActionRow, missionToolkits(mission), 800);
+  } catch { /* non-fatal */ }
+  const approvalBlock = pendingApproval ? `
+PENDING APPROVAL — the current run is paused until the customer decides:
+  Agent: ${pendingApproval.agentRole}
+  Type: ${pendingApproval.kind === 'rehearsal' ? 'rehearsal preview (nothing is sent or changed; approving finishes the rehearsal)' : 'real action (approving makes it happen)'}
+  It will: ${pendingApproval.actions.join(', ') || 'the prepared changes'}
+  Preview: ${pendingApproval.preview.replace(/\s+/g, ' ').slice(0, 800)}
+
+APPROVAL RULES:
+- The customer approves or rejects with the buttons on the approval card in this chat, or by telling you.
+- Only when the customer's latest message clearly approves THIS action ("yes", "go ahead", "send it", "approve", "looks good") or clearly rejects it ("no", "don't send it", "reject", "that's wrong"), add exactly one:
+  <action>{"type":"approval_decision","decision":"approved","reason":"their reason in their own words, or empty"}</action>
+  (use "rejected" for a rejection). Confirm in one short sentence what you recorded.
+- Never decide for them, and never on an unclear message — ask them to confirm instead.
+- On a rejection, if they did not say what is wrong, ask what should change so you can fix the mission.
+` : '';
+
   // ── Agent memory (profile + episodes) ────────────────────────────────
   const { profileBlock, episodesBlock } = await getMemoryContext(tenantId, missionId);
 
@@ -205,7 +236,7 @@ ${missingConnectors.length > 0 ? `STILL NEEDED: ${missingConnectors.join(', ')} 
 
 ${toolsBlock ? toolsBlock + '\n' : ''}
 ${profileBlock ? profileBlock + '\n\n' : ''}${episodesBlock ? episodesBlock + '\n\n' : ''}
-RECENT RUNS:
+${approvalBlock}RECENT RUNS:
 ${runsSummary}
 ${versionHistory}
 SCHEDULE: ${scheduleInfo}
@@ -278,7 +309,11 @@ TODAY: ${now}`;
         .limit(1)
         .single();
 
-      if (lastRun?.status === 'failed') {
+      if (pendingApproval) {
+        proactiveAlert = pendingApproval.kind === 'rehearsal'
+          ? `The rehearsal is waiting for you to check what "${pendingApproval.agentRole}" would do. The details are in the card below.`
+          : `"${pendingApproval.agentRole}" is waiting for your approval to: ${pendingApproval.actions.join(', ') || 'make its changes'}. The details are in the card below.`;
+      } else if (lastRun?.status === 'failed') {
         proactiveAlert = `Your last run failed${lastRun.agents_failed ? ` (${lastRun.agents_failed} agent(s) had errors)` : ''}. Want me to diagnose what went wrong?`;
       } else if (missingConnectors.length > 0) {
         proactiveAlert = `This mission needs ${missingConnectors.join(', ')} to be connected before it can run. Want help connecting ${missingConnectors[0]}?`;

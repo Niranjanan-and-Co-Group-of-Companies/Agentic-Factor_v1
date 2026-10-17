@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 import { buildChatContext } from '@/lib/services/chat-context';
+import { applyChatDecision } from '@/lib/services/approvals';
 import { calculateChatCreditCost, checkCredits, deductCredits } from '@/lib/middleware/billing';
 import { retrieveRelevantChunks, listUploadedDocuments } from '@/lib/services/rag-retrieval';
 import { detectApiKey, redactKey, providerLabel } from '@/lib/services/apikey-detector';
@@ -122,7 +123,7 @@ export async function POST(
 ) {
   const authResult = await extractTenantContext(request);
   if (isAuthError(authResult)) return authResult;
-  const { tenantId } = authResult;
+  const { tenantId, userId } = authResult;
   const { id: missionId } = await context.params;
 
   const { messages, sessionId, isFirstLoad } = (await request.json()) as {
@@ -308,22 +309,42 @@ export async function POST(
 
           const chatId = sessionId ?? (await ensureSession(supabase, missionId, tenantId, recentMessages));
           const userMsg = recentMessages[recentMessages.length - 1];
+          // A decision given by replying ("yes, send it") is carried out here, not shown as an Apply card.
+          const isDecision = actionPayload?.type === 'approval_decision';
+          const cardAction = isDecision ? null : actionPayload;
 
           // Awaited before the stream closes: after controller.close() the serverless function can be
           // frozen, which silently dropped the assistant reply (and its Apply action) from history.
-          await (async () => {
+          let replyId: string | null = null;
+          try {
             await supabase.from('mission_chat_messages').insert({ chat_id: chatId, tenant_id: tenantId, role: userMsg.role, content: userMsg.content });
-            await supabase.from('mission_chat_messages').insert({
+            const { data: saved } = await supabase.from('mission_chat_messages').insert({
               chat_id: chatId, tenant_id: tenantId, role: 'assistant', content: cleanText,
-              action_payload: actionPayload, input_tokens: inputTokens, output_tokens: outputTokens, credits_deducted: credits,
-            });
+              action_payload: cardAction, input_tokens: inputTokens, output_tokens: outputTokens, credits_deducted: credits,
+            }).select('id').single();
+            replyId = (saved?.id as string | undefined) ?? null;
             await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
-          })().catch(console.error);
+          } catch (saveErr) {
+            console.error(saveErr);
+          }
+
+          // After the reply is saved, so the decision's record follows it in the chat history.
+          let finalText = cleanText;
+          let approvalRecord: unknown = null;
+          if (isDecision) {
+            const applied = await applyChatDecision(tenantId, missionId, userId, actionPayload);
+            approvalRecord = applied.record ?? null;
+            if (applied.note) {
+              finalText = `${cleanText}\n\n${applied.note}`;
+              send({ type: 'delta', text: `\n\n${applied.note}` });
+              if (replyId) await supabase.from('mission_chat_messages').update({ content: finalText }).eq('id', replyId);
+            }
+          }
           const allMsgs = recentMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: String(m.content) }));
-          allMsgs.push({ role: 'assistant', content: cleanText });
+          allMsgs.push({ role: 'assistant', content: finalText });
           writeEpisode(tenantId, missionId, allMsgs, []).catch(console.error);
 
-          send({ type: 'done', credits, inputTokens, outputTokens, sessionId: chatId, cleanText, action: actionPayload });
+          send({ type: 'done', credits, inputTokens, outputTokens, sessionId: chatId, cleanText: finalText, action: cardAction, approvalRecord });
           controller.close();
           return;
         }
