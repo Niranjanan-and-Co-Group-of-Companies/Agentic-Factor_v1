@@ -11,7 +11,7 @@ import { retrieveRelevantChunks, listUploadedDocuments } from '@/lib/services/ra
 export const maxDuration = 300;
 
 // Sentinel UUID used as mission_id for platform-level (non-mission) chat sessions
-const PLATFORM_CHAT_SENTINEL = '00000000-0000-0000-0000-000000000000';
+import { PLATFORM_CHAT_SENTINEL } from '@/lib/services/platform-chat';
 
 // ── Static platform capability catalog injected into every system prompt ──────
 const PLATFORM_CATALOG = `

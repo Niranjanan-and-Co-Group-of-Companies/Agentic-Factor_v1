@@ -87,30 +87,36 @@ function Segments({ agents, className }: { agents: LiveAgent[]; className: strin
 // Brand tiles are white in both themes, so the platform's mark keeps its light-theme colours there.
 const MARK_ON_WHITE = { '--logo-ink': '#201D18' } as CSSProperties;
 
-function AppTile({ slug }: { slug: string }) {
+type AppMeta = LiveRunView['apps'];
+
+/** An app's official name and logo from the mission's catalog; a readable name and the logo service otherwise. */
+const metaOf = (slug: string, apps: AppMeta | undefined) => apps?.[slug] ?? { name: appName(slug), logo: `https://logos.composio.dev/api/${slug}` };
+
+function AppTile({ slug, apps }: { slug: string; apps?: AppMeta }) {
   const [broken, setBroken] = useState(false);
+  const { name, logo } = metaOf(slug, apps);
   return (
-    <span className={s.tile} title={appName(slug)}>
+    <span className={s.tile} title={name}>
       {broken
-        ? <span className={s.tileLetter}>{slug[0]?.toUpperCase()}</span>
+        ? <span className={s.tileLetter}>{name[0]?.toUpperCase()}</span>
         // eslint-disable-next-line @next/next/no-img-element
-        : <img src={`https://logos.composio.dev/api/${slug}`} alt={appName(slug)} onError={() => setBroken(true)} />}
+        : <img src={logo} alt={name} onError={() => setBroken(true)} />}
     </span>
   );
 }
 
-function AppTiles({ apps }: { apps: string[] }) {
+function AppTiles({ slugs, apps }: { slugs: string[]; apps?: AppMeta }) {
   return (
     <span className={s.tiles}>
-      {apps.length === 0
+      {slugs.length === 0
         ? <span className={s.tile} style={MARK_ON_WHITE} title="Agentic Factor"><LogoMark size={22} /></span>
-        : apps.slice(0, 2).map(a => <AppTile key={a} slug={a} />)}
+        : slugs.slice(0, 2).map(a => <AppTile key={a} slug={a} apps={apps} />)}
     </span>
   );
 }
 
-function stepView(a: LiveAgent, rehearsal: boolean, nowMs: number) {
-  const apps = a.apps.map(appName).join(', ');
+function stepView(a: LiveAgent, rehearsal: boolean, nowMs: number, appsMeta?: AppMeta) {
+  const apps = a.apps.map(slug => metaOf(slug, appsMeta).name).join(', ');
   const quiet = a.lastSignalAt ? nowMs - Date.parse(a.lastSignalAt) : 0;
   switch (a.step) {
     case 'working':
@@ -209,7 +215,7 @@ export default function LiveRunCard({ missionId, runId, compact = false, onAsk, 
 
       <ol className={s.list}>
         {agents.map((a, i) => {
-          const v = stepView(a, rehearsal, nowMs);
+          const v = stepView(a, rehearsal, nowMs, view.apps);
           const next = agents[i + 1];
           const flowing = a.step === 'done' && !!next && ACTIVE_STEPS.includes(next.step);
           const rowCls = [
@@ -225,7 +231,7 @@ export default function LiveRunCard({ missionId, runId, compact = false, onAsk, 
                 {v.done && <Check size={11} strokeWidth={3} />}
                 {v.failed && <X size={11} strokeWidth={3} />}
               </span>
-              <AppTiles apps={a.apps} />
+              <AppTiles slugs={a.apps} apps={view.apps} />
               <span style={{ minWidth: 0 }}>
                 <span className={s.role} style={{ display: 'block' }}>{a.role}</span>
                 {v.note && !(compact && a.step === 'working') && <span className={`${s.note} ${v.noteCls ?? ''}`}>{v.note}</span>}

@@ -94,6 +94,16 @@ export const executeMissionBackground = inngest.createFunction(
         .eq('id', missionId)
         .eq('tenant_id', tenantId);
 
+      // The run's live card is saved in the mission's chat, so the history keeps every run — whether it
+      // was started there, from the Command Center, by a schedule or by a webhook (once per run).
+      const { data: runRowNow } = await supabase.from('mission_runs').select('run_number').eq('id', runId).maybeSingle();
+      const { recordRunCard } = await import('@/lib/services/chat-log');
+      await recordRunCard(supabase, tenantId, {
+        type: 'run_card', runId, missionId, trigger,
+        runNumber: (runRowNow?.run_number as number | undefined) ?? runNumber,
+        missionTitle: missionRow.mission_json?.title,
+      });
+
       // ── Build initial context for the first agent ──
       // Must be JSON: every generated script starts with json.loads(INPUT_CONTEXT), so a plain-text
       // prefix crashed the first agent on every webhook and repeat run.

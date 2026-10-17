@@ -5,6 +5,7 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { humanizeAction } from '@/lib/utils/app-name';
 import { describeApproval, type ProposedActionRow } from '@/lib/services/approval-records';
+import { actionLabel, declaredActions, missionCatalog } from '@/lib/services/app-catalog';
 
 export { humanizeAction };
 
@@ -60,6 +61,8 @@ export interface LiveRunView {
   run: LiveRun | null;
   agents: LiveAgent[];
   approval: LiveApproval | null;
+  /** Official name and logo of each app the agents use, from Composio's catalog. */
+  apps: Record<string, { name: string; logo: string }>;
   /** Median duration of recent completed runs, for "usually ~25s". */
   typicalMs: number | null;
   serverTime: string;
@@ -133,7 +136,8 @@ export function deriveAgents(input: {
     if (approvalAgentId === agent.id) return { ...base, step: 'approval' };
     if (!started) return { ...base, step: finished ? 'skipped' : 'waiting' };
     if (runStatus === 'failed') return { ...base, step: 'failed', note: shortError(runError), finishedAt: last?.created_at };
-    if (runStatus === 'completed') return { ...base, step: 'skipped' };
+    // It started and the run completed, so it finished — a rehearsal check records no completion of its own.
+    if (runStatus === 'completed') return { ...base, step: 'done', finishedAt: last?.created_at };
     if (runStatus === 'paused') return { ...base, step: 'paused' };
 
     // Still going: the latest signal says what it is doing now.
@@ -170,12 +174,13 @@ export async function loadLiveRun(tenantId: string, missionId: string, runId?: s
   if (!mission) return null;
 
   const mj = (mission.mission_json ?? {}) as { title?: string; agents?: Array<{ id: string; role: string; agentIndex?: number; pythonScript?: string }>; permissions?: Array<{ service?: string; type?: string }> };
-  const toolkits = [...new Set((mj.permissions ?? [])
-    .filter(p => p.type === 'composio_oauth' && p.service)
-    .map(p => p.service!.toLowerCase()))];
+  // Which app each agent works in and how to show it: the mission's own blueprint (its apps and
+  // each agent's declared tools) resolved against Composio's catalog.
+  const catalog = await missionCatalog(mj, declaredActions(mj));
+  const toolkits = Object.keys(catalog.apps);
   const blueprintAgents = [...(mj.agents ?? [])]
     .sort((a, b) => (a.agentIndex ?? 0) - (b.agentIndex ?? 0))
-    .map(a => ({ id: a.id, role: a.role, apps: appsInScript(a.pythonScript ?? '', toolkits) }));
+    .map(a => ({ id: a.id, role: a.role, apps: catalog.agentApps[a.id] ?? appsInScript(a.pythonScript ?? '', toolkits) }));
 
   const runQuery = supabase
     .from('mission_runs')
@@ -207,6 +212,7 @@ export async function loadLiveRun(tenantId: string, missionId: string, runId?: s
     run: null,
     agents: blueprintAgents.map(a => ({ ...a, step: 'waiting' as AgentStep })),
     approval: null,
+    apps: Object.fromEntries(Object.values(catalog.apps).map(a => [a.slug, { name: a.name, logo: a.logo }])),
     typicalMs,
     serverTime: new Date().toISOString(),
   };
@@ -238,7 +244,7 @@ export async function loadLiveRun(tenantId: string, missionId: string, runId?: s
       .limit(1)
       .maybeSingle();
     if (pending && (!pending.run_id || pending.run_id === runRow.id)) {
-      const a = describeApproval({ ...(pending as ProposedActionRow), payload: { runId: pending.run_id } }, toolkits, 600);
+      const a = describeApproval({ ...(pending as ProposedActionRow), payload: { runId: pending.run_id } }, slug => actionLabel(slug, catalog), 600);
       approval = { id: a.id, agentId: a.agentId, agentRole: a.agentRole, kind: a.kind, actions: a.actions, preview: a.preview || undefined, submittedAt: a.submittedAt };
     }
   }

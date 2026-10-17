@@ -46,7 +46,7 @@ const sent: unknown[] = [];
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: async (e: unknown) => { sent.push(e); return {}; } } }));
 
 import { processApprovalDecision, applyChatDecision } from '../approvals';
-import { decisionText, describeApproval, recordFromRow } from '../approval-records';
+import { decisionText, describeApproval, fallbackLabeler, recordFromRow } from '../approval-records';
 import { appName, humanizeAction } from '@/lib/utils/app-name';
 
 const T = 'tenant-1', M = 'mission-1';
@@ -113,11 +113,11 @@ describe('processApprovalDecision — every decision is kept in the mission chat
     expect(db.mission_chat_messages).toHaveLength(1);
   });
 
-  it('starts an "Approvals" chat when the mission has none yet', async () => {
+  it('starts a "Mission activity" chat when the mission has none yet', async () => {
     seed({ chat: false });
     await processApprovalDecision(T, 'act-1', 'approved', M, { via: 'command_center' });
     expect(db.mission_chats).toHaveLength(1);
-    expect(db.mission_chats[0].title).toBe('Approvals');
+    expect(db.mission_chats[0].title).toBe('Mission activity');
     expect(db.mission_chat_messages[0].chat_id).toBe(db.mission_chats[0].id);
   });
 
@@ -148,7 +148,7 @@ describe('applyChatDecision — "yes, send it" in the chat', () => {
 
 describe('approval records and names', () => {
   it('describes a rehearsal check in plain words', () => {
-    const a = describeApproval({ id: 'x', mission_id: M, action_type: 'training_review', agent_role: 'Sheets Builder', payload_redacted: { actions: ['GOOGLESHEETS_CREATE_GOOGLE_SHEET1', 'Custom write'] } }, ['googlesheets']);
+    const a = describeApproval({ id: 'x', mission_id: M, action_type: 'training_review', agent_role: 'Sheets Builder', payload_redacted: { actions: ['GOOGLESHEETS_CREATE_GOOGLE_SHEET1', 'Custom write'] } }, fallbackLabeler(['googlesheets']));
     expect(a).toMatchObject({ kind: 'rehearsal', agentRole: 'Sheets Builder', actions: ['Google Sheets: create google sheet', 'Custom write'], status: 'pending' });
   });
 

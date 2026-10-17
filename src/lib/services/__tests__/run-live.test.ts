@@ -66,6 +66,14 @@ describe('deriveAgents', () => {
     expect(agents[1].note).toBe('The sheet is read-only.');
   });
 
+  it('shows a step that started in a completed run as done — a rehearsal check records no completion', () => {
+    const agents = deriveAgents({
+      agents: AGENTS, runStatus: 'completed',
+      events: [ev('agent.completed', 'a1', 6), ev('agent.started', 'a2', 7), ev('agent.started', 'a3', 30)],
+    });
+    expect(agents.map(a => a.step)).toEqual(['done', 'done', 'done']);
+  });
+
   it('never shows agents as queued once the run is done (the old card stayed at "queued 0/3")', () => {
     const agents = deriveAgents({
       agents: AGENTS, runStatus: 'completed',

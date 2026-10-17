@@ -3,7 +3,7 @@ import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 
 // Platform-level chat sessions use this sentinel as mission_id (NOT NULL constraint satisfied)
-const PLATFORM_CHAT_SENTINEL = '00000000-0000-0000-0000-000000000000';
+import { PLATFORM_CHAT_SENTINEL } from '@/lib/services/platform-chat';
 
 // GET /api/command-chat/sessions — list platform chat sessions
 export async function GET(request: NextRequest) {

@@ -201,16 +201,8 @@ export async function GET(request: NextRequest) {
             .eq('event_type', 'mission.wait');
         }
 
-        // A scheduled run is a fresh run: decided approvals from earlier runs must not carry over,
-        // or agents would replay last run's approved output / execute without a new review.
-        if (payload.action === 'schedule') {
-          await supabase
-            .from('proposed_actions')
-            .delete()
-            .eq('mission_id', missionId)
-            .eq('tenant_id', tenantId)
-            .neq('status', 'pending');
-        }
+        // A scheduled run is a fresh run. Decided approvals from earlier runs stay as history: an approval
+        // only counts for the run that asked for it, so they can't be replayed or skip a new review.
 
         // Fire Inngest event — runs in background, no Vercel timeout risk.
         // Pass a pre-generated runId so the mission_runs row ties to this execution.

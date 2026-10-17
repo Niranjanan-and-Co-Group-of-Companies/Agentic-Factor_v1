@@ -15,7 +15,8 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { getMemoryContext } from '@/lib/services/agent-memory';
 import { cleanTenantFacts } from '@/lib/services/tenant-memory';
-import { describeApproval, missionToolkits, type ApprovalSummary, type ProposedActionRow } from '@/lib/services/approval-records';
+import { approvalActionSlugs, describeApproval, type ApprovalSummary, type ProposedActionRow } from '@/lib/services/approval-records';
+import { missionActionLabeler } from '@/lib/services/app-catalog';
 
 export interface ChatContext {
   systemPrompt: string;
@@ -192,7 +193,10 @@ export async function buildChatContext(
       .order('submitted_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (pending) pendingApproval = describeApproval(pending as ProposedActionRow, missionToolkits(mission), 800);
+    if (pending) {
+      const label = await missionActionLabeler(mission as Parameters<typeof missionActionLabeler>[0], approvalActionSlugs(pending as ProposedActionRow));
+      pendingApproval = describeApproval(pending as ProposedActionRow, label, 800);
+    }
   } catch { /* non-fatal */ }
   const approvalBlock = pendingApproval ? `
 PENDING APPROVAL — the current run is paused until the customer decides:

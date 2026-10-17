@@ -3,7 +3,8 @@ import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 import { circuitBreaker } from '@/lib/services/circuit-breaker';
 import { processApprovalDecision, userEmail } from '@/lib/services/approvals';
-import { describeApproval, missionToolkits, recordFromRow, type ProposedActionRow } from '@/lib/services/approval-records';
+import { approvalActionSlugs, describeApproval, recordFromRow, type ProposedActionRow } from '@/lib/services/approval-records';
+import { missionActionLabeler } from '@/lib/services/app-catalog';
 import { z } from 'zod';
 
 // ============================================================
@@ -86,21 +87,27 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const supabase = createServiceClient();
 
-  const toolkitsFor = async (missionIds: string[]) => {
-    const ids = [...new Set(missionIds)].filter(Boolean);
-    if (ids.length === 0) return new Map<string, string[]>();
-    const { data } = await supabase.from('missions').select('id, permissions:mission_json->permissions').in('id', ids).eq('tenant_id', tenantId);
-    return new Map((data ?? []).map(m => [m.id as string, missionToolkits({ permissions: (m as { permissions?: unknown }).permissions })]));
+  // Official action titles, per mission, for the approvals being shown.
+  const labelersFor = async (rows: ProposedActionRow[]) => {
+    const ids = [...new Set(rows.map(r => r.mission_id))].filter(Boolean);
+    const { data } = ids.length
+      ? await supabase.from('missions').select('id, permissions:mission_json->permissions').in('id', ids).eq('tenant_id', tenantId)
+      : { data: [] };
+    const perms = new Map((data ?? []).map(m => [m.id as string, (m as { permissions?: Array<{ type?: string; service?: string; scope?: string }> }).permissions]));
+    const entries = await Promise.all(ids.map(async id => [id, await missionActionLabeler(
+      { permissions: perms.get(id) }, rows.filter(r => r.mission_id === id).flatMap(approvalActionSlugs),
+    )] as const));
+    return new Map(entries);
   };
 
   const id = params.get('id');
   if (id) {
     const { data: row } = await supabase.from('proposed_actions').select(COLUMNS).eq('id', id).eq('tenant_id', tenantId).maybeSingle();
     if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-    const toolkits = (await toolkitsFor([row.mission_id])).get(row.mission_id) ?? [];
+    const label = (await labelersFor([row as ProposedActionRow])).get(row.mission_id);
     return NextResponse.json({
-      approval: describeApproval(row as ProposedActionRow, toolkits, 12_000),
-      record: recordFromRow(row as ProposedActionRow, toolkits),
+      approval: describeApproval(row as ProposedActionRow, label, 12_000),
+      record: recordFromRow(row as ProposedActionRow, label),
     }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
@@ -112,9 +119,9 @@ export async function GET(request: NextRequest) {
       .eq('status', 'pending')
       .order('submitted_at', { ascending: false })
       .limit(20);
-    const kits = await toolkitsFor((rows ?? []).map(r => r.mission_id));
+    const labels = await labelersFor((rows ?? []) as ProposedActionRow[]);
     return NextResponse.json({
-      approvals: (rows ?? []).map(r => describeApproval(r as ProposedActionRow, kits.get(r.mission_id) ?? [], 600)),
+      approvals: (rows ?? []).map(r => describeApproval(r as ProposedActionRow, labels.get(r.mission_id), 600)),
     }, { headers: { 'Cache-Control': 'no-store' } });
   }
 

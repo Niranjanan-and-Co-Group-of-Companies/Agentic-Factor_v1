@@ -10,11 +10,15 @@ import { withArchitectQuestion } from '@/lib/utils/architect-question';
 
 import Glyph from "@/components/ui/Glyph";
 import ConnectorLogo from "@/components/ConnectorLogos";
+import { AppName } from '@/components/apps/AppInfo';
+import { appNameNow } from '@/components/apps/useAppInfo';
+import { describeNextRun } from '@/lib/services/cron-match';
 import { LogoMark } from "@/components/brand/Logo";
 import LiveRunCard, { RunStrip } from '@/components/runs/LiveRunCard';
 import { kickLive } from '@/components/runs/useLiveRun';
 import PendingApprovals from '@/components/runs/PendingApprovals';
 import { ApprovalRecord, type ApprovalRecordPayload } from '@/components/runs/Approval';
+import { ActionResult, PendingResult, entryType, type ActionResultEntry, type ResultKind } from '@/components/runs/ActionResult';
 import { decisionText } from '@/lib/services/approval-records';
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -31,6 +35,8 @@ interface ChatMessage {
   run?: { missionId: string; runId: string };
   /** An approval decided here; the server saved it into that mission's chat too. */
   approval?: { record: ApprovalRecordPayload; missionId: string; missionTitle?: string };
+  /** A button's action while it is being applied (replaced by its saved result). */
+  pendingResult?: { kind: ResultKind; label: string };
 }
 interface AgentCard { name: string; icon?: string; role: string; tool?: string; trustLevel?: string; }
 interface RequiredConnector { service: string; reason: string; connected: boolean; }
@@ -54,6 +60,10 @@ interface ActionPayload {
   requiredConnectors?: RequiredConnector[];
 }
 interface MissionShortcut { id: string; title: string; status: string; }
+type RunInChat = (
+  kind: ResultKind, label: string, mission: { id?: string; title?: string },
+  work: () => Promise<{ ok: boolean; detail?: string; error?: string }>, action?: ActionPayload,
+) => Promise<void>;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -86,45 +96,8 @@ function statusDot(status: string) {
 
 
 const QUICK_CHIPS = ['What ran today?', 'Check my credits', 'Show all missions', 'Create a new mission'];
-const CONNECTOR_LABELS: Record<string, string> = {
-  gmail: 'Gmail', slack: 'Slack', github: 'GitHub', notion: 'Notion',
-  hubspot: 'HubSpot', shopify: 'Shopify', linkedin: 'LinkedIn',
-  google: 'Google', sheets: 'Google Sheets', discord: 'Discord',
-};
-
-const CONNECTOR_META: Record<string, { label: string; icon: string }> = {
-  google: { label: 'Google', icon: '🔵' },
-  gmail: { label: 'Gmail', icon: '📧' },
-  buffer: { label: 'Buffer', icon: '📢' },
-  openai: { label: 'OpenAI', icon: '🤖' },
-  slack: { label: 'Slack', icon: '💬' },
-  github: { label: 'GitHub', icon: '🐙' },
-  notion: { label: 'Notion', icon: '📝' },
-  hubspot: { label: 'HubSpot', icon: '🎯' },
-  shopify: { label: 'Shopify', icon: '🛍️' },
-  linkedin_oidc: { label: 'LinkedIn', icon: '💼' },
-  linkedin: { label: 'LinkedIn', icon: '💼' },
-  discord: { label: 'Discord', icon: '🎮' },
-  youtube: { label: 'YouTube', icon: '🎬' },
-  twitter: { label: 'Twitter / X', icon: '🐦' },
-  facebook: { label: 'Facebook', icon: '📘' },
-  instagram: { label: 'Instagram', icon: '📸' },
-  canva: { label: 'Canva', icon: '🎨' },
-  stripe: { label: 'Stripe', icon: '💳' },
-  salesforce: { label: 'Salesforce', icon: '☁️' },
-  airtable: { label: 'Airtable', icon: '📊' },
-  asana: { label: 'Asana', icon: '✅' },
-  gemini: { label: 'Gemini', icon: '✦' },
-  elevenlabs: { label: 'ElevenLabs', icon: '🔊' },
-  heygen: { label: 'HeyGen', icon: '🎥' },
-  runwayml: { label: 'Runway ML', icon: '🎞️' },
-  facebook_ads: { label: 'Meta Ads', icon: '📣' },
-  google_ads: { label: 'Google Ads', icon: '📣' },
-  google_analytics: { label: 'Google Analytics', icon: '📈' },
-  whatsapp: { label: 'WhatsApp', icon: '💬' },
-  zoho: { label: 'Zoho', icon: '🗂️' },
-};
-const connectorMeta = (s: string) => CONNECTOR_META[s] ?? { label: s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), icon: '🔌' };
+// Connector names come from Composio's catalog (any app); this is for plain-text messages.
+const connectorMeta = (s: string) => ({ label: appNameNow(s) });
 
 // Connector auth type lookup — determines inline connect flow
 const APIKEY_CONNECTORS = new Set(['openai', 'gemini', 'anthropic', 'buffer', 'sendgrid', 'twilio', 'apollo', 'razorpay', 'elevenlabs', 'heygen', 'runwayml', 'tavily', 'stripe', 'bamboohr', 'firebase', 'zendesk']);
@@ -177,6 +150,8 @@ function CommandCenterPageInner() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const blueprintPollsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  // Connector callbacks are set up before runInChat exists; they reach it through this.
+  const runInChatRef = useRef<RunInChat | null>(null);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
 
@@ -248,12 +223,13 @@ function CommandCenterPageInner() {
     const handle = (e: MessageEvent) => {
       if (e.data?.type === 'OAUTH_SUCCESS') {
         const provider = e.data.provider as string ?? '';
-        showToast(`${connectorMeta(provider).label} connected!`);
         setConnectedInSession(prev => { const s = new Set(prev); s.add(provider); return s; });
         setConnectingSlug(null);
+        void runInChatRef.current?.('connect', connectorMeta(provider).label, {}, async () => ({ ok: true, detail: 'Ready to use in your missions.' }));
       } else if (e.data?.type === 'OAUTH_ERROR') {
-        showToast('Connection failed. Please try again.');
         setConnectingSlug(null);
+        const why = typeof e.data.payload === 'string' ? e.data.payload : 'The sign-in did not complete.';
+        void runInChatRef.current?.('connect', 'The app', {}, async () => ({ ok: false, error: why }));
       }
     };
     window.addEventListener('message', handle);
@@ -286,8 +262,8 @@ function CommandCenterPageInner() {
         if (popup?.closed) { clearInterval(poll); setConnectingSlug(null); }
       }, 500);
     } catch {
-      showToast(`Could not connect ${connectorMeta(service).label}. Try again.`);
       setConnectingSlug(null);
+      void runInChatRef.current?.('connect', connectorMeta(service).label, {}, async () => ({ ok: false, error: 'Could not start the connection. Try again.' }));
     }
   }, []);
 
@@ -314,7 +290,7 @@ function CommandCenterPageInner() {
       const svc = inlineApiKeyModal.service;
       setConnectedInSession(prev => { const s = new Set(prev); s.add(svc); return s; });
       setTimeout(() => {
-        showToast(`${connectorMeta(svc).label} connected!`);
+        void runInChatRef.current?.('connect', connectorMeta(svc).label, {}, async () => ({ ok: true, detail: 'Your key is saved and checked.' }));
         setInlineApiKeyModal(null); setInlineApiKeyValue(''); setInlineApiKeySuccess(false);
       }, 1000);
     } catch { setInlineApiKeyError('Network error. Please try again.'); }
@@ -345,21 +321,59 @@ function CommandCenterPageInner() {
     loadSessions();
   };
 
+  // ── Save what happened into this conversation's history (and the mission's chat when given) ──
+  const saveToHistory = useCallback(async (entry: Record<string, unknown>, missionId?: string) => {
+    if (!activeSessionId && !missionId) return null;
+    try {
+      const res = await fetch('/api/chat-log', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry, missionId, commandSessionId: activeSessionId ?? undefined }),
+      });
+      return res.ok ? await res.json() as { entry?: ActionResultEntry; text?: string } : null;
+    } catch {
+      return null;
+    }
+  }, [activeSessionId]);
+
+  // ── A button's result, kept in the chat: "Applying…", then ✓ or ✗ with the reason ──
+  const runInChat = useCallback(async (
+    kind: ResultKind, label: string, mission: { id?: string; title?: string },
+    work: () => Promise<{ ok: boolean; detail?: string; error?: string }>, action?: ActionPayload,
+  ) => {
+    const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setMessages(prev => [...prev, { id: tempId, role: 'assistant', content: '', ts: Date.now(), pendingResult: { kind, label } }]);
+    let result: { ok: boolean; detail?: string; error?: string };
+    try { result = await work(); } catch { result = { ok: false, error: 'Could not reach the server. Check your connection and try again.' }; }
+    const entry = { type: 'action_result', kind, ok: result.ok, label, detail: result.detail, error: result.error, missionId: mission.id, missionTitle: mission.title, via: 'command_center', action };
+    const saved = await saveToHistory(entry, mission.id);
+    const finalEntry = saved?.entry ?? ({ ...entry, at: new Date().toISOString() } as ActionResultEntry);
+    setMessages(prev => prev.map(m => (m.id === tempId
+      ? { role: 'assistant', content: saved?.text ?? '', action_payload: finalEntry as unknown as ActionPayload, ts: Date.now() }
+      : m)));
+  }, [saveToHistory]);
+  useEffect(() => { runInChatRef.current = runInChat; }, [runInChat]);
+
   // ── An approval decided here shows in this chat (it is saved in the mission's chat too) ──
   const addApprovalRecord = useCallback((record: ApprovalRecordPayload, missionId: string, missionTitle?: string) => {
     setMessages(prev => prev.some(m => m.approval?.record.actionId === record.actionId)
       ? prev
       : [...prev, { role: 'assistant', content: decisionText(record), ts: Date.now(), approval: { record, missionId, missionTitle } }]);
-  }, []);
+    void saveToHistory({ ...record, missionId, missionTitle });
+  }, [saveToHistory]);
 
   // ── Follow a run with a live card in the chat ─────────────────────────────
-  const followRun = useCallback((missionId: string, runId: string) => {
-    setMessages(prev => prev.some(m => m.run?.runId === runId)
-      ? prev
-      : [...prev, { role: 'assistant', content: '', ts: Date.now(), run: { missionId, runId } }]);
+  const followRun = useCallback((missionId: string, runId: string, missionTitle?: string) => {
+    let added = false;
+    setMessages(prev => {
+      if (prev.some(m => m.run?.runId === runId)) return prev;
+      added = true;
+      return [...prev, { role: 'assistant', content: '', ts: Date.now(), run: { missionId, runId } }];
+    });
     setTrackedMissionId(missionId);
     kickLive(missionId);
-  }, []);
+    // The mission's chat records the run itself; this conversation keeps its own copy.
+    if (added) void saveToHistory({ type: 'run_card', runId, missionId, missionTitle });
+  }, [saveToHistory]);
 
   // ── Blueprint polling: pick up Inngest progress + completion ──────────────
   const startBlueprintPolling = useCallback((jobId: string) => {
@@ -568,39 +582,50 @@ function CommandCenterPageInner() {
   const applyAction = async (action: ActionPayload, msgIndex: number) => {
     setApplyingAction(msgIndex);
     try {
+      const mission = { id: action.missionId, title: action.missionTitle };
+      // Pause / resume / remove schedule: one request, its result kept in the chat.
+      const patchMission = (kind: ResultKind, label: string, body: Record<string, unknown>, detail: string) =>
+        runInChat(kind, label, mission, async () => {
+          const res = await fetch(`/api/missions/${action.missionId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          if (res.ok) return { ok: true, detail };
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          return { ok: false, error: err.error ?? 'The request was not accepted.' };
+        }, action);
+
       if (action.type === 'run_mission' && action.missionId) {
-        showToast('Starting mission…');
         const ep = action.missionStatus === 'draft'
           ? `/api/missions/${action.missionId}/run`
           : `/api/missions/${action.missionId}/execute`;
         const res = await fetch(ep, { method: 'POST', credentials: 'include' });
         const data = await res.json().catch(() => ({})) as { runId?: string; error?: string; message?: string; code?: string };
-        if (res.ok && data.runId) followRun(action.missionId, data.runId);
-        else if (res.status === 409 && data.code === 'run_in_progress' && data.runId) {
-          showToast(data.message ?? 'This mission is already running.');
-          followRun(action.missionId, data.runId);
-        } else if (res.ok) showToast('Mission started!');
-        else showToast(`${data.message ?? data.error ?? 'Could not start.'}`);
+        if (data.runId && (res.ok || (res.status === 409 && data.code === 'run_in_progress'))) {
+          // Started — or already going / waiting for an approval: its card says where it is.
+          followRun(action.missionId, data.runId, action.missionTitle);
+        } else if (!res.ok) {
+          await runInChat('run', action.missionTitle || 'Run this mission', mission, async () => ({ ok: false, error: data.message ?? data.error ?? 'The run could not be started.' }), action);
+        }
 
       } else if (action.type === 'schedule_mission' && action.missionId && action.cron) {
-        showToast('Setting schedule…');
-        const res = await fetch(`/api/missions/${action.missionId}`, {
-          method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'schedule', scheduleConfig: { cron: action.cron, timezone: action.timezone ?? 'Asia/Kolkata' } }),
-        });
-        showToast(res.ok ? `Scheduled: ${action.label}` : 'Could not set schedule.');
+        const cron = action.cron;
+        const timezone = action.timezone ?? 'Asia/Kolkata';
+        await runInChat('schedule', action.label || cron, mission, async () => {
+          const res = await fetch(`/api/missions/${action.missionId}`, {
+            method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'schedule', scheduleConfig: { cron, timezone } }),
+          });
+          if (res.ok) return { ok: true, detail: describeNextRun(cron, timezone) };
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          return { ok: false, error: err.error ?? 'Could not set the schedule.' };
+        }, action);
 
       } else if (action.type === 'pause_mission' && action.missionId) {
-        const res = await fetch(`/api/missions/${action.missionId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pause' }) });
-        showToast(res.ok ? 'Mission paused.' : 'Could not pause.');
+        await patchMission('pause', action.missionTitle || 'This mission', { action: 'pause' }, 'Scheduled runs are on hold until you resume it.');
 
       } else if (action.type === 'unschedule_mission' && action.missionId) {
-        const res = await fetch(`/api/missions/${action.missionId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unschedule' }) });
-        showToast(res.ok ? 'Schedule removed.' : 'Could not remove the schedule.');
+        await patchMission('unschedule', action.missionTitle || 'This mission', { action: 'unschedule' }, 'It now runs only when you start it.');
 
       } else if (action.type === 'resume_mission' && action.missionId) {
-        const res = await fetch(`/api/missions/${action.missionId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'resume' }) });
-        showToast(res.ok ? 'Mission resumed.' : 'Could not resume.');
+        await patchMission('resume', action.missionTitle || 'This mission', { action: 'resume' }, 'Scheduled runs continue.');
 
       } else if (action.type === 'suggest_connector' && action.provider) {
         router.push(`/connectors?search=${encodeURIComponent(action.provider)}`);
@@ -617,7 +642,9 @@ function CommandCenterPageInner() {
       } else if (action.type === 'show_usage') {
         router.push('/dashboard/usage');
       }
-    } catch { showToast('Something went wrong.'); }
+    } catch {
+      await runInChat('run', action.label || action.missionTitle || 'This action', { id: action.missionId, title: action.missionTitle }, async () => ({ ok: false, error: 'Something went wrong. Please try again.' }), action);
+    }
     setApplyingAction(null);
   };
 
@@ -795,7 +822,7 @@ function CommandCenterPageInner() {
 
     if (action.type === 'suggest_connector') return (
       <div style={card}>
-        <div style={{ fontSize: '0.8rem', fontWeight: 600 }}><Glyph e="🔗" /> Connect {CONNECTOR_LABELS[action.provider ?? ''] ?? action.provider}</div>
+        <div style={{ fontSize: '0.8rem', fontWeight: 600 }}><Glyph e="🔗" /> Connect <AppName slug={action.provider ?? ''} /></div>
         {action.reason && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{action.reason}</div>}
         <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => applyAction(action, msgIndex)}>Connect Now →</button>
       </div>
@@ -989,7 +1016,6 @@ function CommandCenterPageInner() {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {action.requiredConnectors.map((c, idx) => {
-                    const meta = connectorMeta(c.service);
                     const isConnected = c.connected || connectedInSession.has(c.service);
                     const isConnectingThis = connectingSlug === c.service;
                     const isApiKey = APIKEY_CONNECTORS.has(c.service);
@@ -1002,7 +1028,7 @@ function CommandCenterPageInner() {
                       }}>
                         <span style={{ flexShrink: 0, display: 'inline-flex' }}><ConnectorLogo id={c.service} size={20} /></span>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-primary)' }}>{meta.label}</div>
+                          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-primary)' }}><AppName slug={c.service} /></div>
                           <div style={{ fontSize: '0.63rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.reason}</div>
                         </div>
                         {isConnected ? (
@@ -1099,13 +1125,12 @@ function CommandCenterPageInner() {
     );
 
     if (action.type === 'key_connected') {
-      const meta = connectorMeta(action.provider ?? '');
       return (
         <div style={{ ...card, borderColor: 'color-mix(in srgb, var(--emerald) 35%, transparent)', background: 'color-mix(in srgb, var(--emerald) 4%, transparent)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ lineHeight: 1, display: 'inline-flex' }}><ConnectorLogo id={action.provider ?? ''} size={26} /></span>
             <div>
-              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--emerald)' }}><Glyph e="✅" /> {meta.label} Connected</div>
+              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--emerald)' }}><Glyph e="✅" /> <AppName slug={action.provider ?? ''} /> Connected</div>
               {action.accountInfo && (
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>{action.accountInfo}</div>
               )}
@@ -1116,12 +1141,11 @@ function CommandCenterPageInner() {
     }
 
     if (action.type === 'key_connection_failed') {
-      const meta = connectorMeta(action.provider ?? '');
       return (
         <div style={{ ...card, borderColor: 'color-mix(in srgb, var(--rose) 30%, transparent)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ lineHeight: 1, display: 'inline-flex' }}><ConnectorLogo id={action.provider ?? ''} size={22} /></span>
-            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--rose)' }}><Glyph e="❌" /> {meta.label} key not valid</div>
+            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--rose)' }}><Glyph e="❌" /> <AppName slug={action.provider ?? ''} /> key not valid</div>
           </div>
           {action.error && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{action.error}</div>}
           <button
@@ -1155,7 +1179,7 @@ function CommandCenterPageInner() {
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <span style={{ display: 'inline-flex' }}><ConnectorLogo id={inlineApiKeyModal.service} size={24} /></span>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>Connect {connectorMeta(inlineApiKeyModal.service).label}</div>
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>Connect <AppName slug={inlineApiKeyModal.service} /></div>
                   <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>API Key · encrypted at rest</div>
                 </div>
               </div>
@@ -1165,7 +1189,7 @@ function CommandCenterPageInner() {
             {inlineApiKeySuccess ? (
               <div style={{ padding: 20, textAlign: 'center' }}>
                 <div style={{ fontSize: '2rem', marginBottom: 8 }}><Glyph e="✅" /></div>
-                <div style={{ fontWeight: 700, color: 'var(--emerald)' }}>{connectorMeta(inlineApiKeyModal.service).label} Connected!</div>
+                <div style={{ fontWeight: 700, color: 'var(--emerald)' }}><AppName slug={inlineApiKeyModal.service} /> Connected!</div>
               </div>
             ) : (
               <>
@@ -1276,15 +1300,39 @@ function CommandCenterPageInner() {
               )}
 
               {/* Chat messages */}
-              {messages.map((msg, i) => msg.run ? (
-                <div key={i} data-run-card={msg.run.runId} style={{ maxWidth: 520, width: '100%' }}>
-                  <LiveRunCard compact missionId={msg.run.missionId} runId={msg.run.runId} onDecided={record => addApprovalRecord(record, msg.run!.missionId)} />
-                </div>
-              ) : msg.approval ? (
-                <div key={i} style={{ maxWidth: 520, width: '100%' }}>
-                  <ApprovalRecord record={msg.approval.record} missionId={msg.approval.missionId} missionTitle={msg.approval.missionTitle} />
-                </div>
-              ) : (
+              {messages.map((msg, i) => {
+                // Runs, approvals and button results — added here, or saved in this conversation's history.
+                const kind = entryType(msg.action_payload);
+                const saved = msg.action_payload as unknown as { runId?: string; missionId?: string; missionTitle?: string } | undefined;
+                const run = msg.run ?? (kind === 'run_card' && saved?.runId && saved.missionId ? { runId: saved.runId, missionId: saved.missionId } : null);
+                const approval = msg.approval ?? (kind === 'approval_record' && saved?.missionId
+                  ? { record: msg.action_payload as unknown as ApprovalRecordPayload, missionId: saved.missionId, missionTitle: saved.missionTitle }
+                  : null);
+                if (run) return (
+                  <div key={i} data-run-card={run.runId} style={{ maxWidth: 520, width: '100%' }}>
+                    <LiveRunCard compact missionId={run.missionId} runId={run.runId} onDecided={record => addApprovalRecord(record, run.missionId)} />
+                  </div>
+                );
+                if (approval) return (
+                  <div key={i} style={{ maxWidth: 520, width: '100%' }}>
+                    <ApprovalRecord record={approval.record} missionId={approval.missionId} missionTitle={approval.missionTitle} />
+                  </div>
+                );
+                if (msg.pendingResult) return (
+                  <div key={i} style={{ maxWidth: 520, width: '100%' }}>
+                    <PendingResult kind={msg.pendingResult.kind} label={msg.pendingResult.label} />
+                  </div>
+                );
+                if (kind === 'action_result') {
+                  const entry = msg.action_payload as unknown as ActionResultEntry;
+                  const retry = entry.action as ActionPayload | undefined;
+                  return (
+                    <div key={i} style={{ maxWidth: 520, width: '100%' }}>
+                      <ActionResult entry={entry} showMission onRetry={retry?.type ? () => applyAction(retry, -1) : undefined} />
+                    </div>
+                  );
+                }
+                return (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div style={{
                     maxWidth: '82%',
@@ -1300,7 +1348,8 @@ function CommandCenterPageInner() {
                   {msg.role === 'assistant' && msg.isStreaming && msg.processingAction && renderProcessingCard(msg.processingAction)}
                   {msg.role === 'assistant' && msg.action_payload && !msg.isStreaming && renderActionCard(msg.action_payload as ActionPayload, i)}
                 </div>
-              ))}
+                );
+              })}
               <div ref={messagesEndRef} />
             </div>
           </div>

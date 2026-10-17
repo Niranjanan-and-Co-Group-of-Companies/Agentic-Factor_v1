@@ -153,23 +153,18 @@ export async function POST(
     // ── Generate runId here so the chat can subscribe before Inngest starts ──
     const runId = crypto.randomUUID();
 
-    // ── Clear cache for fresh runs ──────────────────────────────────────────
-    if (missionJson?.agents) {
-      const agentIds = missionJson.agents.map((a: any) => a.id);
-      if (agentIds.length > 0 && mode === 'fresh') {
-        await supabase
-          .from('events')
-          .delete()
-          .eq('tenant_id', tenantId)
-          .eq('event_type', 'agent.completed')
-          .in('entity_id', agentIds);
-
-        await supabase
-          .from('proposed_actions')
-          .delete()
-          .eq('tenant_id', tenantId)
-          .eq('mission_id', missionId);
-      }
+    // ── Fresh runs keep the mission's history ───────────────────────────────
+    // Earlier runs' finished steps and decided approvals used to be deleted here so a new run would not
+    // reuse them — which also wiped the run history and the approval record. Steps are now matched to
+    // their own run (run_id) and approvals to the run that asked for them, so nothing needs deleting.
+    // An approval still left open belongs to no live run any more: it is closed, not deleted.
+    if (mode === 'fresh') {
+      await supabase
+        .from('proposed_actions')
+        .update({ status: 'expired', decided_at: new Date().toISOString() })
+        .eq('tenant_id', tenantId)
+        .eq('mission_id', missionId)
+        .eq('status', 'pending');
     }
 
     // ── Resolve which agents will actually run ──────────────────────────────

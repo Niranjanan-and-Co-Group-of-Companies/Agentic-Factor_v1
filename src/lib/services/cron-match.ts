@@ -17,10 +17,21 @@ function fieldMatches(field: string, value: number, min: number, max: number): b
   });
 }
 
+// One formatter per timezone: building one per call made scanning ahead for the next run slow.
+const formatters = new Map<string, Intl.DateTimeFormat>();
+function formatterFor(timeZone: string): Intl.DateTimeFormat {
+  let f = formatters.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', {
+      timeZone, hour12: false, minute: 'numeric', hour: 'numeric', day: 'numeric', month: 'numeric', weekday: 'short',
+    });
+    formatters.set(timeZone, f);
+  }
+  return f;
+}
+
 export function zonedParts(date: Date, timeZone = 'UTC') {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone, hour12: false, minute: 'numeric', hour: 'numeric', day: 'numeric', month: 'numeric', weekday: 'short',
-  }).formatToParts(date);
+  const parts = formatterFor(timeZone).formatToParts(date);
   const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
   return {
     minute: Number(get('minute')),
@@ -42,6 +53,17 @@ export function cronMatches(expr: string, date: Date, timeZone = 'UTC'): boolean
   // Standard cron: when both day fields are restricted, either one matching is enough.
   const dayOk = dom !== '*' && dow !== '*' ? domMatches || dowMatches : domMatches && dowMatches;
   return fieldMatches(m, t.minute, 0, 59) && fieldMatches(h, t.hour, 0, 23) && fieldMatches(mon, t.month, 1, 12) && dayOk;
+}
+
+/** The next minute (after `from`) the schedule fires, looking up to 35 days ahead; null when not in that window. */
+export function nextCronRun(expr: string, timeZone = 'UTC', from: Date = new Date()): Date | null {
+  if (expr.trim().split(/\s+/).length !== 5) return null;
+  const start = (Math.floor(from.getTime() / 60_000) + 1) * 60_000;
+  for (let i = 0; i < 35 * 24 * 60; i++) {
+    const at = new Date(start + i * 60_000);
+    if (cronMatches(expr, at, timeZone)) return at;
+  }
+  return null;
 }
 
 /**
@@ -67,4 +89,17 @@ export function alignCronToLabel(cron: string, label: string): string {
   if (hour === null || hour > 23 || minute > 59) return cron;
   if (Number(fields[0]) === minute && Number(fields[1]) === hour) return cron;
   return [String(minute), String(hour), ...fields.slice(2)].join(' ');
+}
+
+/** "Next run Sat, 1 Nov, 9:00 am IST" for a schedule; a plain note when it is further out than 35 days. */
+export function describeNextRun(expr: string, timeZone = 'UTC', from: Date = new Date()): string {
+  const next = nextCronRun(expr, timeZone, from);
+  if (!next) return 'Runs on its own on the chosen schedule.';
+  let when: string;
+  try {
+    when = next.toLocaleString('en-IN', { timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+  } catch {
+    when = next.toUTCString();
+  }
+  return `Next run ${when}. Each run’s card shows up in the mission chat.`;
 }

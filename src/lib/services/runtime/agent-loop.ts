@@ -1065,7 +1065,7 @@ export async function executeAgent(
   }
 
   // Check if we are resuming an approved manual action
-  const { data: existingAction } = await supabase
+  const { data: latestAction } = await supabase
     .from('proposed_actions')
     .select('id, status, payload, action_type')
     .eq('tenant_id', tenantId)
@@ -1074,6 +1074,12 @@ export async function executeAgent(
     .order('submitted_at', { ascending: false })
     .limit(1)
     .single();
+  // An approval belongs to the run that asked for it. A decided approval from an earlier run is history
+  // (kept for the record): it must never replay that run's output or act without a fresh review. This
+  // is what lets a new run keep earlier approvals instead of deleting them first.
+  const existingAction = latestAction && (latestAction.status === 'pending' || (!!runId && latestAction.payload?.runId === runId))
+    ? latestAction
+    : null;
 
   if (existingAction) {
     if (existingAction.status === 'pending') {

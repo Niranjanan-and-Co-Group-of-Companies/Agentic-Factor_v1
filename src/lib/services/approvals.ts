@@ -1,6 +1,7 @@
 import { circuitBreaker } from '@/lib/services/circuit-breaker';
 import { createServiceClient } from '@/lib/supabase/server';
-import { missionToolkits, recordDecisionInChat, recordFromRow, type ApprovalRecordPayload, type ApprovalVia, type ProposedActionRow } from '@/lib/services/approval-records';
+import { approvalActionSlugs, recordDecisionInChat, recordFromRow, type ApprovalRecordPayload, type ApprovalVia, type ProposedActionRow } from '@/lib/services/approval-records';
+import { missionActionLabeler } from '@/lib/services/app-catalog';
 
 // ============================================================
 // Shared approval-decision processing — used by both the
@@ -18,6 +19,8 @@ export type ApprovalResult =
   | { ok: false; reason: 'already_decided'; decision: 'approved' | 'rejected'; record: ApprovalRecordPayload | null; message: string }
   | { ok: false; reason: 'not_found'; message: string }
   | { ok: false; reason: 'error'; message: string };
+
+type BlueprintPermissions = Array<{ type?: string; service?: string; scope?: string }>;
 
 export interface DecisionContext {
   /** Why — optional for approvals, asked for on rejections. Kept with the record. */
@@ -70,13 +73,14 @@ export async function processApprovalDecision(
     const { data: missionPerms } = actualMissionId
       ? await supabase.from('missions').select('permissions:mission_json->permissions').eq('id', actualMissionId).maybeSingle()
       : { data: null };
-    const toolkits = missionToolkits({ permissions: (missionPerms as { permissions?: unknown } | null)?.permissions });
+    // Official action titles for this approval, from the mission's own apps.
+    const label = await missionActionLabeler({ permissions: (missionPerms as { permissions?: BlueprintPermissions } | null)?.permissions }, approvalActionSlugs(actionData as ProposedActionRow));
 
     // Decided already (another tab, the Command Center, a reply in chat): report it instead of deciding twice.
     if (actionData.status === 'approved' || actionData.status === 'rejected') {
       return {
         ok: false, reason: 'already_decided', decision: actionData.status,
-        record: recordFromRow(actionData as ProposedActionRow, toolkits),
+        record: recordFromRow(actionData as ProposedActionRow, label),
         message: `This was already ${actionData.status}.`,
       };
     }
@@ -118,7 +122,7 @@ export async function processApprovalDecision(
       const settled = now?.status === 'approved' || now?.status === 'rejected' ? now.status : decision;
       return {
         ok: false, reason: 'already_decided', decision: settled,
-        record: now ? recordFromRow(now as ProposedActionRow, toolkits) : null,
+        record: now ? recordFromRow(now as ProposedActionRow, label) : null,
         message: `This was already ${settled}.`,
       };
     }
@@ -203,7 +207,7 @@ export async function processApprovalDecision(
     }
 
     // The permanent record in the mission's chat — whichever screen the decision came from.
-    const record = recordFromRow({ ...(actionData as ProposedActionRow), status: decision, payload: { ...(actionData.payload ?? {}), decision: { reason, via, by: context.decidedBy, at: decidedAt } } }, toolkits) ?? undefined;
+    const record = recordFromRow({ ...(actionData as ProposedActionRow), status: decision, payload: { ...(actionData.payload ?? {}), decision: { reason, via, by: context.decidedBy, at: decidedAt } } }, label) ?? undefined;
     if (record && actualMissionId) await recordDecisionInChat(supabase, tenantId, actualMissionId, record);
 
     return {

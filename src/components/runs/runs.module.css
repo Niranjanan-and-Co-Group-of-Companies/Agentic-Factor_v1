@@ -154,6 +154,12 @@
 .recordWhen { margin-left: auto; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
 .recordReason { margin: 8px 0 0; padding: 6px 10px; border-left: 2px solid var(--border-strong); font-size: 0.8rem; line-height: 1.5; color: var(--text-primary); background: var(--bg-secondary); border-radius: 0 6px 6px 0; }
 .recordBy { margin-top: 8px; font-size: 0.72rem; color: var(--text-muted); }
+.recordPending { border-left: 3px solid var(--border-strong); }
+.recordPending .spin { color: var(--text-muted); }
+.spin { animation: spinRound 900ms linear infinite; flex-shrink: 0; }
+@keyframes spinRound { to { transform: rotate(360deg); } }
+.resultDetail { margin-top: 6px; font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; }
+.resultError { margin-top: 6px; font-size: 0.8rem; line-height: 1.5; color: var(--rose); }
 
 /* ── Command Center: approvals waiting on you ── */
 .pending { border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--amber) 7%, var(--bg-secondary)); flex-shrink: 0; }
@@ -196,7 +202,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .card, .approval, .strip, .record { animation: none; }
-  .pendingDot { animation: none; }
+  .pendingDot, .spin { animation: none; }
   .nodeWorking, .nodeRepair, .stripDotRun, .stripDotHold, .runDotRun, .nodeDone, .nodeFailed { animation: none; }
   .segActive::after, .skeleton { animation: none; }
   .agentFlow::before { animation: none; }

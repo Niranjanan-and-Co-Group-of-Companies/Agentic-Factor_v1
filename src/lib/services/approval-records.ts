@@ -66,10 +66,19 @@ export function missionToolkits(missionJson: unknown): string[] {
   return [...new Set(perms.filter(p => p.type === 'composio_oauth' && p.service).map(p => p.service!.toLowerCase()))];
 }
 
+/** How an action slug is shown: the mission catalog's official label on the server, a readable fallback otherwise. */
+export type ActionLabeler = (slug: string) => string;
+export const fallbackLabeler = (toolkits: string[] = []): ActionLabeler => slug => (/^[A-Z0-9_]+$/.test(slug) ? humanizeAction(slug, toolkits) : slug);
+
+/** Action slugs an approval asks to run (for looking up their official titles first). */
+export function approvalActionSlugs(row: Pick<ProposedActionRow, 'payload_redacted'>): string[] {
+  return (row.payload_redacted?.actions ?? []).filter(a => /^[A-Z0-9_]+$/.test(a));
+}
+
 /** A proposed action as the customer should see it. */
-export function describeApproval(row: ProposedActionRow, toolkits: string[] = [], previewLimit = 4000): ApprovalSummary {
+export function describeApproval(row: ProposedActionRow, label: ActionLabeler = fallbackLabeler(), previewLimit = 4000): ApprovalSummary {
   const redacted = row.payload_redacted ?? {};
-  const actions = (redacted.actions ?? []).slice(0, 8).map(a => (/^[A-Z0-9_]+$/.test(a) ? humanizeAction(a, toolkits) : a));
+  const actions = (redacted.actions ?? []).slice(0, 8).map(label);
   const status = row.status === 'approved' || row.status === 'rejected' ? row.status : 'pending';
   return {
     id: row.id,
@@ -108,50 +117,15 @@ export async function recordDecisionInChat(
   missionId: string,
   record: ApprovalRecordPayload,
 ): Promise<string | null> {
-  try {
-    const { data: latest } = await supabase
-      .from('mission_chats')
-      .select('id')
-      .eq('mission_id', missionId)
-      .eq('tenant_id', tenantId)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    let chatId = latest?.id as string | undefined;
-    if (!chatId) {
-      const { data: created } = await supabase
-        .from('mission_chats')
-        .insert({ mission_id: missionId, tenant_id: tenantId, title: 'Approvals' })
-        .select('id')
-        .single();
-      chatId = created?.id as string | undefined;
-    }
-    if (!chatId) return null;
-    const { error } = await supabase.from('mission_chat_messages').insert({
-      chat_id: chatId,
-      tenant_id: tenantId,
-      role: 'assistant',
-      content: decisionText(record),
-      action_payload: record,
-      action_applied: true,
-    });
-    if (error) {
-      console.warn('[approval-records] Could not save the decision to the chat:', error.message);
-      return null;
-    }
-    await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
-    return chatId;
-  } catch (err) {
-    console.warn('[approval-records] Could not save the decision to the chat:', err);
-    return null;
-  }
+  const { saveToMissionChat } = await import('@/lib/services/chat-log');
+  return saveToMissionChat(supabase, tenantId, missionId, record, decisionText(record));
 }
 
 /** The saved record of a decided action, rebuilt from the action row (for views that missed the moment). */
-export function recordFromRow(row: ProposedActionRow, toolkits: string[] = []): ApprovalRecordPayload | null {
+export function recordFromRow(row: ProposedActionRow, label: ActionLabeler = fallbackLabeler()): ApprovalRecordPayload | null {
   if (row.status !== 'approved' && row.status !== 'rejected') return null;
   const d = (row.payload?.decision ?? {}) as { reason?: string; via?: ApprovalVia; by?: string; at?: string };
-  const summary = describeApproval(row, toolkits, 1500);
+  const summary = describeApproval(row, label, 1500);
   return {
     type: 'approval_record',
     actionId: row.id,

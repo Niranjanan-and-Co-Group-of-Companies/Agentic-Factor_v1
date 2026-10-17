@@ -501,6 +501,47 @@ def _without_version_prefix(path: str) -> Optional[str]:
     return None
 
 
+def _mentions_rate_limit(text) -> bool:
+    s = str(text or "").lower()
+    return "429" in s or "rate limit" in s or "too many requests" in s
+
+
+def _is_rate_limited(resp) -> bool:
+    """Did the app say "too many requests"? (HTTP 429, or the same reported inside Composio's answer.)"""
+    if resp.status_code == 429:
+        return True
+    try:
+        data = resp.json()
+    except Exception:
+        return resp.status_code >= 400 and _mentions_rate_limit(resp.text[:500])
+    if not isinstance(data, dict):
+        return False
+    status = data.get("status")
+    if status == 429:
+        return True
+    if data.get("successful") is False and _mentions_rate_limit(data.get("error")):
+        return True
+    return isinstance(status, int) and status >= 400 and _mentions_rate_limit(json.dumps(data.get("data"), default=str)[:500])
+
+
+def _post_retrying(url: str, headers: Dict[str, str], body: Any, timeout: int = 60, attempts: int = 4):
+    """POST, and when the app is rate-limiting wait and try again (what Retry-After asks, else 2s, 4s, 8s;
+    never more than 15s at a time). A 429 means the request was not carried out, so retrying is safe."""
+    resp = None
+    for attempt in range(attempts):
+        resp = requests.post(url, headers=headers, json=body, timeout=timeout)
+        if attempt == attempts - 1 or not _is_rate_limited(resp):
+            return resp
+        try:
+            wait = float(resp.headers.get("Retry-After", ""))
+        except (TypeError, ValueError):
+            wait = 2 ** (attempt + 1)
+        wait = max(1.0, min(wait, 15.0))
+        sys.stderr.write(f"[RATE_LIMIT] The app said too many requests: waiting {wait:.0f}s, then trying again ({attempt + 1}/{attempts - 1})\\n")
+        time.sleep(wait)
+    return resp
+
+
 def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Dict] = None, body: Any = None, headers: Optional[Dict] = None, binary: Optional[bytes] = None, content_type: str = "application/octet-stream") -> Any:
     """Call an app's own REST API through the customer's Composio connection, for anything the
     toolkit has no action for. Zoho Books has no report actions, so a P&L is:
@@ -545,10 +586,10 @@ def composio_proxy(toolkit: str, method: str, endpoint: str, params: Optional[Di
         payload["binary_body"] = {"base64": base64.b64encode(binary).decode(), "content_type": content_type}
     def send(path):
         body_payload = {**payload, "endpoint": path}
-        r = requests.post(
+        r = _post_retrying(
             "https://backend.composio.dev/api/v3.1/tools/execute/proxy",
-            headers={"x-api-key": os.environ.get("COMPOSIO_API_KEY", ""), "Content-Type": "application/json"},
-            json=body_payload,
+            {"x-api-key": os.environ.get("COMPOSIO_API_KEY", ""), "Content-Type": "application/json"},
+            body_payload,
             timeout=60,
         )
         if r.status_code >= 400:
@@ -702,10 +743,10 @@ def composio_execute(action_name: str, params: Dict[str, Any], dry_run_result: O
 
     # Local files become Composio file references (uploaded first), as Composio's own SDK does.
     params = _with_files(params, lambda path, mime: _upload_for_action(action_name, path, mime))
-    resp = requests.post(
+    resp = _post_retrying(
         f"https://backend.composio.dev/api/v3.1/tools/execute/{action_name}",
-        headers={"x-api-key": api_key, "Content-Type": "application/json"},
-        json={"user_id": entity_id, "arguments": params},
+        {"x-api-key": api_key, "Content-Type": "application/json"},
+        {"user_id": entity_id, "arguments": params},
         timeout=60,
     )
 

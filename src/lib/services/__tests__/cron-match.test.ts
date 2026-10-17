@@ -62,3 +62,15 @@ describe('alignCronToLabel', () => {
     expect(alignCronToLabel('0 9 * * *', 'Daily')).toBe('0 9 * * *');
   });
 });
+
+describe('nextCronRun', () => {
+  it('finds the next 1st-of-month 9am in IST', async () => {
+    const { nextCronRun } = await import('../cron-match');
+    const next = nextCronRun('0 9 1 * *', 'Asia/Kolkata', new Date('2026-10-17T08:00:00Z'));
+    expect(next?.toISOString()).toBe('2026-11-01T03:30:00.000Z');
+  });
+  it('returns null for a malformed schedule', async () => {
+    const { nextCronRun } = await import('../cron-match');
+    expect(nextCronRun('every monday', 'UTC')).toBeNull();
+  });
+});
