@@ -89,7 +89,7 @@ function Segments({ agents, className }: { agents: LiveAgent[]; className: strin
 }
 
 // Brand tiles are white in both themes, so the platform's mark keeps its light-theme colours there.
-const MARK_ON_WHITE = { '--text-primary': '#1B1814', '--bg-primary': '#F7F3EC' } as CSSProperties;
+const MARK_ON_WHITE = { '--logo-ink': '#201D18' } as CSSProperties;
 
 function AppTile({ slug }: { slug: string }) {
   const [broken, setBroken] = useState(false);
@@ -107,7 +107,7 @@ function AppTiles({ apps }: { apps: string[] }) {
   return (
     <span className={s.tiles}>
       {apps.length === 0
-        ? <span className={s.tile} style={MARK_ON_WHITE} title="Agentic Factor"><LogoMark size={16} /></span>
+        ? <span className={s.tile} style={MARK_ON_WHITE} title="Agentic Factor"><LogoMark size={22} /></span>
         : apps.slice(0, 2).map(a => <AppTile key={a} slug={a} />)}
     </span>
   );

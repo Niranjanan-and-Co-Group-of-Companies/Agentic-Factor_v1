@@ -47,13 +47,13 @@ export function BrandGlyph({ icon, size = 20, color }: { icon: BrandIcon; size?:
 }
 
 // Brand tiles are always white, so the platform's own mark keeps its light-theme colours there.
-const MARK_ON_WHITE = { "--text-primary": "#1B1814", "--bg-primary": "#F7F3EC" } as CSSProperties;
+const MARK_ON_WHITE = { "--logo-ink": "#201D18" } as CSSProperties;
 
 /** An agent's app in a plan row. "af" is a step the platform does itself (scoring, writing). */
 export function AppTile({ brand, className, size = 17 }: { brand: BrandKey | "af"; className?: string; size?: number }) {
   return (
     <span className={className} style={brand === "af" ? MARK_ON_WHITE : undefined}>
-      {brand === "af" ? <LogoMark size={size + 1} /> : <BrandGlyph icon={BRAND[brand]} size={size} />}
+      {brand === "af" ? <LogoMark size={size + 6} /> : <BrandGlyph icon={BRAND[brand]} size={size} />}
     </span>
   );
 }

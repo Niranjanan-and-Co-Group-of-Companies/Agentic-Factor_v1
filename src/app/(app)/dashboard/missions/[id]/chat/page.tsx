@@ -1634,7 +1634,7 @@ export default function MissionChatPage() {
               {/* Welcome / empty state */}
               {messages.length === 0 && !proactiveAlert && (
                 <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-                  <div style={{ display: 'inline-flex', marginBottom: 20 }}><LogoMark size={44} /></div>
+                  <div style={{ display: 'inline-flex', marginBottom: 22 }}><LogoMark size={30} shape="wide" /></div>
                   <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '2.3rem', fontWeight: 400, lineHeight: 1.08, letterSpacing: '-0.01em', color: 'var(--text-primary)', marginBottom: 12 }}>
                     Your Mission Assistant
                   </h2>

@@ -45,6 +45,7 @@
 
   /* Text */
   --text-primary: #1B1814;
+  --logo-ink: #201D18;  --logo-accent: #DF552D; /* the mark, exactly as approved */
   --text-secondary: #57504A;
   --text-muted: #6F675E;
 
@@ -93,6 +94,7 @@
   --info: #7FB0DE;     --info-bg: rgba(127, 176, 222, 0.12);
 
   --text-primary: #F2EDE5;
+  --logo-ink: #F2EDE5;  --logo-accent: #DF552D;
   --text-secondary: #BEB6AA;
   --text-muted: #958D82;
 

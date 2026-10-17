@@ -190,7 +190,7 @@ export default function PricingPage() {
         subscription_id: data.subscriptionId,
         name: "Agentic Factor",
         description: `${planLabel} Plan — ${billingPeriod === 'annual' ? 'Annual' : 'Monthly'}`,
-        image: "https://agenticfactor.io/favicon.ico",
+        image: "https://agenticfactor.io/brand/agentic-factor-mark.png",
         handler: function () {
           setToast("Payment successful. Your plan will activate in a few seconds…");
           // Give the webhook ~4s to land before reloading so the updated plan shows immediately

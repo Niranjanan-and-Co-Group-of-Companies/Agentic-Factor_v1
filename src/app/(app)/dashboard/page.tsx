@@ -1231,7 +1231,7 @@ function CommandCenterPageInner() {
               {/* Welcome state — shown whenever the conversation is empty */}
               {messages.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '56px 20px 48px' }}>
-                  <div style={{ display: 'inline-flex', marginBottom: 22 }}><LogoMark size={44} title="Agentic Factor" /></div>
+                  <div style={{ display: 'inline-flex', marginBottom: 24 }}><LogoMark size={30} shape="wide" title="Agentic Factor" /></div>
                   <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '2.4rem', fontWeight: 400, lineHeight: 1.08, letterSpacing: '-0.01em', color: 'var(--text-primary)', marginBottom: 14 }}>
                     What shall we automate today?
                   </h2>
