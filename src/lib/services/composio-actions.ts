@@ -328,6 +328,40 @@ ${LARGE_CONTENT_NOTE}`;
 }
 
 /**
+ * How scripts call Composio beyond the action list: the proxy for missing actions, file parameters,
+ * and the rule that every call to these toolkits goes through Composio.
+ */
+export function composioUsageNotes(slugs: string[]): string {
+  const slugList = slugs.join(', ');
+  return `NO ACTION FOR IT? Some toolkits lack whole areas (Zoho Books has no report actions — no P&L, balance sheet or trial balance). Then call the app's own REST API through the customer's connection — never invent an action name, and never fall back to approximating the data:
+  from agenticfactor._core import composio_proxy
+  pnl = composio_proxy("zoho_books", "GET", "/books/v3/reports/profitandloss", params={"organization_id": org_id, "from_date": "2025-04-01", "to_date": "2026-03-31"})
+The first argument is the toolkit slug; the path is the app's full documented REST path (e.g. Zoho Books "/books/v3/invoices") — it is joined with the customer's own connection base URL, so the right region/data centre is used. Put query parameters in params, never in the path. GET reads run in previews; POST/PUT/PATCH/DELETE are writes and go through approval like composio_execute writes.
+FILE PARAMETERS of a Composio action (email attachments, file uploads, Canva/Drive imports): save the file locally and pass composio_file("/tmp/deck.pptx") as the parameter value — e.g. composio_execute("CANVA_CREATE_DESIGN_IMPORT_JOB", {"title": t, "file": composio_file(path)}) or {"attachment": composio_file(pdf_path)}. composio_execute uploads it to Composio's file storage and passes the file reference ({name, mimetype, s3key}); NEVER put base64 file content into params (it fails as too large or with "missing s3key").
+FILES the script generates (an .xlsx built with openpyxl, a .pdf, an image) can also go straight to an app's own API as raw bytes through composio_proxy — e.g. to the customer's Google Drive:
+  f = composio_proxy("googledrive", "POST", "https://www.googleapis.com/upload/drive/v3/files?uploadType=media", binary=data, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+  composio_proxy("googledrive", "PATCH", f"https://www.googleapis.com/drive/v3/files/{f['id']}", body={"name": "Report.xlsx"})
+
+COMPOSIO CALL RULE — ABSOLUTE (applies to reads AND writes, every single interaction):
+For ALL services listed above (${slugList}), you MUST use composio_execute() for EVERY call — lookups, searches, reads, and writes.
+There is NO direct Bearer token available for Composio-managed services. Direct HTTP calls ALWAYS return 401.
+
+✅ CORRECT — Trello: read board/list first, then create card (ALL via composio_execute):
+  boards = composio_execute("TRELLO_GET_USER_BOARDS_ALL_BOARDS", {})
+  board_list = boards if isinstance(boards, list) else boards.get("boards", [])
+  board = next((b for b in board_list if "Action Items" in b.get("name", "")), board_list[0] if board_list else None)
+  lists = composio_execute("TRELLO_GET_ALL_LISTS_OF_A_BOARD", {"board_id": board["id"]})
+  list_items = lists if isinstance(lists, list) else lists.get("lists", [])
+  composio_execute("TRELLO_CREATE_TRELLO_CARD", {"idList": list_items[0]["id"], "name": "Card Title", "desc": "..."})
+
+❌ WRONG — direct REST (ALWAYS fails with 401 — no Trello token exists in env):
+  _request("GET", "https://api.trello.com/1/members/me/boards", token=_get_token("trello"))
+  api.call("trello", "GET", "/members/me/boards")
+NEVER use api.call(), _request(), or any direct HTTP for these services: ${slugList}
+${LARGE_CONTENT_NOTE}`;
+}
+
+/**
  * Fetch all Composio action schemas for the tenant's connected providers and
  * format them as a concise system-prompt section.
  *
@@ -372,32 +406,7 @@ All available actions for this tenant's connected apps (format: slug — descrip
 ${sections.join('\n')}
 NOTE: Every action name used in composio_execute() MUST appear verbatim in the list above.
 
-NO ACTION FOR IT? Some toolkits lack whole areas (Zoho Books has no report actions — no P&L, balance sheet or trial balance). Then call the app's own REST API through the customer's connection — never invent an action name, and never fall back to approximating the data:
-  from agenticfactor._core import composio_proxy
-  pnl = composio_proxy("zoho_books", "GET", "/books/v3/reports/profitandloss", params={"organization_id": org_id, "from_date": "2025-04-01", "to_date": "2026-03-31"})
-The first argument is the toolkit slug; the path is the app's full documented REST path (e.g. Zoho Books "/books/v3/invoices") — it is joined with the customer's own connection base URL, so the right region/data centre is used. Put query parameters in params, never in the path. GET reads run in previews; POST/PUT/PATCH/DELETE are writes and go through approval like composio_execute writes.
-FILE PARAMETERS of a Composio action (email attachments, file uploads, Canva/Drive imports): save the file locally and pass composio_file("/tmp/deck.pptx") as the parameter value — e.g. composio_execute("CANVA_CREATE_DESIGN_IMPORT_JOB", {"title": t, "file": composio_file(path)}) or {"attachment": composio_file(pdf_path)}. composio_execute uploads it to Composio's file storage and passes the file reference ({name, mimetype, s3key}); NEVER put base64 file content into params (it fails as too large or with "missing s3key").
-FILES the script generates (an .xlsx built with openpyxl, a .pdf, an image) can also go straight to an app's own API as raw bytes through composio_proxy — e.g. to the customer's Google Drive:
-  f = composio_proxy("googledrive", "POST", "https://www.googleapis.com/upload/drive/v3/files?uploadType=media", binary=data, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-  composio_proxy("googledrive", "PATCH", f"https://www.googleapis.com/drive/v3/files/{f['id']}", body={"name": "Report.xlsx"})
-
-COMPOSIO CALL RULE — ABSOLUTE (applies to reads AND writes, every single interaction):
-For ALL services listed above (${slugList}), you MUST use composio_execute() for EVERY call — lookups, searches, reads, and writes.
-There is NO direct Bearer token available for Composio-managed services. Direct HTTP calls ALWAYS return 401.
-
-✅ CORRECT — Trello: read board/list first, then create card (ALL via composio_execute):
-  boards = composio_execute("TRELLO_GET_USER_BOARDS_ALL_BOARDS", {})
-  board_list = boards if isinstance(boards, list) else boards.get("boards", [])
-  board = next((b for b in board_list if "Action Items" in b.get("name", "")), board_list[0] if board_list else None)
-  lists = composio_execute("TRELLO_GET_ALL_LISTS_OF_A_BOARD", {"board_id": board["id"]})
-  list_items = lists if isinstance(lists, list) else lists.get("lists", [])
-  composio_execute("TRELLO_CREATE_TRELLO_CARD", {"idList": list_items[0]["id"], "name": "Card Title", "desc": "..."})
-
-❌ WRONG — direct REST (ALWAYS fails with 401 — no Trello token exists in env):
-  _request("GET", "https://api.trello.com/1/members/me/boards", token=_get_token("trello"))
-  api.call("trello", "GET", "/members/me/boards")
-NEVER use api.call(), _request(), or any direct HTTP for these services: ${slugList}
-${LARGE_CONTENT_NOTE}
+${composioUsageNotes(connectedSlugs)}
 
 PER-AGENT PROVIDER RULE (CRITICAL):
 Each agent in the mission blueprint must handle EXACTLY ONE service.

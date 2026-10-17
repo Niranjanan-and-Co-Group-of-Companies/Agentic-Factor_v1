@@ -76,3 +76,9 @@ export function scriptFrom(content: string): { script?: string; why: string } {
   if (block?.trim()) return { script: block, why: '' };
   return { why: parsed ? 'the reply had no script in it' : content.trim() ? 'the reply was not valid JSON' : 'the reply was empty' };
 }
+
+/** Composio action names a plan spells out ("GITHUB_LIST_COMMITS"), for the toolkits in play. */
+export function actionsNamedIn(plan: string, toolkits: string[]): string[] {
+  const prefixes = toolkits.map(t => `${t.toUpperCase()}_`);
+  return [...new Set((plan.match(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g) ?? []).filter(a => prefixes.some(p => a.startsWith(p))))];
+}

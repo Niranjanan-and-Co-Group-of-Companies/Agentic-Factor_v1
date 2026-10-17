@@ -5,7 +5,7 @@ import { callLLM, generateEmbedding } from './llm-router';
 import { robustJSONParse, safeJSONParse } from '../utils/json-parser';
 import { readDecryptedToken } from './vault';
 import { MEMORY_EXTRACTION_PROMPT, cleanTenantFacts, formatTenantMemory } from './tenant-memory';
-import { collectRewrites, REWRITE_SCRIPT, restoreUnchangedScripts, scriptFrom, UNCHANGED_SCRIPT, type ScriptRewrite } from './blueprint-edit';
+import { actionsNamedIn, collectRewrites, REWRITE_SCRIPT, restoreUnchangedScripts, scriptFrom, UNCHANGED_SCRIPT, type ScriptRewrite } from './blueprint-edit';
 import { autoFixComposioParams, checkComposioParams } from './composio-param-check';
 import { appName } from '../utils/app-name';
 
@@ -1126,14 +1126,26 @@ async function composioContextFor(toolkits: string[]): Promise<string> {
   return `${await buildComposioActionsContext(toolkits).catch(() => '')}${await lessonsFor(toolkits).catch(() => '')}`;
 }
 
+/** The toolkits an agent's declared tools name ("Slack API" → slack) — none for an agent that only writes text. */
+function toolkitsForTools(toolkits: string[], tools: Array<{ name: string }>): string[] {
+  const text = tools.map(t => t.name).join(' ').toLowerCase();
+  return toolkits.filter(tk => text.includes(tk.toLowerCase()) || text.includes(appName(tk).toLowerCase()));
+}
+
+
 /**
- * The toolkits an agent's plan and tools name — none for an agent that only writes text. Falling back
- * to every connected toolkit put a content writer's prompt near the model's input limit.
+ * The Composio context one agent's script needs. When its plan names the actions to call: those (and
+ * the closest others) in full, and only the names of the rest — a toolkit's whole list is ~90K tokens
+ * for GitHub, and a Slack poster whose plan mentioned GitHub data was handed it. Otherwise the full
+ * lists of the toolkits its tools name.
  */
-function toolkitsForAgent(toolkits: string[], text: string): string[] {
-  const upper = text.toUpperCase();
-  const lower = text.toLowerCase();
-  return toolkits.filter(tk => upper.includes(`${tk.toUpperCase()}_`) || lower.includes(tk.toLowerCase()) || lower.includes(appName(tk).toLowerCase()));
+async function composioContextForAgent(plan: string, tools: Array<{ name: string }>, toolkits: string[]): Promise<string> {
+  const named = actionsNamedIn(plan, toolkits);
+  if (named.length === 0) return composioContextFor(toolkitsForTools(toolkits, tools));
+  const kits = toolkits.filter(t => named.some(a => a.startsWith(`${t.toUpperCase()}_`)));
+  const { buildComposioFixContext, composioUsageNotes } = await import('./composio-actions');
+  const { lessonsFor } = await import('./toolkit-lessons');
+  return `${await buildComposioFixContext(named).catch(() => '')}\n${composioUsageNotes(kits)}${await lessonsFor(kits).catch(() => '')}`;
 }
 
 /**
@@ -1190,7 +1202,6 @@ export async function writeAgentScript(
   if (!agent) throw new Error(`The design has no agent #${agentIndex + 1}.`);
   const planOf = (index: number) => design.plans.find(p => p.agentIndex === index)?.scriptChange;
   const plan = planOf(agentIndex) ?? agent.systemPrompt ?? agent.role;
-  const toolkits = toolkitsForAgent(design.contextToolkits, `${plan}\n${(agent.tools ?? []).map(t => t.name).join(', ')}`);
   const missionView = JSON.stringify({
     ...design.llmOutput,
     agents: design.llmOutput.agents.map(a => {
@@ -1201,7 +1212,7 @@ export async function writeAgentScript(
   }, null, 2);
   return writeScript(
     SCRIPT_WRITE_PROMPT,
-    [`Examples of complete missions (for the script style):\n${FEW_SHOT_EXAMPLES}`, await composioContextFor(toolkits), ...design.notes],
+    [`Examples of complete missions (for the script style):\n${FEW_SHOT_EXAMPLES}`, await composioContextForAgent(plan, agent.tools ?? [], design.contextToolkits), ...design.notes],
     `THE CUSTOMER'S REQUEST:\n${intent}${fileContextFor(files)}\n\nTHE MISSION DESIGN:\n${missionView}\n\nAGENT TO WRITE — agentIndex ${agentIndex}, role "${agent.role}"\nInstructions: ${agent.systemPrompt ?? ''}\nHandoff: ${agent.handoffProtocol ?? ''}\n\nPLAN FOR ITS SCRIPT:\n${plan}`,
     agent.role,
     { tenantId, missionId: 'blueprint_generation' },

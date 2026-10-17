@@ -42,7 +42,7 @@ describe('restoreUnchangedScripts', () => {
   });
 });
 
-import { collectRewrites, REWRITE_SCRIPT, scriptFrom } from '../blueprint-edit';
+import { actionsNamedIn, collectRewrites, REWRITE_SCRIPT, scriptFrom } from '../blueprint-edit';
 
 describe('collectRewrites', () => {
   it('lists the agents marked for rewrite with their change notes', () => {
@@ -88,5 +88,13 @@ describe('scriptFrom — the script in a writer\'s reply', () => {
     expect(scriptFrom(`{"pythonScript": "${REWRITE_SCRIPT}"}`)).toEqual({ why: 'the reply had no script in it' });
     expect(scriptFrom('Sorry, I cannot do that.').why).toBe('the reply was not valid JSON');
     expect(scriptFrom('  ').why).toBe('the reply was empty');
+  });
+});
+
+describe('actionsNamedIn — the Composio actions a plan spells out', () => {
+  it('keeps the actions of the toolkits in play and ignores other capitals', () => {
+    const plan = 'Read input_data["commits"] (from GITHUB_LIST_COMMITS) and post with SLACK_SEND_MESSAGE to the channel. Use ZOHO_BOOKS_LIST_INVOICES only if asked. Output JSON_FIELD.';
+    expect(actionsNamedIn(plan, ['slack', 'zoho_books'])).toEqual(['SLACK_SEND_MESSAGE', 'ZOHO_BOOKS_LIST_INVOICES']);
+    expect(actionsNamedIn('Write a summary with ask_ai.', ['slack'])).toEqual([]);
   });
 });
