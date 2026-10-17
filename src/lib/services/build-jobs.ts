@@ -3,6 +3,8 @@
 // exists — the conversation that led to it, moved from Command Center into the mission's own chat.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { LLMUsage } from '@/lib/services/llm-router';
+import { usageCostUsd } from '@/lib/services/prices';
 
 export interface BuildRequest { intent: string; priorQuestions?: string[]; sourceRequest?: string }
 
@@ -15,6 +17,25 @@ export async function recordJobStatus(supabase: SupabaseClient, tenantId: string
     entity_id: jobId,
     payload: { jobId, status, ...data, updatedAt: new Date().toISOString() },
   });
+}
+
+/**
+ * Charges what one build or update step's model calls really cost us (× the work markup), tagged with
+ * the job so the total can be shown and a failure billed at the failure rate. Throws when the tenant's
+ * credits run out.
+ */
+export async function chargeJobStep(tenantId: string, jobId: string, step: string, usage: LLMUsage[], missionId?: string): Promise<number> {
+  const realCostUsd = usageCostUsd(usage);
+  if (realCostUsd <= 0) return 0;
+  const { creditsForCost, deductCredits } = await import('@/lib/middleware/billing');
+  const credits = await creditsForCost(realCostUsd, 'work');
+  const sum = (k: 'inputTokens' | 'outputTokens' | 'cacheWriteTokens' | 'cacheReadTokens') => usage.reduce((n, u) => n + (u[k] ?? 0), 0);
+  await deductCredits(tenantId, credits, `build:${step}`, {
+    provider: 'anthropic', model: [...new Set(usage.map(u => u.model))].join(', '),
+    inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'), cacheWriteTokens: sum('cacheWriteTokens'), cacheReadTokens: sum('cacheReadTokens'),
+    realCostUsd, markup: 'work', jobId, missionId,
+  });
+  return credits;
 }
 
 /** The request a job was started with, kept so a failed build can be tried again as it was. */
@@ -61,7 +82,7 @@ export function buildFailureMessage(raw: string, lastStep?: string, errorName?: 
  * Reports a failed build once: the job's status (with the real reason) and the Command Center message
  * that started it, which keeps the job id so "Try again" can rebuild it.
  */
-export async function reportBuildFailure(supabase: SupabaseClient, tenantId: string, jobId: string, raw: string, errorName?: string): Promise<string> {
+export async function reportBuildFailure(supabase: SupabaseClient, tenantId: string, jobId: string, raw: string, errorName?: string, credits?: number): Promise<string> {
   const { data: latest } = await supabase.from('events')
     .select('payload')
     .eq('tenant_id', tenantId)
@@ -73,9 +94,9 @@ export async function reportBuildFailure(supabase: SupabaseClient, tenantId: str
   const last = latest?.payload as { status?: string; step?: string; error?: string } | undefined;
   if (last?.status === 'failed' && last.error) return last.error;
   const error = buildFailureMessage(raw, last?.step, errorName);
-  await recordJobStatus(supabase, tenantId, jobId, 'failed', { error });
+  await recordJobStatus(supabase, tenantId, jobId, 'failed', { error, credits });
   await supabase.from('mission_chat_messages')
-    .update({ action_payload: { type: 'mission_create_error', error, jobId } })
+    .update({ action_payload: { type: 'mission_create_error', error, jobId, credits } })
     .eq('tenant_id', tenantId)
     .eq('action_payload->>jobId', jobId);
   return error;

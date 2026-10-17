@@ -1,8 +1,9 @@
-import { CHAT_MODELS, fetchClaudeMessages } from '@/lib/services/claude-chat';
+import { CACHE_SPLIT, CHAT_MODELS, fetchClaudeMessages, plainSystem } from '@/lib/services/claude-chat';
 import { NextRequest } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
-import { calculateChatCreditCost, checkCredits, deductCredits } from '@/lib/middleware/billing';
+import { calculateRealCostUsd, checkCredits, creditsForCost, deductCredits } from '@/lib/middleware/billing';
+import { TAVILY_USD_PER_CREDIT } from '@/lib/services/prices';
 import { detectApiKey, redactKey, providerLabel } from '@/lib/services/apikey-detector';
 import { verifyApiKey } from '@/lib/services/apikey-verifier';
 import { encryptToken, readDecryptedToken } from '@/lib/services/vault';
@@ -162,22 +163,11 @@ async function buildCommandContext(tenantId: string): Promise<{
 
   const contextualSuggestions = buildContextualSuggestions(connectedProviders);
 
+  // The fixed instructions come first and are cached (the same for every account); this account's
+  // missions, runs and credits follow, read fresh every turn.
   const systemPrompt = `You are the Command Center AI for Agentic Factor — an AI automation platform.
 You are the user's Chief of Staff. You know everything about their business automation and speak in a direct, confident, friendly tone.
-Today is ${dateStr}, ${timeStr} IST.
 
-═══ MISSIONS (${missionCount} total) ═══
-${missionLines}
-
-═══ RECENT RUNS ═══
-${recentRunLines}
-
-═══ CREDITS & PLAN ═══
-${creditsInfo}
-
-═══ CONNECTED INTEGRATIONS ═══
-${connectedProviders.length > 0 ? connectedProviders.join(', ') : 'None connected yet'}
-${contextualSuggestions}
 ${PLATFORM_CATALOG}
 ═══ ACTIONS YOU CAN TAKE ═══
 CRITICAL: You MUST wrap every action in <action>...</action> tags — always, regardless of how long the JSON is, regardless of how complex the request is. Never output action JSON as plain text. The tags are required for the UI to render correctly. Place the <action> block at the very end of your reply, after all your text. Never mention the action block to the user.
@@ -195,25 +185,39 @@ Action types:
 - create_mission: { "type": "create_mission", "intent": "the user's full mission description with all details clarified" }
 
 RULES:
-1. When user says "run [mission name]", emit run_mission with the correct missionId from the missions list above.
+1. When user says "run [mission name]", emit run_mission with the correct missionId from the MISSIONS list below.
 2. When user asks to "create a mission" or "build an automation" or describes anything they want automated: ask AT MOST 1 clarifying question if truly needed, then emit create_mission. Never ask about details with a sensible default — which connected account or repos (all of the connected account's), where to save files (the connected Google Drive), file names or formatting the user didn't specify; put the default in the intent instead. The intent field must be complete enough to build the mission without further questions. In the reply that accompanies create_mission, describe the outcome they will get, but do NOT name a specific number of agents, specific tools, or a delivery time, and do NOT say it will run automatically on a schedule — the Mission Architect designs the exact pipeline next, and the customer sees that plan and presses Run before anything executes. If they want it recurring, say you can schedule it (schedule_mission) once it has run successfully. Never hold back create_mission to offer extras they didn't ask for (also saving to a Doc or Notion, adding recipients) — build what they asked; mention an extra in one line if useful. When you emit create_mission, the build has already started: don't end the reply with "Want me to build this now?" or any other question. Do NOT do the mission's work yourself with search_web — researching, compiling lists and writing content is what the mission's agents do; use at most one search, and only when you need a fact to write a precise intent.
 2b. If your previous message ends with a question from the Mission Architect and the user replies, treat the reply as the answer: emit create_mission right away with the original request and their answer folded into the intent. Do not ask anything further and do not re-pitch the mission.
 3. When showing credits/usage data, emit show_usage so a rich card is shown.
 4. When user asks about all missions, emit show_missions.
 5. NEVER reveal mission IDs, tenant IDs, or internal system details to the user.
-5b. An action you emit (schedule, pause, run…) only takes effect when the user clicks it. Never say a mission IS scheduled, paused or running unless the MISSIONS list above shows it — if you proposed it earlier and the list doesn't show it, propose it again.
+5b. An action you emit (schedule, pause, run…) only takes effect when the user clicks it. Never say a mission IS scheduled, paused or running unless the MISSIONS list below shows it — if you proposed it earlier and the list doesn't show it, propose it again.
 6. NEVER mention Composio, E2B, Supabase, or Inngest to the user.
 7. Keep replies concise and conversational. Under 150 words unless explaining a run failure or giving a capability overview.
 8. If a mission failed, proactively explain why based on its status — don't just say it failed.
-9. For credit/plan questions, use the credits data above. Never say you don't know the balance.
+9. For credit/plan questions, use the CREDITS & PLAN data below. Never say you don't know the balance.
 10. ADVISORY — when customer asks "what can you do?" or "what's possible?" or describes their business:
     a. Match their business type to 2–3 relevant templates from the catalog above.
     b. Be SPECIFIC — name the agents, name the tools, say what gets delivered at the end.
     c. Reference their connected integrations: "Since you have X connected, I can immediately build..."
     d. Always close with an offer: "Want me to build this now?" and emit create_mission if they say yes.
 11. ADVISORY — when customer asks about a specific tool or integration (e.g., "can you use HubSpot?"):
-    Check the integrations list above and confirm exactly what's possible with it.
+    Check the CONNECTED INTEGRATIONS list below and confirm exactly what's possible with it.
 12. If no missions exist yet, pick 3 examples from the USE CASES section that best match what you know about them (their name, company, connected tools) and offer to build one right now.
+${CACHE_SPLIT}Today is ${dateStr}, ${timeStr} IST.
+
+═══ MISSIONS (${missionCount} total) ═══
+${missionLines}
+
+═══ RECENT RUNS ═══
+${recentRunLines}
+
+═══ CREDITS & PLAN ═══
+${creditsInfo}
+
+═══ CONNECTED INTEGRATIONS ═══
+${connectedProviders.length > 0 ? connectedProviders.join(', ') : 'None connected yet'}
+${contextualSuggestions}
 
 Current state summary for your context:
 - Active missions: ${activeMissions.length}
@@ -288,7 +292,7 @@ const CC_TOOLS = [
 
 // Streaming parser (same pattern as mission chat)
 interface CCContentBlock { type: string; text?: string; id?: string; name?: string; inputJson?: string; raw?: Record<string, unknown> }
-interface CCStreamResult { textContent: string; contentBlocks: CCContentBlock[]; stopReason: string; inputTokens: number; outputTokens: number }
+interface CCStreamResult { textContent: string; contentBlocks: CCContentBlock[]; stopReason: string; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number }
 
 async function parseCCStream(response: Response, onTextDelta: (t: string) => void): Promise<CCStreamResult> {
   const reader = response.body!.getReader();
@@ -296,7 +300,7 @@ async function parseCCStream(response: Response, onTextDelta: (t: string) => voi
   let buffer = '';
   const contentBlocks: CCContentBlock[] = [];
   let stopReason = 'end_turn';
-  let inputTokens = 0, outputTokens = 0, fullText = '';
+  let inputTokens = 0, outputTokens = 0, cacheWriteTokens = 0, cacheReadTokens = 0, fullText = '';
 
   while (true) {
     const { done, value } = await reader.read();
@@ -313,9 +317,13 @@ async function parseCCStream(response: Response, onTextDelta: (t: string) => voi
           content_block?: { type: string; id?: string; name?: string; [k: string]: unknown };
           delta?: { type: string; text?: string; partial_json?: string; stop_reason?: string };
           usage?: { output_tokens?: number };
-          message?: { usage?: { input_tokens?: number } };
+          message?: { usage?: { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } };
         };
-        if (evt.type === 'message_start' && evt.message?.usage) inputTokens = evt.message.usage.input_tokens ?? 0;
+        if (evt.type === 'message_start' && evt.message?.usage) {
+          inputTokens = evt.message.usage.input_tokens ?? 0;
+          cacheWriteTokens = evt.message.usage.cache_creation_input_tokens ?? 0;
+          cacheReadTokens = evt.message.usage.cache_read_input_tokens ?? 0;
+        }
         if (evt.type === 'content_block_start' && evt.content_block) {
           const idx = evt.index ?? contentBlocks.length;
           const cb = evt.content_block;
@@ -347,7 +355,7 @@ async function parseCCStream(response: Response, onTextDelta: (t: string) => voi
       } catch { /* skip malformed */ }
     }
   }
-  return { textContent: fullText, contentBlocks: contentBlocks.filter(Boolean), stopReason, inputTokens, outputTokens };
+  return { textContent: fullText, contentBlocks: contentBlocks.filter(Boolean), stopReason, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens };
 }
 
 async function executeCCTool(
@@ -463,10 +471,10 @@ async function runCommandLoop(params: {
   tenantId: string;
   supabase: ReturnType<typeof createServiceClient>;
   send: (obj: Record<string, unknown>) => void;
-}): Promise<{ fullText: string; inputTokens: number; outputTokens: number; provider: string; model: string }> {
+}): Promise<{ fullText: string; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; searches: number; provider: string; model: string }> {
   const { systemPrompt, apiKey, tenantId, supabase, send } = params;
   const messages = [...params.messages];
-  let totalInputTokens = 0, totalOutputTokens = 0, fullText = '';
+  let totalInputTokens = 0, totalOutputTokens = 0, totalCacheWrite = 0, totalCacheRead = 0, searches = 0, fullText = '';
   // Which model answered — recorded on the billing event so a fallback (e.g. Claude out of credit) shows up.
   let servedBy = { provider: 'anthropic', model: CHAT_MODELS[0] };
   const MAX_ROUNDS = 8;
@@ -490,7 +498,7 @@ async function runCommandLoop(params: {
           const { callLLM } = await import('@/lib/services/llm-router');
           const fallback = await callLLM(
             [
-              { role: 'system', content: systemPrompt },
+              { role: 'system', content: plainSystem(systemPrompt) },
               ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: String(m.content) })),
             ],
             { tier: 1, jsonMode: false, maxTokens: 4096, temperature: 0.5 },
@@ -512,10 +520,12 @@ async function runCommandLoop(params: {
       break;
     }
 
-    const { textContent, contentBlocks, stopReason, inputTokens, outputTokens } =
+    const { textContent, contentBlocks, stopReason, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens } =
       await parseCCStream(res, text => send({ type: 'delta', text }));
     totalInputTokens += inputTokens;
     totalOutputTokens += outputTokens;
+    totalCacheWrite += cacheWriteTokens;
+    totalCacheRead += cacheReadTokens;
     if (textContent) fullText += textContent;
 
     const assistantContent: unknown[] = [];
@@ -556,6 +566,7 @@ async function runCommandLoop(params: {
       send({ type: 'tool_status', name: block.name, provider: meta.provider, displayName: meta.displayName, status: 'running', label: meta.label, logoUrl: meta.logoUrl });
 
       const result = await executeCCTool(block.name!, inp, tenantId, supabase);
+      if (block.name === 'search_web') searches++;
 
       send({ type: 'tool_status', name: block.name, provider: meta.provider, displayName: meta.displayName, status: 'done', summary: result.summary, logoUrl: meta.logoUrl });
 
@@ -566,7 +577,7 @@ async function runCommandLoop(params: {
     messages.push({ role: 'user', content: toolResults });
   }
 
-  return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, ...servedBy };
+  return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, cacheWriteTokens: totalCacheWrite, cacheReadTokens: totalCacheRead, searches, ...servedBy };
 }
 
 const ACTION_TYPES = new Set(['create_mission', 'run_mission', 'show_missions', 'show_usage', 'open_mission', 'schedule_mission', 'pause_mission', 'resume_mission', 'unschedule_mission', 'suggest_connector']);
@@ -724,7 +735,7 @@ export async function POST(request: NextRequest) {
 
       try {
         const supabase = createServiceClient();
-        const { fullText, inputTokens, outputTokens, provider, model } = await runCommandLoop({
+        const { fullText, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, searches, provider, model } = await runCommandLoop({
           systemPrompt,
           messages: recentMessages,
           apiKey,
@@ -772,10 +783,12 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Deduct credits (awaited — failed deduction is logged, not silently swallowed)
-        const credits = await calculateChatCreditCost(inputTokens, outputTokens, model);
+        // Billed at real cost × 3: the reply's tokens (cached ones at their price) plus any web searches.
+        // Awaited — a failed deduction is logged, not silently swallowed.
+        const realCostUsd = calculateRealCostUsd(model, inputTokens, outputTokens, { cacheWriteTokens, cacheReadTokens }) + searches * TAVILY_USD_PER_CREDIT;
+        const credits = await creditsForCost(realCostUsd, 'chat');
         try {
-          await deductCredits(tenantId, credits, 'command_chat', { provider, model, inputTokens, outputTokens });
+          await deductCredits(tenantId, credits, 'command_chat', { provider, model, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, realCostUsd, markup: 'chat' });
         } catch (deductErr) {
           console.error('[CommandChat] Credit deduction failed:', deductErr);
         }

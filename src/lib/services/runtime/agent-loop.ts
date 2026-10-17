@@ -5,6 +5,7 @@ import { robustJSONParse } from '@/lib/utils/json-parser';
 import { criticInputView, criticOutputView, describeInputShape } from './pipeline-context';
 import { applyScriptEdits, hasEditBlocks, EDIT_FORMAT, EDIT_MIN_CHARS } from './script-edits';
 import { createHash } from 'crypto';
+import { USAGE_PROBE, chargeModelCall, chargeSandbox, parseUsageProbe, type RunBill } from '../run-billing';
 
 const scriptHash = (code: string) => createHash('sha256').update(code).digest('hex').slice(0, 16);
 
@@ -33,6 +34,18 @@ const STEP_BUDGET_MS = 285_000;
 const APPROVED_RUN_TIMEOUT_MS = 220_000;
 
 /** Create an E2B sandbox with automatic retry on transient infrastructure failures. */
+/**
+ * Bills a sandbox for the seconds it was alive and the searches and app actions its script made, then
+ * kills it. Never throws: the work is done either way.
+ */
+async function billAndKill(sandbox: InstanceType<typeof Sandbox>, startedAt: number, bill: RunBill | undefined, label: string): Promise<void> {
+  const tools = bill
+    ? await sandbox.runCode(USAGE_PROBE, { timeoutMs: 5_000 }).then(e => parseUsageProbe(e.logs.stdout.join('\n'))).catch(() => ({}))
+    : {};
+  await sandbox.kill().catch(() => {});
+  if (bill) await chargeSandbox(bill, label, (Date.now() - startedAt) / 1000, tools).catch(err => console.warn(`[Billing] Sandbox charge failed (${label}):`, (err as Error).message));
+}
+
 async function createSandboxWithRetry(timeoutMs: number, maxAttempts = 3): Promise<InstanceType<typeof Sandbox>> {
   let lastErr: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -529,20 +542,17 @@ async function runRealSideEffects(
   agentId: string,
   tenantId: string,
   timeoutMs: number = SCRIPT_TIMEOUT_MS,
+  bill?: RunBill,
 ): Promise<string> {
   let finalOutputJSON = dryRunOutputJSON;
   console.log(`[Agent ${agentId}] Phase 2: Executing real side effects...`);
   try {
-    // Charge for Phase 2 sandbox before spinning it up
-    const { deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
-    await deductCredits(tenantId, CREDIT_COSTS.code_execution, `e2b_phase2_realrun:${agentId}`).catch(
-      (e: any) => console.warn(`[Agent ${agentId}] Phase 2 credit deduction failed (non-fatal):`, e.message)
-    );
-
     const finalEnvs = { ...sandboxEnvs };
     delete finalEnvs['AF_DRY_RUN'];
 
+    // Billed by the second (and for its searches and app actions) once it is done.
     const finalSandbox = await createSandboxWithRetry(Math.max(SANDBOX_LIFETIME_MS, timeoutMs + 60_000));
+    const finalStartedAt = Date.now();
 
     try {
       const phase2Pkgs = getRequiredPackages(pythonCode);
@@ -621,7 +631,7 @@ ${pythonCode}`.replace(/\x00/g, '');
         }
       }
     } finally {
-      await finalSandbox.kill().catch(() => {});
+      await billAndKill(finalSandbox, finalStartedAt, bill, 'e2b_live_run');
     }
   } catch (phase2Err: any) {
     throw phase2Err;
@@ -1051,6 +1061,8 @@ export async function executeAgent(
 
   let attempts = 0;
   const maxAttempts = 5;
+  // Everything this agent uses is billed at real cost × 4 and tagged with the run (free-plan rehearsals at half).
+  const billOf = (): RunBill => ({ tenantId, runId, missionId, agentRole: agent.role, halve: isTrainingMode && tenantPlan === 'free' });
   // Fixes asked for so far: code still failing after two of them goes to the strongest model.
   let fixesAsked = 0;
   let lastError = '';
@@ -1168,7 +1180,7 @@ export async function executeAgent(
         let realOutput: string;
         markProgress('acting');
         try {
-          realOutput = await runRealSideEffects(approvedCode, resumeEnvs, existingAction.payload.output, agent.id, tenantId, APPROVED_RUN_TIMEOUT_MS);
+          realOutput = await runRealSideEffects(approvedCode, resumeEnvs, existingAction.payload.output, agent.id, tenantId, APPROVED_RUN_TIMEOUT_MS, billOf());
         } catch (realErr) {
           // Recorded so a retry of this step reports what happened instead of "already being executed".
           await supabase.from('proposed_actions')
@@ -1227,15 +1239,15 @@ export async function executeAgent(
     }
     attempts++;
     
-    // ── Billing Enforcement: Deduct E2B execution credit per attempt ──
-    // LLM model credit cost is deducted separately after we know which model was used.
-    try {
-      const { deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
-      const e2bCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(CREDIT_COSTS.code_execution / 2) : CREDIT_COSTS.code_execution;
-      await deductCredits(tenantId, e2bCost, `e2b_execution_attempt_${attempts}:${agent.role}`);
-    } catch (err) {
-      console.warn(`[Agent ${agent.id}] Insufficient credits for execution, stopping.`, err);
-      throw new Error('InsufficientCredits');
+    // ── Billing: stop when credits have run out. The sandbox is billed by the second once it has run,
+    // and each model call as it is made.
+    {
+      const { checkCredits } = await import('@/lib/middleware/billing');
+      const credit = await checkCredits(tenantId, 1).catch(() => ({ allowed: true }));
+      if (!credit.allowed) {
+        console.warn(`[Agent ${agent.id}] Insufficient credits for execution, stopping.`);
+        throw new Error('InsufficientCredits');
+      }
     }
 
     let pythonCode = null;
@@ -1341,6 +1353,7 @@ ${fixByEdits ? `\n${EDIT_FORMAT}` : '- Return the COMPLETE corrected Python scri
             [{ role: 'system', content: composioFixPrompt }],
             { temperature: 0.0, jsonMode: false, job: codeJob, planTenantId: tenantId }
           );
+          await chargeModelCall(billOf(), 'llm_composio_fix', composioFixResponse).catch(() => { /* non-fatal */ });
 
           const { code: composioFixCode, problem: editProblem } = codeFromFix(composioFixResponse.content, lastPythonCode);
           if (editProblem) {
@@ -1350,16 +1363,6 @@ ${fixByEdits ? `\n${EDIT_FORMAT}` : '- Return the COMPLETE corrected Python scri
           if (composioFixCode) {
             pythonCode = sanitizePythonCode(composioFixCode);
             console.log(`[Agent ${agent.id}] Composio-aware correction applied (attempt ${attempts})`);
-            // Deduct LLM credit for this fix call (token-proportional)
-            try {
-              const { deductCredits, calculateLLMCreditCost } = await import('@/lib/middleware/billing');
-              const fixCostBase = await calculateLLMCreditCost(composioFixResponse.model, composioFixResponse.inputTokens ?? 0, composioFixResponse.outputTokens ?? 0);
-              const fixCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(fixCostBase / 2) : fixCostBase;
-              await deductCredits(tenantId, fixCost, `llm_composio_fix:${agent.role}`, {
-                provider: composioFixResponse.provider, model: composioFixResponse.model,
-                inputTokens: composioFixResponse.inputTokens, outputTokens: composioFixResponse.outputTokens,
-              });
-            } catch { /* non-fatal */ }
           }
         } catch (composioFixErr) {
           console.warn(`[Agent ${agent.id}] Composio-aware fix failed, falling back to full regeneration:`, composioFixErr);
@@ -1550,18 +1553,9 @@ INSTRUCTIONS:
         { temperature: 0.1, jsonMode: false, job: codeJob, planTenantId: tenantId }
       );
 
-      // ── Deduct LLM credit: token-proportional at 4× real cost via live USD/INR ──
-      // Always deduct — even if later E2B execution fails, we already paid the provider.
+      // ── Billed at real cost × 4 — even if the sandbox run then fails, we already paid the provider.
       try {
-        const { deductCredits, calculateLLMCreditCost } = await import('@/lib/middleware/billing');
-        const llmCostBase = await calculateLLMCreditCost(response.model, response.inputTokens ?? 0, response.outputTokens ?? 0);
-        const llmCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(llmCostBase / 2) : llmCostBase;
-        await deductCredits(tenantId, llmCost, `llm_${response.provider}:${response.model}:${agent.role}`, {
-          provider: response.provider,
-          model: response.model,
-          inputTokens: response.inputTokens,
-          outputTokens: response.outputTokens,
-        });
+        const llmCost = await chargeModelCall(billOf(), `llm_${response.provider}:${response.model}`, response);
         console.log(`[Agent ${agent.id}] LLM credit: ${llmCost} (model: ${response.model}, in:${response.inputTokens} out:${response.outputTokens})`);
       } catch (creditErr) {
         console.warn(`[Agent ${agent.id}] LLM credit deduction failed:`, creditErr);
@@ -1596,8 +1590,9 @@ INSTRUCTIONS:
         
         try {
           const checkSandbox = await createSandboxWithRetry(15_000);
+          const checkStartedAt = Date.now();
           const checkResult = await checkSandbox.runCode(syntaxCheckCode);
-          await checkSandbox.kill().catch(() => {});
+          await billAndKill(checkSandbox, checkStartedAt, billOf(), 'e2b_syntax_check');
           
           const checkOutput = (checkResult.text || '').trim();
           
@@ -1787,8 +1782,9 @@ matplotlib.use('Agg')
 
 ${pythonCode}`;
 
-      // Execute in E2B cloud sandbox (pre-warmed, <1s start time)
+      // Execute in E2B cloud sandbox (pre-warmed, <1s start time); billed by the second once done.
       const sandbox = await createSandboxWithRetry(SANDBOX_LIFETIME_MS);
+      const sandboxStartedAt = Date.now();
 
       try {
         // Install only the packages this script actually imports — skip unused heavy deps.
@@ -2152,10 +2148,7 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
           // (undocumented service assignments, reused records, "too prompt" payments), and every false
           // rejection costs a full sandbox retry plus a fixer call.
           const criticResult = await callLLM([{ role: 'user', content: criticPrompt }], { temperature: 0, jsonMode: true, tier: 2 });
-          const { deductCredits: deductCritic, calculateLLMCreditCost: calcCriticCost } = await import('@/lib/middleware/billing');
-          const criticCostBase = await calcCriticCost(criticResult.model, criticResult.inputTokens ?? 0, criticResult.outputTokens ?? 0);
-          const criticCost = (isTrainingMode && tenantPlan === 'free') ? Math.ceil(criticCostBase / 2) : criticCostBase;
-          deductCritic(tenantId, criticCost, `critic_llm:${agent.role}`).catch(() => {});
+          chargeModelCall(billOf(), 'critic_llm', criticResult).catch(() => {});
           // A malformed verdict (e.g. an unescaped quote in the reason) used to fail the agent's attempt
           // with "Failed to extract valid JSON". Read the verdict from the text; if there is none, pass.
           let criticParsed: { valid?: boolean; reason?: string };
@@ -2302,7 +2295,7 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
         // trust, plus any agent under autonomous trust, land here directly).
         if (hasWriteOps) {
           markProgress('acting');
-          finalOutputJSON = await runRealSideEffects(pythonCode, sandboxEnvs, finalOutputJSON, agent.id, tenantId);
+          finalOutputJSON = await runRealSideEffects(pythonCode, sandboxEnvs, finalOutputJSON, agent.id, tenantId, SCRIPT_TIMEOUT_MS, billOf());
         } else {
           console.log(`[Agent ${agent.id}] No write operations detected — skipping Phase 2.`);
         }
@@ -2325,8 +2318,8 @@ Respond: {"valid": boolean, "reason": "string if invalid"}`;
         return { output: finalOutputJSON, finalCode: pythonCode, signal: detectedSignal };
 
       } finally {
-        // Always clean up the sandbox
-        await sandbox.kill().catch(() => {});
+        // Always clean up the sandbox — after billing its time and what its script used.
+        await billAndKill(sandbox, sandboxStartedAt, billOf(), `e2b_attempt_${attempts}`);
       }
 
     } catch (error: any) {

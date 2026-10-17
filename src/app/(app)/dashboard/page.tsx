@@ -62,6 +62,8 @@ interface ActionPayload {
   requiredConnectors?: RequiredConnector[];
   /** The build conversation was moved into the new mission's chat. */
   movedToChat?: boolean;
+  /** What the build cost (real cost × markup; the failure rate when it failed). */
+  credits?: number;
 }
 /** How far a build's code steps have got: one entry per agent whose code is being written. */
 interface BuildProgress { roles: string[]; ready: string[] }
@@ -412,7 +414,7 @@ function CommandCenterPageInner() {
           missionId?: string; missionTitle?: string;
           agents?: AgentCard[]; orchestrationPattern?: string;
           requiredConnectors?: RequiredConnector[]; error?: string;
-          question?: string; progress?: BuildProgress; movedToChat?: boolean;
+          question?: string; progress?: BuildProgress; movedToChat?: boolean; credits?: number;
         };
 
         if (data.step) setBlueprintSteps(prev => ({ ...prev, [jobId]: data.step! }));
@@ -430,6 +432,7 @@ function CommandCenterPageInner() {
               agents: data.agents ?? [], orchestrationPattern: data.orchestrationPattern,
               requiredConnectors: data.requiredConnectors ?? [],
               movedToChat: data.movedToChat,
+              credits: data.credits,
             }};
             return updated;
           });
@@ -452,7 +455,7 @@ function CommandCenterPageInner() {
             const idx = updated.findIndex(m => m.action_payload?.type === 'building_blueprint' && m.action_payload.jobId === jobId);
             if (idx === -1) return prev;
             // The real reason, and the job, so "Try again" can rebuild it as it was asked for.
-            updated[idx] = { ...updated[idx], action_payload: { type: 'mission_create_error', error: data.error ?? 'The build stopped without saying why.', jobId }};
+            updated[idx] = { ...updated[idx], action_payload: { type: 'mission_create_error', error: data.error ?? 'The build stopped without saying why.', jobId, credits: data.credits }};
             return updated;
           });
         }
@@ -947,7 +950,9 @@ function CommandCenterPageInner() {
               }}><Glyph e="✨" /></div>
               <div>
                 <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>Mission Blueprint Ready</div>
-                <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', marginTop: 1 }}>{action.missionTitle}</div>
+                <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', marginTop: 1 }}>
+                  {action.missionTitle}{typeof action.credits === 'number' && action.credits > 0 ? ` · built for ${action.credits} credits` : ''}
+                </div>
               </div>
             </div>
             {action.orchestrationPattern && (
@@ -1204,6 +1209,9 @@ function CommandCenterPageInner() {
       <div style={{ ...card, borderColor: 'var(--red,var(--rose))' }} role="alert">
         <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--red,var(--rose))' }}><Glyph e="⚠️" /> Could not create the mission</div>
         {action.error && <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{action.error}</div>}
+        {typeof action.credits === 'number' && action.credits > 0 && (
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Charged {action.credits} credits, at the reduced rate for failed builds.</div>
+        )}
         <button style={{ ...ghostBtn, alignSelf: 'flex-start' }} disabled={applying} onClick={() => retryBuild(action.jobId, msgIndex)}>
           {applying ? 'Starting again…' : 'Try again'}
         </button>

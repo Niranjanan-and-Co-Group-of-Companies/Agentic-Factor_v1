@@ -1,4 +1,4 @@
-import { CHAT_MODELS, fetchClaudeMessages } from '@/lib/services/claude-chat';
+import { CHAT_MODELS, fetchClaudeMessages, plainSystem } from '@/lib/services/claude-chat';
 import { NextRequest } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
@@ -31,6 +31,8 @@ interface StreamResult {
   stopReason: string;
   inputTokens: number;
   outputTokens: number;
+  cacheWriteTokens?: number;
+  cacheReadTokens?: number;
 }
 
 async function parseAnthropicStream(
@@ -44,6 +46,8 @@ async function parseAnthropicStream(
   let stopReason = 'end_turn';
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheWriteTokens = 0;
+  let cacheReadTokens = 0;
   let fullText = '';
 
   while (true) {
@@ -64,11 +68,13 @@ async function parseAnthropicStream(
           content_block?: { type: string; id?: string; name?: string; [k: string]: unknown };
           delta?: { type: string; text?: string; partial_json?: string; stop_reason?: string };
           usage?: { output_tokens?: number };
-          message?: { usage?: { input_tokens?: number; output_tokens?: number } };
+          message?: { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } };
         };
 
         if (evt.type === 'message_start' && evt.message?.usage) {
           inputTokens = evt.message.usage.input_tokens ?? 0;
+          cacheWriteTokens = evt.message.usage.cache_creation_input_tokens ?? 0;
+          cacheReadTokens = evt.message.usage.cache_read_input_tokens ?? 0;
         }
         if (evt.type === 'content_block_start' && evt.content_block) {
           const idx = evt.index ?? contentBlocks.length;
@@ -102,7 +108,7 @@ async function parseAnthropicStream(
     }
   }
 
-  return { textContent: fullText, contentBlocks: contentBlocks.filter(Boolean), stopReason, inputTokens, outputTokens };
+  return { textContent: fullText, contentBlocks: contentBlocks.filter(Boolean), stopReason, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens };
 }
 
 // Strips ALL <action>...</action> blocks from text — used server-side to
@@ -265,7 +271,7 @@ export async function POST(
             const { callLLM } = await import('@/lib/services/llm-router');
             const fallback = await callLLM(
               [
-                { role: 'system', content: systemPrompt },
+                { role: 'system', content: plainSystem(systemPrompt) },
                 ...recentMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: String(m.content) })),
               ],
               { tier: 1, jsonMode: false, maxTokens: 4096, temperature: 0.5 },
@@ -283,6 +289,7 @@ export async function POST(
         }
 
         const { textContent, contentBlocks, stopReason, inputTokens, outputTokens } = streamed;
+        const cache = { cacheWriteTokens: streamed.cacheWriteTokens ?? 0, cacheReadTokens: streamed.cacheReadTokens ?? 0 };
 
         const toolBlocks = contentBlocks.filter(b => b.type === 'tool_use' && b.id && b.name);
 
@@ -297,10 +304,10 @@ export async function POST(
           }
           const cleanText = stripAllActionTags(textContent);
 
-          const credits = await calculateChatCreditCost(inputTokens, outputTokens, model);
+          const credits = await calculateChatCreditCost(inputTokens, outputTokens, model, cache);
           try {
             await deductCredits(tenantId, credits, 'chat_message', {
-              provider: 'anthropic', model, inputTokens, outputTokens,
+              provider: 'anthropic', model, inputTokens, outputTokens, ...cache, markup: 'chat', missionId,
             });
           } catch (deductErr) {
             console.error('[Chat] Credit deduction failed:', deductErr);
@@ -366,8 +373,8 @@ export async function POST(
 
         // Deduct planning call credits
         try {
-          const planningCost = await calculateChatCreditCost(inputTokens, outputTokens, model);
-          await deductCredits(tenantId, planningCost, 'chat_planning', { provider: 'anthropic', model, inputTokens, outputTokens });
+          const planningCost = await calculateChatCreditCost(inputTokens, outputTokens, model, cache);
+          await deductCredits(tenantId, planningCost, 'chat_planning', { provider: 'anthropic', model, inputTokens, outputTokens, ...cache, markup: 'chat', missionId });
         } catch (deductErr) {
           console.error('[Chat] Planning credit deduction failed:', deductErr);
         }

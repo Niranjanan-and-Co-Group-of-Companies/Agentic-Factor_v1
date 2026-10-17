@@ -83,6 +83,19 @@ def _record_deferred(action: str, params: Any) -> None:
         pass
 
 
+# What this script used of the platform's paid services (app actions, web searches). The platform
+# reads it after the script has run and bills it at its real cost.
+_USAGE = {"composioCalls": 0, "tavilyCredits": 0, "serpapiSearches": 0}
+
+
+def _count_usage(kind: str, n: int = 1) -> None:
+    _USAGE[kind] = _USAGE.get(kind, 0) + n
+
+
+# Reads that are sent as POST: a preview must still run them (a search finds nothing otherwise).
+_READ_POST_URLS = ("https://api.tavily.com/search",)
+
+
 def _request(
     method: str,
     url: str,
@@ -103,7 +116,7 @@ def _request(
     # READ operations (GET) still execute normally so data fetching works
     # This prevents side effects (email sending, sheet creation) during retry attempts
     dry_run = os.environ.get("AF_DRY_RUN", "0") == "1"
-    if dry_run and method.upper() in ("POST", "PUT", "PATCH", "DELETE"):
+    if dry_run and method.upper() in ("POST", "PUT", "PATCH", "DELETE") and not url.startswith(_READ_POST_URLS):
         sys.stderr.write(f"[DRY_RUN] Skipped {method} {url} (side effects deferred to final run)\n")
         _record_deferred(f"{method.upper()} {url}", json_data if json_data is not None else params)
         # Return realistic mock responses based on the URL/provider
@@ -156,6 +169,10 @@ def _request(
                 raise APIError(resp.status_code, str(err_body), provider)
             
             # Success
+            if provider == "tavily":
+                _count_usage("tavilyCredits", 2 if (json_data or {}).get("search_depth") == "advanced" else 1)
+            elif provider == "serpapi":
+                _count_usage("serpapiSearches")
             try:
                 return resp.json()
             except Exception:
@@ -715,6 +732,7 @@ def _post_retrying(url: str, headers: Dict[str, str], body: Any, timeout: int = 
     resp = None
     for attempt in range(attempts):
         resp = requests.post(url, headers=headers, json=body, timeout=timeout)
+        _count_usage("composioCalls")
         if attempt == attempts - 1 or not _is_rate_limited(resp):
             return resp
         try:

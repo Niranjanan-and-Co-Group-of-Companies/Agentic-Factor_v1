@@ -26,8 +26,11 @@ interface LLMResponse {
   provider: string;
   model: string;        // Actual model used (for credit billing)
   tokensUsed: number;
-  inputTokens?: number;  // For token-based billing
+  inputTokens?: number;  // For token-based billing (uncached input)
   outputTokens?: number; // For token-based billing
+  /** Prompt tokens written to / read from the prompt cache, billed at their own prices. */
+  cacheWriteTokens?: number;
+  cacheReadTokens?: number;
   /** The reply stopped at the output limit: it is incomplete. */
   truncated?: boolean;
 }
@@ -39,9 +42,9 @@ interface LLMResponse {
 const MODEL_CHAINS: Record<string, Record<number, string[]>> = {
   anthropic: {
     // Claude Sonnet = Priority 1 in Tier 1
-    1: ['claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
-    2: ['claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
-    3: ['claude-haiku-4-5-20251001'],
+    1: ['claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+    2: ['claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+    3: ['claude-haiku-5-5', 'claude-haiku-4-5-20251001'],
   },
   gemini: {
     1: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
@@ -167,7 +170,7 @@ export const JOB_MODELS: Record<LLMJob, string[]> = {
 const JOB_TIER: Record<LLMJob, 1 | 2 | 3> = { build: 1, light: 3, escalate: 1 };
 
 /** What one model call used. */
-export interface LLMUsage { model: string; inputTokens: number; outputTokens: number }
+export interface LLMUsage { model: string; inputTokens: number; outputTokens: number; cacheWriteTokens?: number; cacheReadTokens?: number }
 const usageScope = new AsyncLocalStorage<LLMUsage[]>();
 
 /** Runs `fn` and returns, with its result, every model call it made (model and tokens) — e.g. one build step's cost. */
@@ -177,14 +180,31 @@ export async function withUsage<T>(fn: () => Promise<T>): Promise<{ result: T; u
   return { result, usage };
 }
 
+/**
+ * Runs `fn` and hands every model call it made to `record` — also when `fn` throws, since a failed
+ * step's calls cost the same. A failure of `record` never hides `fn`'s own result or error.
+ */
+export async function recordingUsage<T>(fn: () => Promise<T>, record: (usage: LLMUsage[]) => Promise<void>): Promise<T> {
+  const usage: LLMUsage[] = [];
+  try {
+    return await usageScope.run(usage, fn);
+  } finally {
+    if (usage.length > 0) await record(usage).catch(err => console.warn('[LLM] Could not record usage:', err));
+  }
+}
+
+type ModelTotals = { calls: number; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number };
+
 /** Calls and tokens per model, small enough to keep with a job's progress. */
-export function usageByModel(usage: LLMUsage[]): Record<string, { calls: number; inputTokens: number; outputTokens: number }> {
-  const out: Record<string, { calls: number; inputTokens: number; outputTokens: number }> = {};
+export function usageByModel(usage: LLMUsage[]): Record<string, ModelTotals> {
+  const out: Record<string, ModelTotals> = {};
   for (const u of usage) {
-    const m = (out[u.model] ??= { calls: 0, inputTokens: 0, outputTokens: 0 });
+    const m = (out[u.model] ??= { calls: 0, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 });
     m.calls++;
     m.inputTokens += u.inputTokens;
     m.outputTokens += u.outputTokens;
+    m.cacheWriteTokens += u.cacheWriteTokens ?? 0;
+    m.cacheReadTokens += u.cacheReadTokens ?? 0;
   }
   return out;
 }
@@ -239,7 +259,10 @@ export async function callLLM(
   if (!result) {
     throw new Error('No LLM provider available. All models in all providers failed. Check API keys and model availability.');
   }
-  usageScope.getStore()?.push({ model: result.model, inputTokens: result.inputTokens ?? 0, outputTokens: result.outputTokens ?? 0 });
+  usageScope.getStore()?.push({
+    model: result.model, inputTokens: result.inputTokens ?? 0, outputTokens: result.outputTokens ?? 0,
+    cacheWriteTokens: result.cacheWriteTokens ?? 0, cacheReadTokens: result.cacheReadTokens ?? 0,
+  });
 
   // Record successful usage
   if (budgetContext && result.tokensUsed > 0) {
@@ -257,10 +280,11 @@ export async function callLLM(
 
 // ── Anthropic with Fallback Chain ──
 // Claude's latest models lead each chain; the configured chain (and then Gemini, then OpenAI) stays
-// as the fallback. Tier 1 is code and blueprint generation: paid plans get the strongest model.
+// as the fallback. Opus is not a default for any tier: it is the 'escalate' job, for code still
+// failing after two fixes. Haiku 5.5 does the small side jobs at a tenth of Haiku 4.5's price.
 const PREFERRED_CLAUDE: Record<'premium' | 'standard', Record<number, string[]>> = {
-  premium:  { 1: ['claude-opus-5-5', 'claude-sonnet-5'], 2: ['claude-sonnet-5'], 3: [] },
-  standard: { 1: ['claude-sonnet-5'], 2: ['claude-sonnet-5'], 3: [] },
+  premium:  { 1: ['claude-sonnet-5-5', 'claude-sonnet-5'], 2: ['claude-sonnet-5-5', 'claude-sonnet-5'], 3: ['claude-haiku-5-5'] },
+  standard: { 1: ['claude-sonnet-5-5', 'claude-sonnet-5'], 2: ['claude-sonnet-5-5', 'claude-sonnet-5'], 3: ['claude-haiku-5-5'] },
 };
 
 const planCache = new Map<string, { paid: boolean; at: number }>();
@@ -577,14 +601,16 @@ async function callAnthropicDirect(messages: LLMMessage[], temperature: number, 
   if (data.stop_reason === 'max_tokens') console.warn(`[LLM Router] ${modelName} hit max_tokens (${maxTokens}) — its answer is cut off.`);
   const inputTokens = data.usage?.input_tokens || 0;
   const outputTokens = data.usage?.output_tokens || 0;
-  const tokensUsed = inputTokens + outputTokens;
+  const cacheWriteTokens = data.usage?.cache_creation_input_tokens || 0;
+  const cacheReadTokens = data.usage?.cache_read_input_tokens || 0;
+  const tokensUsed = inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens;
 
   // Post-process: extract JSON if Claude wraps it in markdown code blocks
   if (jsonMode) {
     content = extractJsonFromResponse(content);
   }
 
-  return { content, provider: 'anthropic', model: modelName, tokensUsed, inputTokens, outputTokens, truncated: data.stop_reason === 'max_tokens' };
+  return { content, provider: 'anthropic', model: modelName, tokensUsed, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, truncated: data.stop_reason === 'max_tokens' };
 }
 
 /**

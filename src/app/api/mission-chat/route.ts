@@ -248,12 +248,11 @@ You MUST respond in valid JSON format matching this schema:
     // ── Deduct credits proportionally after LLM responds ──
     if (!isSilentCheckin) {
       const { calculateChatCreditCost, deductCredits } = await import('@/lib/middleware/billing');
-      const cost = await calculateChatCreditCost(
-        response.inputTokens ?? 0,
-        response.outputTokens ?? 0,
-        response.model ?? 'claude-sonnet-4-6',
-      );
-      deductCredits(tenantId, cost, 'mission_chat').catch(console.error);
+      const cache = { cacheWriteTokens: response.cacheWriteTokens ?? 0, cacheReadTokens: response.cacheReadTokens ?? 0 };
+      const cost = await calculateChatCreditCost(response.inputTokens ?? 0, response.outputTokens ?? 0, response.model, cache);
+      deductCredits(tenantId, cost, 'mission_chat', {
+        provider: response.provider, model: response.model, inputTokens: response.inputTokens, outputTokens: response.outputTokens, ...cache, markup: 'chat',
+      }).catch(console.error);
     }
 
     let parsedResponse: any;

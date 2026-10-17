@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { withPromptCache } from '@/lib/services/claude-chat';
 import { inngest } from './client';
 import { createServiceClient } from '@/lib/supabase/server';
 import type { ToolMeta } from '@/lib/services/tool-registry';
@@ -106,9 +107,11 @@ export const executeChatAgent = inngest.createFunction(
       // ── Execute tool calls for this round ────────────────────────────────
       const toolResults = await step.run(`tools-round-${round}`, async () => {
         const { executeTool, describeToolCall } = await import('@/lib/services/tool-registry');
-        const { checkCredits, deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
+        const { checkCredits, deductCredits, creditsForCost } = await import('@/lib/middleware/billing');
+        const { COMPOSIO_USD_PER_CALL } = await import('@/lib/services/prices');
         const supabase = createServiceClient();
         const results: Array<{ type: string; tool_use_id: string; content: string }> = [];
+        let appActions = 0;
 
         for (const block of toolBlocks) {
           const meta = toolMetaMap.get(block.name!);
@@ -119,7 +122,7 @@ export const executeChatAgent = inngest.createFunction(
           const label = describeToolCall(block.name!, input);
 
           // Credit gate per tool call
-          const creditCheck = await checkCredits(tenantId, CREDIT_COSTS.tool_call);
+          const creditCheck = await checkCredits(tenantId, 1);
           if (!creditCheck.allowed) {
             await supabase.from('agent_execution_events').insert({
               session_id: executionId, tenant_id: tenantId, mission_id: missionId, chat_id: chatId,
@@ -161,14 +164,18 @@ export const executeChatAgent = inngest.createFunction(
             payload: { name: block.name, provider: providerSlug, displayName, status: isDone ? 'done' : 'error', summary: result.summary, logoUrl },
           });
 
-          // Deduct credits (non-fatal if fails)
-          deductCredits(tenantId, CREDIT_COSTS.tool_call, `tool_call:${block.name!}`, {
-            provider: providerSlug, model: providerSlug,
-          }).catch(() => {});
+          if (providerSlug !== 'system') appActions++;
 
           results.push({ type: 'tool_result', tool_use_id: block.id!, content: result.content });
         }
 
+        // The round's app actions, billed together at their real cost × 4 (non-fatal if it fails).
+        if (appActions > 0) {
+          const realCostUsd = appActions * COMPOSIO_USD_PER_CALL;
+          await creditsForCost(realCostUsd, 'work')
+            .then(credits => deductCredits(tenantId, credits, 'tool_calls', { provider: 'composio', model: `${appActions} app action${appActions === 1 ? '' : 's'}`, realCostUsd, markup: 'work', missionId }))
+            .catch(() => {});
+        }
         return results;
       });
 
@@ -201,14 +208,15 @@ export const executeChatAgent = inngest.createFunction(
             'x-api-key': apiKey,
             'anthropic-version': '2023-06-01',
           },
-          body: JSON.stringify({
+          // Cached: the fixed parts of the prompt and the conversation so far are re-read every round.
+          body: JSON.stringify(withPromptCache({
             model,
             max_tokens: 8192,
             stream: false,
             system: systemPrompt,
             tools,
             messages,
-          }),
+          })),
         });
 
         if (!response.ok) {
@@ -220,13 +228,14 @@ export const executeChatAgent = inngest.createFunction(
         const data = await response.json() as {
           content: SerializedContentBlock[];
           stop_reason: string;
-          usage: { input_tokens: number; output_tokens: number };
+          usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
         };
 
-        // Deduct LLM credits (non-fatal)
-        calculateChatCreditCost(data.usage.input_tokens, data.usage.output_tokens, model)
+        // Deduct LLM credits at real cost × 3 (non-fatal)
+        const cache = { cacheWriteTokens: data.usage.cache_creation_input_tokens ?? 0, cacheReadTokens: data.usage.cache_read_input_tokens ?? 0 };
+        calculateChatCreditCost(data.usage.input_tokens, data.usage.output_tokens, model, cache)
           .then(cost => deductCredits(tenantId, cost, 'chat_message_agent', {
-            provider: 'anthropic', model, inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens,
+            provider: 'anthropic', model, inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens, ...cache, markup: 'chat', missionId,
           }))
           .catch(() => {});
 

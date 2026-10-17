@@ -30,6 +30,8 @@ export const editBlueprintBackground = inngest.createFunction(
     onFailure: async ({ event, error }: { event: { data: { event?: EditEvent } }; error: Error }) => {
       const d = event.data.event?.data;
       if (!d) return;
+      const { settleFailure } = await import('@/lib/middleware/billing');
+      await settleFailure(d.tenantId, { jobId: d.jobId }).catch(() => {});
       await createServiceClient().from('agent_execution_events').insert({
         session_id: d.jobId, tenant_id: d.tenantId, mission_id: d.missionId, chat_id: d.missionId,
         event_type: 'blueprint_error', payload: { message: error?.message || 'Blueprint update failed — please try again.' },
@@ -48,6 +50,11 @@ export const editBlueprintBackground = inngest.createFunction(
       } catch { /* non-fatal — the page falls back to polling */ }
     };
     const emitStep = (stepName: string, label: string) => emit('blueprint_step', { step: stepName, label });
+    // Each step pays for its own model calls (real cost × 4) as it finishes; a failed update is billed at 1.75×.
+    const { chargeJobStep } = await import('@/lib/services/build-jobs');
+    const { recordingUsage } = await import('@/lib/services/llm-router');
+    const charged = <T,>(stepName: string, fn: () => Promise<T>) =>
+      recordingUsage(fn, usage => chargeJobStep(tenantId, jobId, `update:${stepName}`, usage, missionId).then(() => {}));
 
     try {
       const current = await step.run('load-mission', async () => {
@@ -59,18 +66,18 @@ export const editBlueprintBackground = inngest.createFunction(
 
       const draft = await step.run('draft-edit', async () => {
         const { draftBlueprintEdit } = await import('@/lib/services/intake');
-        return draftBlueprintEdit(current.mission_json, changeRequest, tenantId, connectedProviders, emitStep);
+        return charged('draft', () => draftBlueprintEdit(current.mission_json, changeRequest, tenantId, connectedProviders, emitStep));
       });
 
       // Each changed agent's script is written in its own call, all in parallel.
       const rewritten = await step.run('rewrite-scripts', async () => {
         const { rewriteAgentScripts } = await import('@/lib/services/intake');
-        return rewriteAgentScripts(current.mission_json, draft, changeRequest, tenantId, emitStep);
+        return charged('code', () => rewriteAgentScripts(current.mission_json, draft, changeRequest, tenantId, emitStep));
       });
 
       const updated = await step.run('validate-edit', async () => {
         const { finalizeBlueprintEdit } = await import('@/lib/services/intake');
-        return finalizeBlueprintEdit(current.mission_json, rewritten, tenantId, connectedProviders, emitStep);
+        return charged('checks', () => finalizeBlueprintEdit(current.mission_json, rewritten, tenantId, connectedProviders, emitStep));
       });
 
       await step.run('save', async () => {
@@ -81,10 +88,8 @@ export const editBlueprintBackground = inngest.createFunction(
           .update({ mission_json: updated as unknown as Record<string, unknown>, title, updated_at: new Date().toISOString() })
           .eq('id', missionId).eq('tenant_id', tenantId);
         if (error) throw new Error('Failed to save updated blueprint');
-        await emit('blueprint_completed', { title, versionNumber });
-
-        const { deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
-        await deductCredits(tenantId, CREDIT_COSTS.llm_call_pro * 3, 'mission_update').catch(() => {});
+        const { creditsChargedFor } = await import('@/lib/middleware/billing');
+        await emit('blueprint_completed', { title, versionNumber, credits: await creditsChargedFor(tenantId, { jobId }) });
         const { data: perms } = await supabase.from('tenant_permissions').select('provider').eq('tenant_id', tenantId);
         const { refreshMissionTools } = await import('@/lib/services/tool-registry');
         await refreshMissionTools(tenantId, missionId, (perms ?? []).map((r: { provider: string }) => r.provider)).catch(() => {});
@@ -92,7 +97,9 @@ export const editBlueprintBackground = inngest.createFunction(
 
       return { success: true, missionId, versionNumber };
     } catch (err) {
-      await emit('blueprint_error', { message: (err as Error).message ?? 'Blueprint update failed' });
+      const { settleFailure } = await import('@/lib/middleware/billing');
+      const { charged: credits } = await settleFailure(tenantId, { jobId }).catch(() => ({ charged: undefined }));
+      await emit('blueprint_error', { message: (err as Error).message ?? 'Blueprint update failed', credits });
       throw err;
     }
   },

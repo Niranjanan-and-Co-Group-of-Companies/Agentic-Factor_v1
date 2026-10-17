@@ -413,12 +413,9 @@ export const executeMissionBackground = inngest.createFunction(
               { role: 'system', content: `You are the Mission Supervisor. Based on the previous agent's output, decide which agent should run next. If the goal is fully achieved, return null. Return JSON: {"nextAgentId": "uuid-here" | null, "reasoning": "why"}` },
               { role: 'user', content: `Mission: ${mission.title}\n\nAvailable Agents:\n${JSON.stringify(availableAgents, null, 2)}\n\nPrevious Agent Output:\n${output}` }
             ], { jsonMode: true, tier: 2 });
-            // Bill supervisor routing call (token-proportional)
-            try {
-              const { deductCredits, calculateLLMCreditCost } = await import('@/lib/middleware/billing');
-              const superCost = await calculateLLMCreditCost(decision.model, decision.inputTokens ?? 0, decision.outputTokens ?? 0);
-              await deductCredits(tenantId, superCost, `supervisor_routing:${agentId}`);
-            } catch { /* non-fatal */ }
+            // Bill the supervisor's routing call at real cost × 4, tagged with the run.
+            const { chargeModelCall } = await import('@/lib/services/run-billing');
+            await chargeModelCall({ tenantId, runId, missionId, agentRole: 'supervisor' }, 'supervisor_routing', decision).catch(() => { /* non-fatal */ });
             return JSON.parse(decision.content);
           });
           currentAgentId = nextAgent.nextAgentId;
@@ -601,6 +598,10 @@ export const executeMissionBackground = inngest.createFunction(
         }).eq('id', runId);
         if (runErr) console.warn('[Inngest] Failed to update mission_runs (non-fatal):', runErr.message);
 
+        // A failed run is billed at the failure rate (1.75×): what it was charged is refunded down to it.
+        const { settleFailure } = await import('@/lib/middleware/billing');
+        await settleFailure(tenantId, { runId }).catch(err => console.warn('[Inngest] Failure-rate settlement failed:', err));
+
         try {
           const { notifyMissionStatus } = await import('@/lib/services/notifications');
           await notifyMissionStatus(tenantId, mission.title, missionId, 'failed');
@@ -646,14 +647,20 @@ export const generateBlueprintBackground = inngest.createFunction(
       const { jobId, tenantId } = (event.data.event?.data ?? {}) as { jobId?: string; tenantId?: string };
       if (!jobId || !tenantId) return;
       const { reportBuildFailure } = await import('@/lib/services/build-jobs');
-      await reportBuildFailure(createServiceClient(), tenantId, jobId, error?.message ?? '', error?.name);
+      const { settleFailure } = await import('@/lib/middleware/billing');
+      const { charged } = await settleFailure(tenantId, { jobId }).catch(() => ({ charged: undefined }));
+      await reportBuildFailure(createServiceClient(), tenantId, jobId, error?.message ?? '', error?.name, charged);
     },
   },
   async ({ event, step }) => {
     const { jobId, intent, tenantId, files, priorQuestions, sourceRequest } = event.data;
     const supabase = createServiceClient();
-    const { recordJobStatus } = await import('@/lib/services/build-jobs');
+    const { recordJobStatus, chargeJobStep } = await import('@/lib/services/build-jobs');
     const updateJobStatus = (status: string, data: Record<string, any> = {}) => recordJobStatus(supabase, tenantId, jobId, status, data);
+    // Each step pays for its own model calls (real cost × 4) as it finishes — also when it fails.
+    const { recordingUsage } = await import('@/lib/services/llm-router');
+    const charged = <T,>(stepName: string, fn: () => Promise<T>) =>
+      recordingUsage(fn, usage => chargeJobStep(tenantId, jobId, stepName, usage).then(() => {}));
     const { withCustomerWords } = await import('@/lib/utils/source-request');
     const request = withCustomerWords(intent, sourceRequest);
 
@@ -685,12 +692,8 @@ export const generateBlueprintBackground = inngest.createFunction(
       const designed = await step.run('design-mission', async () => {
         await updateJobStatus('processing', { step: '🤖 AI architect is designing your agent team...' });
         const { designMission } = await import('@/lib/services/intake');
-        const { withUsage, usageByModel } = await import('@/lib/services/llm-router');
-        const { result, usage } = await withUsage(() => designMission(request, tenantId, files, { priorQuestions }));
-        if (result.isDiscovery) {
-          await updateJobStatus('processing', { step: '💬 The architect has a question', usage: usageByModel(usage) });
-          return { type: 'discovery' as const, question: result.question };
-        }
+        const result = await charged('design', () => designMission(request, tenantId, files, { priorQuestions }));
+        if (result.isDiscovery) return { type: 'discovery' as const, question: result.question };
 
         const { design } = result;
         const agents = design.llmOutput.agents;
@@ -699,7 +702,6 @@ export const generateBlueprintBackground = inngest.createFunction(
         await updateJobStatus('processing', {
           step: `📐 ${agents.length}-agent pipeline designed: ${roles}${extra}`,
           codeRoles: design.plans.map(p => agents.find(a => a.agentIndex === p.agentIndex)?.role ?? `Agent ${p.agentIndex + 1}`),
-          usage: usageByModel(usage),
         });
         return { type: 'design' as const, design };
       });
@@ -730,9 +732,8 @@ export const generateBlueprintBackground = inngest.createFunction(
           const role = roleOf(plan.agentIndex);
           await updateJobStatus('processing', { step: `✍️ Writing code for ${role}…`, writing: role });
           const { writeAgentScript } = await import('@/lib/services/intake');
-          const { withUsage, usageByModel } = await import('@/lib/services/llm-router');
-          const { result: script, usage } = await withUsage(() => writeAgentScript(design, plan.agentIndex, request, tenantId, files));
-          await updateJobStatus('processing', { step: `✅ Code ready for ${role}`, codeReady: role, usage: usageByModel(usage) });
+          const script = await charged(`code:${role}`, () => writeAgentScript(design, plan.agentIndex, request, tenantId, files));
+          await updateJobStatus('processing', { step: `✅ Code ready for ${role}`, codeReady: role });
           return script;
         }).then(script => { scripts[plan.agentIndex] = script; })
       ));
@@ -741,10 +742,7 @@ export const generateBlueprintBackground = inngest.createFunction(
       const checked = await step.run('check-mission', async () => {
         await updateJobStatus('processing', { step: '🔎 Checking actions and settings against each app…' });
         const { checkMission } = await import('@/lib/services/intake');
-        const { withUsage, usageByModel } = await import('@/lib/services/llm-router');
-        const { result, usage } = await withUsage(() => checkMission(design, scripts, tenantId));
-        await updateJobStatus('processing', { step: '🔎 Actions and settings checked', usage: usageByModel(usage) });
-        return result;
+        return charged('checks', () => checkMission(design, scripts, tenantId));
       });
 
       // ── Step 5: Persist + emit completion data ──
@@ -791,7 +789,9 @@ export const generateBlueprintBackground = inngest.createFunction(
         // The conversation that built it moves into the mission's chat; Command Center points there.
         const { moveBuildThread } = await import('@/lib/services/build-jobs');
         const chatId = await moveBuildThread(supabase, tenantId, jobId, { id: saved.id, title: saved.title, agentCount: mission.agents.length });
+        const { creditsChargedFor } = await import('@/lib/middleware/billing');
         const created = {
+          credits: await creditsChargedFor(tenantId, { jobId }),
           missionId: saved.id,
           missionTitle: saved.title,
           agents: agentCards,
@@ -807,13 +807,6 @@ export const generateBlueprintBackground = inngest.createFunction(
         await updateJobStatus('completed', created);
       });
 
-      await step.run('deduct-credit', async () => {
-        // Blueprint generation makes 3 LLM calls: main generation + action name validation (4.6)
-        // + parameter validation (4.7). Charge all three at pro tier (12 × 3 = 36 credits).
-        const { deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
-        await deductCredits(tenantId, CREDIT_COSTS.llm_call_pro * 3, 'blueprint_generation').catch(() => {});
-      });
-
       return { success: true, jobId, type: 'blueprint' };
 
     } catch (error: any) {
@@ -821,8 +814,11 @@ export const generateBlueprintBackground = inngest.createFunction(
       const isCircuitOpen = rawMsg.includes('Circuit breaker OPEN') || rawMsg.includes('Circuit is OPEN');
 
       await step.run('save-error', async () => {
+        // A failed build is billed at the failure rate (1.75×): what its steps were charged is refunded down to it.
         const { reportBuildFailure } = await import('@/lib/services/build-jobs');
-        await reportBuildFailure(supabase, tenantId, jobId, rawMsg, error?.name);
+        const { settleFailure } = await import('@/lib/middleware/billing');
+        const { charged } = await settleFailure(tenantId, { jobId }).catch(() => ({ charged: undefined }));
+        await reportBuildFailure(supabase, tenantId, jobId, rawMsg, error?.name, charged);
       });
 
       // Circuit-open errors must not be retried — each retry re-trips the circuit.

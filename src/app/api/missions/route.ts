@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
 
     // ── Phase 4.2: Edit Blueprint via Chat ──
     if (action === 'edit') {
-      const { checkCredits, deductCredits, CREDIT_COSTS } = await import('@/lib/middleware/billing');
+      const { checkCredits } = await import('@/lib/middleware/billing');
       const creditCheck = await checkCredits(tenantId, 1);
       if (!creditCheck.allowed) {
         return NextResponse.json({ error: creditCheck.reason }, { status: 402 });
@@ -82,10 +82,8 @@ export async function POST(request: NextRequest) {
       const { blueprint, instruction } = EditBlueprintRequest.parse(body);
       const parsedBlueprint = MissionSchema.parse(blueprint); // validate structure
       
-      const updatedMission = await editBlueprint(parsedBlueprint as Mission, instruction);
-      
-      // Deduct 1 credit for the LLM generation
-      try { await deductCredits(tenantId, CREDIT_COSTS.llm_call_pro, 'blueprint_edit'); } catch { /* non-fatal for blueprint edit */ }
+      // Billed at what its model calls really cost (× 4; × 1.75 if it fails).
+      const updatedMission = await billedAtRealCost(tenantId, 'edit', () => editBlueprint(parsedBlueprint as Mission, instruction));
       
       return NextResponse.json({
         success: true,
@@ -197,7 +195,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: legacyCreditCheck.reason }, { status: 402 });
     }
     const { intent } = GenerateBlueprintRequest.parse(body);
-    const { mission } = await generateMissionJSON(intent, tenantId);
+    const { mission } = await billedAtRealCost(tenantId, 'create', () => generateMissionJSON(intent, tenantId));
     if (!mission) {
       return NextResponse.json({ error: 'Mission generation failed' }, { status: 500 });
     }
@@ -256,5 +254,19 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('[GET /api/missions] Error:', error);
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
+  }
+}
+
+/** Runs blueprint work and bills its model calls at real cost × 4 — or × 1.75 when it fails. */
+async function billedAtRealCost<T>(tenantId: string, label: string, work: () => Promise<T>): Promise<T> {
+  const jobId = crypto.randomUUID();
+  const { recordingUsage } = await import('@/lib/services/llm-router');
+  const { chargeJobStep } = await import('@/lib/services/build-jobs');
+  try {
+    return await recordingUsage(work, usage => chargeJobStep(tenantId, jobId, label, usage).then(() => {}));
+  } catch (err) {
+    const { settleFailure } = await import('@/lib/middleware/billing');
+    await settleFailure(tenantId, { jobId }).catch(() => {});
+    throw err;
   }
 }

@@ -55,7 +55,16 @@ export function runHeadline(view: LiveRunView, nowMs: number): string {
   }
 }
 
+/** The run's time and, once it has cost something, its credits ("1m 20s · 42 credits"). */
 function elapsedLabel(view: LiveRunView, nowMs: number): string {
+  const time = timeLabel(view, nowMs);
+  const credits = view.run?.credits;
+  if (!credits) return time;
+  const cost = `${credits} credit${credits === 1 ? '' : 's'}${view.run?.status === 'failed' ? ' (failure rate)' : ''}`;
+  return time ? `${time} · ${cost}` : cost;
+}
+
+function timeLabel(view: LiveRunView, nowMs: number): string {
   const run = view.run!;
   if (isFinished(run.status)) {
     return fmtDuration(run.durationMs ?? (run.completedAt ? Date.parse(run.completedAt) - Date.parse(run.startedAt) : null));

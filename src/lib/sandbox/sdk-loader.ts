@@ -79,6 +79,13 @@ def _record_deferred(action: str, params: Any) -> None:
         pass
 
 
+# What this script used of the platform's paid services (app actions, web searches). The platform
+# reads it after the script has run and bills it at its real cost.
+_USAGE = {"composioCalls": 0, "tavilyCredits": 0, "serpapiSearches": 0}
+
+def _count_usage(kind, n=1):
+    _USAGE[kind] = _USAGE.get(kind, 0) + n
+
 def _request(method, url, token=None, api_key=None, headers=None, json_data=None, data=None, params=None, retries=2, timeout=30, provider=""):
     _headers = {"Content-Type": "application/json"}
     if token: _headers["Authorization"] = f"Bearer {token}"
@@ -95,6 +102,10 @@ def _request(method, url, token=None, api_key=None, headers=None, json_data=None
                 try: err_body = resp.json()
                 except: err_body = resp.text
                 raise APIError(resp.status_code, str(err_body), provider)
+            if provider == "tavily":
+                _count_usage("tavilyCredits", 2 if (json_data or {}).get("search_depth") == "advanced" else 1)
+            elif provider == "serpapi":
+                _count_usage("serpapiSearches")
             try: return resp.json()
             except: return {"text": resp.text, "status": resp.status_code}
         except requests.exceptions.Timeout:
@@ -530,6 +541,7 @@ def _post_retrying(url: str, headers: Dict[str, str], body: Any, timeout: int = 
     resp = None
     for attempt in range(attempts):
         resp = requests.post(url, headers=headers, json=body, timeout=timeout)
+        _count_usage("composioCalls")
         if attempt == attempts - 1 or not _is_rate_limited(resp):
             return resp
         try:

@@ -101,8 +101,9 @@ export async function POST(request: NextRequest) {
 
   const credits = await calculateUsdCreditCost(image.costUsd);
   // actionType ends with ":<agent role>" so the run detail attributes it to this agent.
-  await deductCredits(claims.tenantId, credits, `sandbox_image:${claims.agentRole}`, { provider: 'image', model: image.model })
-    .catch(err => console.error('[sandbox/image] credit deduction failed:', err));
+  await deductCredits(claims.tenantId, credits, `sandbox_image:${claims.agentRole}`, {
+    provider: 'image', model: image.model, realCostUsd: image.costUsd, markup: 'work', runId: claims.runId, missionId: claims.missionId,
+  }).catch(err => console.error('[sandbox/image] credit deduction failed:', err));
 
   const ext = image.mimeType.includes('jpeg') ? 'jpg' : image.mimeType.includes('webp') ? 'webp' : 'png';
   const path = `${claims.tenantId}/${claims.runId ?? 'no-run'}/${requestHash}.${ext}`;

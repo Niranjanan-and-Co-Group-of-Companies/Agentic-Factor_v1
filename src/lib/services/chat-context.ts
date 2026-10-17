@@ -12,6 +12,7 @@
  *   8. Operating principles + current date/time
  */
 
+import { CACHE_SPLIT } from './claude-chat';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getMemoryContext } from '@/lib/services/agent-memory';
 import { cleanTenantFacts } from '@/lib/services/tenant-memory';
@@ -224,27 +225,11 @@ APPROVAL RULES:
     timeStyle: 'short',
   });
 
-  const systemPrompt = `You are the AI agent built into "${missionTitle}" on AgenticFactor.
+  // Three parts, so the fixed parts are cached between turns: the rules (the same for every mission),
+  // this mission's own details, then what changes from turn to turn (status, runs, approvals, time).
+  const systemPrompt = `You are the AI agent built into a mission on AgenticFactor — the mission is described below.
 You are not a general-purpose assistant — you are this mission's dedicated agent.
 Your job is to ACCOMPLISH THINGS, not just give advice. If you can do it with your tools, do it.
-
-MISSION: "${missionTitle}"
-STATUS: ${missionStatus}
-MISSION ID: ${missionId}
-
-AGENTS IN THIS MISSION:
-${agentsSummary}${agentPrompts}
-
-CONNECTED SERVICES: ${connectedProviders.length > 0 ? connectedProviders.join(', ') : 'none connected yet'}
-${missingConnectors.length > 0 ? `STILL NEEDED: ${missingConnectors.join(', ')} — suggest connecting these` : ''}
-
-${toolsBlock ? toolsBlock + '\n' : ''}
-${profileBlock ? profileBlock + '\n\n' : ''}${episodesBlock ? episodesBlock + '\n\n' : ''}
-${approvalBlock}RECENT RUNS:
-${runsSummary}
-${versionHistory}
-SCHEDULE: ${scheduleInfo}
-${tenantFacts}
 
 OPERATING PRINCIPLES:
 - LANGUAGE: Detect the language the customer writes or speaks in and always reply in that exact same language. Never switch languages unless the customer does. Hindi → Hindi. Tamil → Tamil. Same for every language.
@@ -286,7 +271,7 @@ UPDATE_MISSION RULES:
 
 RUN_SELECTIVE RULES:
 - Emit run_selective when the customer asks to run only specific agents (e.g. "run only the code writer", "run agents 2 and 3", "just run the test writer")
-- Use the agent IDs from the AGENTS IN THIS MISSION list above — they are shown as [id:xxx]
+- Use the agent IDs from the AGENTS IN THIS MISSION list below — they are shown as [id:xxx]
 - Use executionMode "parallel" when the customer wants agents to run simultaneously ("at the same time", "together", "in parallel")
 - Use executionMode "sequential" when order matters or not specified ("then", "after", one by one)
 - The "label" must describe exactly what will run: "Run Code Writer then Test Writer" or "Run Code Writer + Test Writer simultaneously"
@@ -297,6 +282,23 @@ REVERT_VERSION RULES:
 - The versionNumber must be an integer — use the version number from version history if shown, otherwise use the most recent version (current − 1)
 - Label: "Revert to version N" or "Undo last change"
 - After reverting, the system saves the current state as a new version so the revert itself is undoable
+${CACHE_SPLIT}MISSION: "${missionTitle}"
+MISSION ID: ${missionId}
+
+AGENTS IN THIS MISSION:
+${agentsSummary}${agentPrompts}
+
+${toolsBlock ? toolsBlock + '\n' : ''}
+${profileBlock ? profileBlock + '\n\n' : ''}${episodesBlock ? episodesBlock + '\n\n' : ''}${CACHE_SPLIT}STATUS: ${missionStatus}
+
+CONNECTED SERVICES: ${connectedProviders.length > 0 ? connectedProviders.join(', ') : 'none connected yet'}
+${missingConnectors.length > 0 ? `STILL NEEDED: ${missingConnectors.join(', ')} — suggest connecting these` : ''}
+
+${approvalBlock}RECENT RUNS:
+${runsSummary}
+${versionHistory}
+SCHEDULE: ${scheduleInfo}
+${tenantFacts}
 
 TODAY: ${now}`;
 

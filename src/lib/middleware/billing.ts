@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { getUsdToInr } from '@/lib/services/fx-rate';
+import { tokenCostUsd } from '@/lib/services/prices';
 
 // ============================================================
 // Billing Enforcement — Credit-Based Plan System
@@ -44,37 +45,17 @@ export const CREDIT_COSTS = {
   tool_call: 3,           // Composio API tool call (~$0.005/action × 4 markup × ₹86 ÷ ₹1/credit = 3 credits → 85% margin)
 } as const;
 
-// ── Token-Based Billing: Real Cost per 1K tokens (USD) ──
-// These are our ACTUAL costs from each provider. Used for internal tracking.
-// Customer credits are our markup on top of these real costs.
-const TOKEN_COSTS_PER_1K: Record<string, { input: number; output: number }> = {
-  // Anthropic (https://docs.anthropic.com/en/docs/about-claude/pricing)
-  'claude-opus':    { input: 0.015,  output: 0.075 },
-  'claude-sonnet':  { input: 0.003,  output: 0.015 },
-  'claude-haiku':   { input: 0.001,  output: 0.005 },
-  // Gemini
-  'gemini-2.5-pro': { input: 0.00125, output: 0.005 },
-  'gemini-2.5-flash': { input: 0.000075, output: 0.0003 },
-  'gemini-2.0-flash': { input: 0.000075, output: 0.0003 },
-  // OpenAI
-  'gpt-4o':         { input: 0.0025, output: 0.01 },
-  'gpt-4o-mini':    { input: 0.00015, output: 0.0006 },
-};
-
 /**
- * Calculate the real USD cost for an LLM call based on actual tokens used.
- * Used for internal profit tracking — NOT shown to customers.
+ * The real USD cost of an LLM call, from the providers' official prices (services/prices.ts),
+ * including prompt-cache writes and reads.
  */
 export function calculateRealCostUsd(
   model: string,
   inputTokens: number,
-  outputTokens: number
+  outputTokens: number,
+  cache: { cacheWriteTokens?: number; cacheReadTokens?: number } = {},
 ): number {
-  // Find matching cost entry
-  const matchKey = Object.keys(TOKEN_COSTS_PER_1K).find(k => model.includes(k));
-  if (!matchKey) return 0;
-  const costs = TOKEN_COSTS_PER_1K[matchKey];
-  return (inputTokens / 1000) * costs.input + (outputTokens / 1000) * costs.output;
+  return tokenCostUsd(model, { inputTokens, outputTokens, ...cache });
 }
 
 /**
@@ -271,11 +252,28 @@ export async function checkModelAccess(tenantId: string, requestedTier: ModelTie
  * Call this after a successful action (LLM call, code execution, etc.)
  * Optionally tracks real token costs for internal profit analysis.
  */
+/** What a charge was for: the model call or service behind it, its real cost, and the run or build it belongs to. */
+export interface ChargeMeta {
+  provider?: string;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheWriteTokens?: number;
+  cacheReadTokens?: number;
+  /** Real cost to us in USD; computed from the tokens when not given. */
+  realCostUsd?: number;
+  markup?: MarkupKind;
+  runId?: string;
+  jobId?: string;
+  missionId?: string;
+  triggeredByUserId?: string;
+}
+
 export async function deductCredits(
   tenantId: string,
   amount: number,
   actionType: string,
-  tokenMeta?: { provider: string; model: string; inputTokens?: number; outputTokens?: number; triggeredByUserId?: string }
+  tokenMeta?: ChargeMeta
 ): Promise<void> {
   const supabase = createServiceClient();
 
@@ -296,14 +294,10 @@ export async function deductCredits(
     throw new Error(result?.failure_reason ?? 'Insufficient credits');
   }
 
-  // Calculate real USD cost if token metadata is provided
-  let realCostUsd: number | undefined;
-  if (tokenMeta?.inputTokens || tokenMeta?.outputTokens) {
-    realCostUsd = calculateRealCostUsd(
-      tokenMeta.model,
-      tokenMeta.inputTokens || 0,
-      tokenMeta.outputTokens || 0,
-    );
+  // The real USD cost behind the charge: given, or from the tokens of the model call
+  let realCostUsd = tokenMeta?.realCostUsd;
+  if (realCostUsd === undefined && tokenMeta?.model && (tokenMeta.inputTokens || tokenMeta.outputTokens)) {
+    realCostUsd = calculateRealCostUsd(tokenMeta.model, tokenMeta.inputTokens || 0, tokenMeta.outputTokens || 0, tokenMeta);
   }
 
   // Log credit usage event with attribution (non-critical, fire-and-forget)
@@ -322,55 +316,103 @@ export async function deductCredits(
         model: tokenMeta.model,
         inputTokens: tokenMeta.inputTokens,
         outputTokens: tokenMeta.outputTokens,
+        cacheWriteTokens: tokenMeta.cacheWriteTokens,
+        cacheReadTokens: tokenMeta.cacheReadTokens,
         realCostUsd,
+        markup: tokenMeta.markup,
+        runId: tokenMeta.runId,
+        jobId: tokenMeta.jobId,
+        missionId: tokenMeta.missionId,
       } : {}),
     },
   }).then(() => {}, () => {});
 }
 
-// ── Credit pricing constants ─────────────────────────────────────────────────
-// 1 credit = ₹1 customer value (Individual plan: ₹999/mo ÷ 1000 credits).
-// Formula: credits = realCostUsd × MARKUP × (liveUsdInr / INR_PER_CREDIT)
-// When INR weakens, deductions rise automatically — margin stays protected.
+// ── Real cost → credits ─────────────────────────────────────────────────────
+// credits = real cost to us (USD) × live USD→INR rate × markup ÷ ₹ per credit, rounded up (min 1).
+// Plans and packs are unchanged; only what each action deducts follows its real cost.
 const INR_PER_CREDIT = 1;   // ₹1 per credit — update if plan pricing changes
-const AGENT_LLM_MARKUP = 4; // 4× on agent/mission LLM calls
-const CHAT_MARKUP = 3;      // 3× on conversational chat
+/** Agent and mission work (building, writing and fixing code, runs, searches, app actions, images), chat, and failures. */
+export const MARKUP = { work: 4, chat: 3, failure: 1.75 } as const;
+export type MarkupKind = keyof typeof MARKUP;
 
-/**
- * Token-proportional credit cost for a single LLM call inside an agent run.
- * 4× markup on real provider cost, converted at live USD/INR. Min 1 credit.
- */
-export async function calculateLLMCreditCost(
-  model: string,
-  inputTokens: number,
-  outputTokens: number,
-): Promise<number> {
-  const realCostUsd = calculateRealCostUsd(model, inputTokens, outputTokens);
+/** Credits for a real cost at a markup. */
+export async function creditsForCost(realCostUsd: number, kind: MarkupKind = 'work'): Promise<number> {
   const usdToInr = await getUsdToInr();
-  const customerCostInr = realCostUsd * AGENT_LLM_MARKUP * usdToInr;
-  return Math.max(1, Math.ceil(customerCostInr / INR_PER_CREDIT));
+  return Math.max(1, Math.ceil((realCostUsd * usdToInr * MARKUP[kind]) / INR_PER_CREDIT));
 }
 
-/** Credits for a provider charge priced per item (a generated image), with the agent markup. Min 1 credit. */
+type CacheTokens = { cacheWriteTokens?: number; cacheReadTokens?: number };
+
+/** Credits for one LLM call inside an agent run or a build: real cost × 4. */
+export async function calculateLLMCreditCost(model: string, inputTokens: number, outputTokens: number, cache: CacheTokens = {}): Promise<number> {
+  return creditsForCost(calculateRealCostUsd(model, inputTokens, outputTokens, cache), 'work');
+}
+
+/** Credits for a provider charge priced per item (a generated image): real cost × 4. */
 export async function calculateUsdCreditCost(realCostUsd: number): Promise<number> {
-  const usdToInr = await getUsdToInr();
-  return Math.max(1, Math.ceil((realCostUsd * AGENT_LLM_MARKUP * usdToInr) / INR_PER_CREDIT));
+  return creditsForCost(realCostUsd, 'work');
+}
+
+/** Credits for one chat reply: real cost × 3. Never shown to the customer — the balance just decreases. */
+export async function calculateChatCreditCost(inputTokens: number, outputTokens: number, model: string, cache: CacheTokens = {}): Promise<number> {
+  return creditsForCost(calculateRealCostUsd(model, inputTokens, outputTokens, cache), 'chat');
 }
 
 /**
- * Calculate credits to charge for one chat exchange.
- * Proportional to actual token usage × 3× markup, converted via live USD/INR.
- * Never shown to the customer — balance just decreases naturally.
+ * A failed run or build is billed at the failure markup (1.75×) instead of 4×: charges are taken as
+ * the work happens, so this refunds the difference once it has failed. Safe to call more than once.
+ * Returns the credits it was billed at in the end.
  */
-export async function calculateChatCreditCost(
-  inputTokens: number,
-  outputTokens: number,
-  model: string
-): Promise<number> {
-  const realCostUsd = calculateRealCostUsd(model, inputTokens, outputTokens);
+export async function settleFailure(tenantId: string, ref: { runId?: string; jobId?: string }): Promise<{ charged: number; refunded: number }> {
+  const key = ref.runId ? 'runId' : 'jobId';
+  const id = ref.runId ?? ref.jobId;
+  if (!id) return { charged: 0, refunded: 0 };
+  const supabase = createServiceClient();
+  const { data: done } = await supabase.from('events').select('payload')
+    .eq('tenant_id', tenantId).eq('event_type', 'billing.failure_refund').eq(`payload->>${key}`, id).limit(1).maybeSingle();
+  if (done) {
+    const p = done.payload as { target?: number; refunded?: number };
+    return { charged: p.target ?? 0, refunded: p.refunded ?? 0 };
+  }
+  const { data: rows } = await supabase.from('events').select('payload')
+    .eq('tenant_id', tenantId).eq('event_type', 'billing.credit_used').eq(`payload->>${key}`, id).limit(2000);
+  const charges = (rows ?? []).map(r => r.payload as { amount?: number; realCostUsd?: number; markup?: MarkupKind });
+  const charged = charges.reduce((sum, c) => sum + (c.amount ?? 0), 0);
+  if (charged === 0) return { charged: 0, refunded: 0 };
+  // At the failure markup: from the real cost where recorded, else scaled down from the amount charged.
   const usdToInr = await getUsdToInr();
-  const customerCostInr = realCostUsd * CHAT_MARKUP * usdToInr;
-  return Math.max(2, Math.ceil(customerCostInr / INR_PER_CREDIT));
+  const target = Math.max(1, Math.ceil(charges.reduce((sum, c) => sum + (
+    typeof c.realCostUsd === 'number'
+      ? (c.realCostUsd * usdToInr * MARKUP.failure) / INR_PER_CREDIT
+      : (c.amount ?? 0) * MARKUP.failure / MARKUP[c.markup ?? 'work']
+  ), 0)));
+  const refunded = Math.max(0, charged - target);
+  // Recorded first, so a second call never refunds twice.
+  const { error } = await supabase.from('events').insert({
+    tenant_id: tenantId, event_type: 'billing.failure_refund', entity_type: 'billing', entity_id: tenantId,
+    payload: { [key]: id, chargedBefore: charged, target, refunded, markup: MARKUP.failure },
+  });
+  if (error) {
+    console.warn('[Billing] Could not record the failure settlement:', error.message);
+    return { charged, refunded: 0 };
+  }
+  if (refunded > 0) await addCredits(tenantId, refunded, `failure_rate:${key}:${id}`);
+  return { charged: Math.min(charged, target), refunded };
+}
+
+/** Credits charged so far for a run or a build, after any failure refund. */
+export async function creditsChargedFor(tenantId: string, ref: { runId?: string; jobId?: string }): Promise<number> {
+  const key = ref.runId ? 'runId' : 'jobId';
+  const id = ref.runId ?? ref.jobId;
+  if (!id) return 0;
+  const supabase = createServiceClient();
+  const [{ data: used }, { data: refund }] = await Promise.all([
+    supabase.from('events').select('payload').eq('tenant_id', tenantId).eq('event_type', 'billing.credit_used').eq(`payload->>${key}`, id).limit(2000),
+    supabase.from('events').select('payload').eq('tenant_id', tenantId).eq('event_type', 'billing.failure_refund').eq(`payload->>${key}`, id).limit(1).maybeSingle(),
+  ]);
+  const charged = (used ?? []).reduce((sum, r) => sum + ((r.payload as { amount?: number }).amount ?? 0), 0);
+  return charged - ((refund?.payload as { refunded?: number } | undefined)?.refunded ?? 0);
 }
 
 /**

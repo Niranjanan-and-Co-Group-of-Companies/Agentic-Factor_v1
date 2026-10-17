@@ -54,6 +54,8 @@ export interface LiveRun {
   agentsFailed: number;
   error?: string;
   summary?: string;
+  /** Credits charged for this run so far (at the failure rate once it has failed). */
+  credits?: number;
 }
 
 export interface LiveRunView {
@@ -264,6 +266,7 @@ export async function loadLiveRun(tenantId: string, missionId: string, runId?: s
     agentsFailed: runRow.agents_failed ?? 0,
     error: status === 'failed' ? shortError(runError ?? runRow.summary) : undefined,
     summary: runRow.summary ? String(runRow.summary).replace(REHEARSAL_PREFIX, '').slice(0, 400) : undefined,
+    credits: await import('@/lib/middleware/billing').then(b => b.creditsChargedFor(tenantId, { runId: runRow.id })).catch(() => undefined),
   };
   view.agents = deriveAgents({ agents: blueprintAgents, events: rows, runStatus: status, approvalAgentId: approval?.agentId, runError: runError ?? (status === 'failed' ? runRow.summary : null) });
   view.approval = approval;

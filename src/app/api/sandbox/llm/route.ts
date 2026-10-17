@@ -69,7 +69,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `AI call limit reached for this agent run (${MAX_CALLS_PER_TOKEN})` }, { status: 429 });
   }
 
-  const { checkCredits, deductCredits, calculateLLMCreditCost } = await import('@/lib/middleware/billing');
+  const { checkCredits } = await import('@/lib/middleware/billing');
+  const { chargeModelCall } = await import('@/lib/services/run-billing');
   const creditCheck = await checkCredits(claims.tenantId, 2);
   if (!creditCheck.allowed) {
     return NextResponse.json({ error: creditCheck.reason ?? 'Insufficient credits' }, { status: 402 });
@@ -110,11 +111,10 @@ export async function POST(request: NextRequest) {
           { role: 'user' as const, content: 'Continue exactly where you stopped. Do not repeat or summarise anything already written.' }],
         { tier: 2, jsonMode, maxTokens, temperature: 0.4 },
       );
-      const partCredits = await calculateLLMCreditCost(result.model, result.inputTokens ?? 0, result.outputTokens ?? 0);
-      // actionType ends with ":<agent role>" so the run detail attributes it to this agent.
-      await deductCredits(claims.tenantId, partCredits, `sandbox_llm:${claims.agentRole}`, {
-        provider: result.provider, model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens,
-      }).catch(err => console.error('[sandbox/llm] credit deduction failed:', err));
+      // Real cost × 4, tagged with the run and agent.
+      const partCredits = await chargeModelCall(
+        { tenantId: claims.tenantId, runId: claims.runId, missionId: claims.missionId, agentRole: claims.agentRole }, 'sandbox_llm', result,
+      ).catch(err => { console.error('[sandbox/llm] credit deduction failed:', err); return 0; });
       credits += partCredits;
       model = result.model;
       text += result.content; // appended as-is: the cut can fall mid-word

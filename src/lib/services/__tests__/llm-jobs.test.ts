@@ -53,7 +53,7 @@ describe('withUsage — what a build step spent', () => {
     });
     const [a, b] = await Promise.all([step(1), step(2)]);
     expect(a.usage).toHaveLength(1);
-    expect(usageByModel(b.usage)).toEqual({ 'claude-opus-5-5': { calls: 2, inputTokens: 20, outputTokens: 10 } });
+    expect(usageByModel(b.usage)).toEqual({ 'claude-opus-5-5': { calls: 2, inputTokens: 20, outputTokens: 10, cacheWriteTokens: 0, cacheReadTokens: 0 } });
     await callLLM([{ role: 'user', content: 'outside' }], { job: 'escalate' });
     expect(b.usage).toHaveLength(2);
   });

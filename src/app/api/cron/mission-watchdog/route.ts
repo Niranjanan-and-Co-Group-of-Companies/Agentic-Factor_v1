@@ -1,3 +1,4 @@
+import { settleFailure } from '@/lib/middleware/billing';
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
 
@@ -134,12 +135,15 @@ export async function GET(request: NextRequest) {
         .eq('tenant_id', mission.tenant_id)
         .in('status', ['running', 'spawning', 'paused']);
 
-      await supabase
+      const { data: failedRuns } = await supabase
         .from('mission_runs')
         .update({ status: 'failed', completed_at: new Date().toISOString() })
         .eq('mission_id', mission.id)
         .eq('tenant_id', mission.tenant_id)
-        .in('status', ['queued', 'running']);
+        .in('status', ['queued', 'running'])
+        .select('id');
+      // Billed at the failure rate (1.75×).
+      for (const r of failedRuns ?? []) await settleFailure(mission.tenant_id, { runId: r.id as string }).catch(() => {});
 
       // Any approval still waiting on a human is moot now — the mission
       // that would have resumed from it is dead.
@@ -197,6 +201,7 @@ async function closeOrphanedRuns(supabase: ReturnType<typeof createServiceClient
       .eq('tenant_id', run.tenant_id)
       .in('status', ['queued', 'running']);
     if (!error) closed++;
+    if (!error && !finished) await settleFailure(run.tenant_id, { runId: run.id }).catch(() => {});
   }
   if (closed) console.log(`[Watchdog] Closed ${closed} orphaned run(s) under inactive missions`);
   return closed;
