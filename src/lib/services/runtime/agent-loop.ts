@@ -877,7 +877,9 @@ function getRequiredPackages(code: string): string[] {
   // requests is always required — the agenticfactor SDK core uses it
   needed.add('requests');
 
-  for (const match of code.matchAll(/^(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)/gm)) {
+  // Indented imports too: a Canva script imported pptx inside a function, so python-pptx was never
+  // installed and its first attempt failed with ModuleNotFoundError.
+  for (const match of code.matchAll(/^[ \t]*(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)/gm)) {
     const pkgs = PIP_MAP[match[1]];
     if (pkgs) pkgs.forEach(p => needed.add(p));
   }
