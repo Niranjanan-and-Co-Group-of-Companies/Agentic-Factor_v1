@@ -13,6 +13,7 @@
 // if the DB is unavailable or the table doesn't exist.
 // ============================================================
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createServiceClient } from '@/lib/supabase/server';
 
 interface LLMMessage {
@@ -165,6 +166,29 @@ export const JOB_MODELS: Record<LLMJob, string[]> = {
 };
 const JOB_TIER: Record<LLMJob, 1 | 2 | 3> = { build: 1, light: 3, escalate: 1 };
 
+/** What one model call used. */
+export interface LLMUsage { model: string; inputTokens: number; outputTokens: number }
+const usageScope = new AsyncLocalStorage<LLMUsage[]>();
+
+/** Runs `fn` and returns, with its result, every model call it made (model and tokens) — e.g. one build step's cost. */
+export async function withUsage<T>(fn: () => Promise<T>): Promise<{ result: T; usage: LLMUsage[] }> {
+  const usage: LLMUsage[] = [];
+  const result = await usageScope.run(usage, fn);
+  return { result, usage };
+}
+
+/** Calls and tokens per model, small enough to keep with a job's progress. */
+export function usageByModel(usage: LLMUsage[]): Record<string, { calls: number; inputTokens: number; outputTokens: number }> {
+  const out: Record<string, { calls: number; inputTokens: number; outputTokens: number }> = {};
+  for (const u of usage) {
+    const m = (out[u.model] ??= { calls: 0, inputTokens: 0, outputTokens: 0 });
+    m.calls++;
+    m.inputTokens += u.inputTokens;
+    m.outputTokens += u.outputTokens;
+  }
+  return out;
+}
+
 /**
  * Call the best available LLM provider with self-healing fallback.
  * Returns the response including the actual model used for credit billing.
@@ -215,6 +239,7 @@ export async function callLLM(
   if (!result) {
     throw new Error('No LLM provider available. All models in all providers failed. Check API keys and model availability.');
   }
+  usageScope.getStore()?.push({ model: result.model, inputTokens: result.inputTokens ?? 0, outputTokens: result.outputTokens ?? 0 });
 
   // Record successful usage
   if (budgetContext && result.tokensUsed > 0) {

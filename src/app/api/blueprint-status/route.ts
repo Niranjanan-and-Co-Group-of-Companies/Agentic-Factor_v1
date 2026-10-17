@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
   delete latest.request;
   delete latest.codeRoles;
   delete latest.codeReady;
+  delete latest.usage;
   const codeRoles = payloads.find(p => Array.isArray(p.codeRoles))?.codeRoles;
   const progress = codeRoles?.length
     ? { roles: codeRoles, ready: [...new Set(payloads.map(p => p.codeReady).filter((r): r is string => typeof r === 'string'))] }

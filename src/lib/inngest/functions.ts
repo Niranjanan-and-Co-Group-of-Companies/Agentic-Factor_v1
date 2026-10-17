@@ -685,8 +685,12 @@ export const generateBlueprintBackground = inngest.createFunction(
       const designed = await step.run('design-mission', async () => {
         await updateJobStatus('processing', { step: '🤖 AI architect is designing your agent team...' });
         const { designMission } = await import('@/lib/services/intake');
-        const result = await designMission(request, tenantId, files, { priorQuestions });
-        if (result.isDiscovery) return { type: 'discovery' as const, question: result.question };
+        const { withUsage, usageByModel } = await import('@/lib/services/llm-router');
+        const { result, usage } = await withUsage(() => designMission(request, tenantId, files, { priorQuestions }));
+        if (result.isDiscovery) {
+          await updateJobStatus('processing', { step: '💬 The architect has a question', usage: usageByModel(usage) });
+          return { type: 'discovery' as const, question: result.question };
+        }
 
         const { design } = result;
         const agents = design.llmOutput.agents;
@@ -695,6 +699,7 @@ export const generateBlueprintBackground = inngest.createFunction(
         await updateJobStatus('processing', {
           step: `📐 ${agents.length}-agent pipeline designed: ${roles}${extra}`,
           codeRoles: design.plans.map(p => agents.find(a => a.agentIndex === p.agentIndex)?.role ?? `Agent ${p.agentIndex + 1}`),
+          usage: usageByModel(usage),
         });
         return { type: 'design' as const, design };
       });
@@ -725,8 +730,9 @@ export const generateBlueprintBackground = inngest.createFunction(
           const role = roleOf(plan.agentIndex);
           await updateJobStatus('processing', { step: `✍️ Writing code for ${role}…`, writing: role });
           const { writeAgentScript } = await import('@/lib/services/intake');
-          const script = await writeAgentScript(design, plan.agentIndex, request, tenantId, files);
-          await updateJobStatus('processing', { step: `✅ Code ready for ${role}`, codeReady: role });
+          const { withUsage, usageByModel } = await import('@/lib/services/llm-router');
+          const { result: script, usage } = await withUsage(() => writeAgentScript(design, plan.agentIndex, request, tenantId, files));
+          await updateJobStatus('processing', { step: `✅ Code ready for ${role}`, codeReady: role, usage: usageByModel(usage) });
           return script;
         }).then(script => { scripts[plan.agentIndex] = script; })
       ));
@@ -735,7 +741,10 @@ export const generateBlueprintBackground = inngest.createFunction(
       const checked = await step.run('check-mission', async () => {
         await updateJobStatus('processing', { step: '🔎 Checking actions and settings against each app…' });
         const { checkMission } = await import('@/lib/services/intake');
-        return checkMission(design, scripts, tenantId);
+        const { withUsage, usageByModel } = await import('@/lib/services/llm-router');
+        const { result, usage } = await withUsage(() => checkMission(design, scripts, tenantId));
+        await updateJobStatus('processing', { step: '🔎 Actions and settings checked', usage: usageByModel(usage) });
+        return result;
       });
 
       // ── Step 5: Persist + emit completion data ──
