@@ -277,21 +277,25 @@ export async function deductCredits(
 ): Promise<void> {
   const supabase = createServiceClient();
 
-  // Auto-provision billing record if missing
-  await ensureBillingRecord(tenantId);
+  // A charge of 0 credits only records its real cost (a run's running total hasn't reached the next credit).
+  let result: { new_monthly?: number; new_topup?: number } = {};
+  if (amount > 0) {
+    // Auto-provision billing record if missing
+    await ensureBillingRecord(tenantId);
 
-  // Atomic two-bucket deduction via DB function (no read-then-write race)
-  const { data: rows, error } = await supabase.rpc('deduct_credits_atomic', {
-    p_tenant_id:         tenantId,
-    p_amount:            amount,
-    p_check_monthly_cap: true,
-  });
+    // Atomic two-bucket deduction via DB function (no read-then-write race)
+    const { data: rows, error } = await supabase.rpc('deduct_credits_atomic', {
+      p_tenant_id:         tenantId,
+      p_amount:            amount,
+      p_check_monthly_cap: true,
+    });
 
-  if (error) throw new Error(`Credit deduction DB error: ${error.message}`);
+    if (error) throw new Error(`Credit deduction DB error: ${error.message}`);
 
-  const result = Array.isArray(rows) ? rows[0] : rows;
-  if (!result?.success) {
-    throw new Error(result?.failure_reason ?? 'Insufficient credits');
+    result = Array.isArray(rows) ? rows[0] : rows;
+    if (!(result as { success?: boolean })?.success) {
+      throw new Error((result as { failure_reason?: string })?.failure_reason ?? 'Insufficient credits');
+    }
   }
 
   // The real USD cost behind the charge: given, or from the tokens of the model call
@@ -300,8 +304,9 @@ export async function deductCredits(
     realCostUsd = calculateRealCostUsd(tokenMeta.model, tokenMeta.inputTokens || 0, tokenMeta.outputTokens || 0, tokenMeta);
   }
 
-  // Log credit usage event with attribution (non-critical, fire-and-forget)
-  supabase.from('events').insert({
+  // Log credit usage event with attribution. Awaited: a run's next charge reads these to keep its
+  // total rounded once (a record still in flight was charged again). A failure is logged, not thrown.
+  const { error: logError } = await supabase.from('events').insert({
     tenant_id: tenantId,
     event_type: 'billing.credit_used',
     entity_type: 'billing',
@@ -310,7 +315,7 @@ export async function deductCredits(
     payload: {
       amount,
       actionType,
-      remainingAfter: (result.new_monthly ?? 0) + (result.new_topup ?? 0),
+      remainingAfter: amount > 0 ? (result.new_monthly ?? 0) + (result.new_topup ?? 0) : undefined,
       ...(tokenMeta ? {
         provider: tokenMeta.provider,
         model: tokenMeta.model,
@@ -325,7 +330,8 @@ export async function deductCredits(
         missionId: tokenMeta.missionId,
       } : {}),
     },
-  }).then(() => {}, () => {});
+  });
+  if (logError) console.warn('[Billing] Could not record the charge:', logError.message);
 }
 
 // ── Real cost → credits ─────────────────────────────────────────────────────
@@ -357,6 +363,43 @@ export async function calculateUsdCreditCost(realCostUsd: number): Promise<numbe
 /** Credits for one chat reply: real cost × 3. Never shown to the customer — the balance just decreases. */
 export async function calculateChatCreditCost(inputTokens: number, outputTokens: number, model: string, cache: CacheTokens = {}): Promise<number> {
   return creditsForCost(calculateRealCostUsd(model, inputTokens, outputTokens, cache), 'chat');
+}
+
+/**
+ * Charges the next cost of a run or build so that its total is its real cost × markup rounded up once:
+ * this charge is the difference between that and what was already charged. Rounding each charge up to a
+ * whole credit billed a run of a few tiny sandbox and check charges at nearly twice its rate.
+ * `divisor` halves free-plan rehearsals.
+ */
+export async function chargeTowards(
+  tenantId: string,
+  ref: { runId?: string; jobId?: string },
+  realCostUsd: number,
+  kind: MarkupKind,
+  actionType: string,
+  meta: ChargeMeta = {},
+  divisor = 1,
+): Promise<number> {
+  const key = ref.runId ? 'runId' : 'jobId';
+  const id = ref.runId ?? ref.jobId;
+  if (!id) {
+    const credits = Math.ceil((await creditsForCost(realCostUsd, kind)) / divisor);
+    await deductCredits(tenantId, credits, actionType, { ...meta, realCostUsd, markup: kind });
+    return credits;
+  }
+  const { data } = await createServiceClient().from('events').select('payload')
+    .eq('tenant_id', tenantId).eq('event_type', 'billing.credit_used').eq(`payload->>${key}`, id).limit(2000);
+  let prevCost = 0, prevCharged = 0;
+  for (const row of data ?? []) {
+    const p = row.payload as { amount?: number; realCostUsd?: number };
+    prevCharged += p.amount ?? 0;
+    prevCost += p.realCostUsd ?? 0;
+  }
+  const usdToInr = await getUsdToInr();
+  const target = Math.max(1, Math.ceil(((prevCost + realCostUsd) * usdToInr * MARKUP[kind]) / INR_PER_CREDIT / divisor));
+  const credits = Math.max(0, target - prevCharged);
+  await deductCredits(tenantId, credits, actionType, { ...meta, realCostUsd, markup: kind, [key]: id });
+  return credits;
 }
 
 /**

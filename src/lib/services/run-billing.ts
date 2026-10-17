@@ -36,14 +36,11 @@ export function parseUsageProbe(stdout: string): ToolUsage {
 }
 
 async function charge(bill: RunBill, label: string, realCostUsd: number, meta: { provider: string; model?: string; inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number }): Promise<number> {
-  const { creditsForCost, deductCredits } = await import('@/lib/middleware/billing');
-  const full = await creditsForCost(realCostUsd, 'work');
-  const credits = bill.halve ? Math.ceil(full / 2) : full;
+  const { chargeTowards } = await import('@/lib/middleware/billing');
   // "<what>:<agent role>" — the run page attributes charges to a mission's agents by this suffix.
-  await deductCredits(bill.tenantId, credits, `${label}:${bill.agentRole}`, {
-    ...meta, realCostUsd, markup: 'work', runId: bill.runId, missionId: bill.missionId,
-  });
-  return credits;
+  // The run's total is rounded up once, so a tiny charge may add nothing until it reaches a credit.
+  return chargeTowards(bill.tenantId, { runId: bill.runId }, realCostUsd, 'work', `${label}:${bill.agentRole}`,
+    { ...meta, missionId: bill.missionId }, bill.halve ? 2 : 1);
 }
 
 /** Charges one model call made for an agent (writing, fixing or checking its code; routing). */

@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Image limit reached for this agent run (${MAX_IMAGES_PER_TOKEN})` }, { status: 429 });
   }
 
-  const { checkCredits, deductCredits, calculateUsdCreditCost } = await import('@/lib/middleware/billing');
+  const { checkCredits, chargeTowards } = await import('@/lib/middleware/billing');
   const creditCheck = await checkCredits(claims.tenantId, 30);
   if (!creditCheck.allowed) {
     return NextResponse.json({ error: creditCheck.reason ?? 'Insufficient credits' }, { status: 402 });
@@ -99,11 +99,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: (err as Error).message.slice(0, 500) }, { status: 502 });
   }
 
-  const credits = await calculateUsdCreditCost(image.costUsd);
-  // actionType ends with ":<agent role>" so the run detail attributes it to this agent.
-  await deductCredits(claims.tenantId, credits, `sandbox_image:${claims.agentRole}`, {
-    provider: 'image', model: image.model, realCostUsd: image.costUsd, markup: 'work', runId: claims.runId, missionId: claims.missionId,
-  }).catch(err => console.error('[sandbox/image] credit deduction failed:', err));
+  // Real cost × 4, added to the run's total; actionType ends with ":<agent role>" so the run detail attributes it to this agent.
+  const credits = await chargeTowards(claims.tenantId, { runId: claims.runId }, image.costUsd, 'work', `sandbox_image:${claims.agentRole}`, {
+    provider: 'image', model: image.model, missionId: claims.missionId,
+  }).catch(err => { console.error('[sandbox/image] credit deduction failed:', err); return 0; });
 
   const ext = image.mimeType.includes('jpeg') ? 'jpg' : image.mimeType.includes('webp') ? 'webp' : 'png';
   const path = `${claims.tenantId}/${claims.runId ?? 'no-run'}/${requestHash}.${ext}`;

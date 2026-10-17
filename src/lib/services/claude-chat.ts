@@ -8,8 +8,9 @@ export const CHAT_MODELS = ['claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonn
 /**
  * Prompt caching. A chat's system prompt is written as parts joined by CACHE_SPLIT: every part but the
  * last (the fixed instructions, then the mission's own details) is cached, and the last part — what
- * changes every turn (time, runs, credits) — is not. The latest message is cached too, so the rounds of
- * a tool loop re-read the conversation at the cache price (a tenth of the input price, or less).
+ * changes every turn (time, runs, credits) — is not. Inside a tool loop the latest message is cached
+ * too, so the next round re-reads the conversation at the cache price; a plain reply doesn't, since
+ * caching costs 25% more than reading the tokens once and the next turn's context has changed anyway.
  */
 export const CACHE_SPLIT = '\n\n<<AF_CACHE_SPLIT>>\n\n';
 
@@ -48,12 +49,19 @@ export function withCachedHistory<M extends { role: string; content: unknown }>(
   return out;
 }
 
-/** The request body with prompt caching applied to its system prompt and messages. */
+/** Whether the conversation is inside a tool loop: its last message returns tool results. */
+function inToolLoop(messages: Array<{ content: unknown }>): boolean {
+  const last = messages[messages.length - 1]?.content;
+  return Array.isArray(last) && last.some(b => (b as { type?: string })?.type === 'tool_result');
+}
+
+/** The request body with prompt caching applied to its system prompt (and, inside a tool loop, its messages). */
 export function withPromptCache(body: Record<string, unknown>): Record<string, unknown> {
+  const messages = Array.isArray(body.messages) ? body.messages as Array<{ role: string; content: unknown }> : null;
   return {
     ...body,
     ...(typeof body.system === 'string' ? { system: cachedSystem(body.system) } : {}),
-    ...(Array.isArray(body.messages) ? { messages: withCachedHistory(body.messages as Array<{ role: string; content: unknown }>) } : {}),
+    ...(messages && inToolLoop(messages) ? { messages: withCachedHistory(messages) } : {}),
   };
 }
 

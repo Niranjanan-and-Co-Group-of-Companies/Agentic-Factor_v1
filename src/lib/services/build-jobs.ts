@@ -27,15 +27,14 @@ export async function recordJobStatus(supabase: SupabaseClient, tenantId: string
 export async function chargeJobStep(tenantId: string, jobId: string, step: string, usage: LLMUsage[], missionId?: string): Promise<number> {
   const realCostUsd = usageCostUsd(usage);
   if (realCostUsd <= 0) return 0;
-  const { creditsForCost, deductCredits } = await import('@/lib/middleware/billing');
-  const credits = await creditsForCost(realCostUsd, 'work');
+  const { chargeTowards } = await import('@/lib/middleware/billing');
   const sum = (k: 'inputTokens' | 'outputTokens' | 'cacheWriteTokens' | 'cacheReadTokens') => usage.reduce((n, u) => n + (u[k] ?? 0), 0);
-  await deductCredits(tenantId, credits, `build:${step}`, {
+  // The build's total is rounded up once, not each step's share.
+  return chargeTowards(tenantId, { jobId }, realCostUsd, 'work', `build:${step}`, {
     provider: 'anthropic', model: [...new Set(usage.map(u => u.model))].join(', '),
     inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'), cacheWriteTokens: sum('cacheWriteTokens'), cacheReadTokens: sum('cacheReadTokens'),
-    realCostUsd, markup: 'work', jobId, missionId,
+    missionId,
   });
-  return credits;
 }
 
 /** The request a job was started with, kept so a failed build can be tried again as it was. */

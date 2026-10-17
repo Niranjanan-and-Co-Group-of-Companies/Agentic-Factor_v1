@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 type Row = Record<string, any>;
 let events: Row[] = [];
 let refunds: Array<{ amount: number; reason: string }> = [];
+let deducted: number[] = [];
 function from(table: string) {
   const filters: Array<(r: Row) => boolean> = [];
   let limitN: number | undefined;
@@ -14,7 +15,8 @@ function from(table: string) {
     return key ? r[col]?.[key] : r[col];
   };
   const run = () => {
-    const out = (table === 'events' ? events : []).filter(r => filters.every(f => f(r)));
+    const rows = table === 'events' ? events : table === 'tenant_billing' ? [{ tenant_id: 'T', plan: 'pro' }] : [];
+    const out = rows.filter(r => filters.every(f => f(r)));
     return limitN != null ? out.slice(0, limitN) : out;
   };
   const q: any = {
@@ -23,6 +25,7 @@ function from(table: string) {
     limit(n: number) { limitN = n; return q; },
     insert(o: Row) { inserted = o; events.push(o); return q; },
     maybeSingle() { return Promise.resolve({ data: run()[0] ?? null, error: null }); },
+    single() { return Promise.resolve({ data: run()[0] ?? null, error: null }); },
     then(res: any, rej: any) { return Promise.resolve(inserted ? { data: null, error: null } : { data: run(), error: null }).then(res, rej); },
   };
   return q;
@@ -32,6 +35,10 @@ vi.mock('@/lib/supabase/server', () => ({
     from,
     rpc: (name: string, args: Row) => {
       if (name === 'add_credits_atomic_refund') refunds.push({ amount: args.p_amount, reason: args.p_reason });
+      if (name === 'deduct_credits_atomic') {
+        deducted.push(args.p_amount);
+        return Promise.resolve({ data: [{ success: true, new_monthly: 100, new_topup: 0 }], error: null });
+      }
       return Promise.resolve({ data: null, error: null });
     },
   }),
@@ -39,11 +46,11 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/services/fx-rate', () => ({ getUsdToInr: async () => 87 }));
 
 import { tokenCostUsd, sandboxCostUsd, toolCostUsd } from '../prices';
-import { creditsForCost, creditsChargedFor, settleFailure, MARKUP } from '@/lib/middleware/billing';
+import { chargeTowards, creditsForCost, creditsChargedFor, settleFailure, MARKUP } from '@/lib/middleware/billing';
 import { parseUsageProbe } from '../run-billing';
-import { cachedSystem, CACHE_SPLIT, plainSystem, withCachedHistory } from '../claude-chat';
+import { cachedSystem, CACHE_SPLIT, plainSystem, withCachedHistory, withPromptCache } from '../claude-chat';
 
-beforeEach(() => { events = []; refunds = []; });
+beforeEach(() => { events = []; refunds = []; deducted = []; });
 
 describe('prices — what each call really costs us', () => {
   it('prices tokens by model, cached tokens at their own rate', () => {
@@ -73,6 +80,23 @@ describe('credits — real cost × live rate × markup, rounded up', () => {
     expect(await creditsForCost(0.30, 'failure')).toBe(46);    // 0.30 × 87 × 1.75 = 45.675
     expect(await creditsForCost(0.022, 'chat')).toBe(6);       // 0.022 × 87 × 3 = 5.74
     expect(await creditsForCost(0.0001, 'work')).toBe(1);      // never less than 1
+  });
+});
+
+describe('chargeTowards — a run’s total is rounded up once, not every charge', () => {
+  it('charges only the difference to the rounded-up total', async () => {
+    // $0.00004 × 87 × 4 = 0.014 → the run's first credit.
+    expect(await chargeTowards('T', { runId: 'R' }, 0.00004, 'work', 'e2b_syntax_check:A')).toBe(1);
+    // Two more tiny charges stay within that credit: nothing more is deducted, but their cost is recorded.
+    expect(await chargeTowards('T', { runId: 'R' }, 0.00004, 'work', 'e2b_syntax_check:B')).toBe(0);
+    expect(await chargeTowards('T', { runId: 'R' }, 0.0012, 'work', 'e2b_attempt_1:A')).toBe(0);
+    // A $0.008 check brings the total to $0.00928 → 0.00928 × 87 × 4 = 3.23 → 4 credits in all.
+    expect(await chargeTowards('T', { runId: 'R' }, 0.008, 'work', 'critic_llm:A')).toBe(3);
+    expect(deducted).toEqual([1, 3]);
+    expect(events.filter(e => e.payload?.runId === 'R')).toHaveLength(4);
+  });
+  it('halves a free-plan rehearsal', async () => {
+    expect(await chargeTowards('T', { runId: 'F' }, 0.1, 'work', 'critic_llm:A', {}, 2)).toBe(18); // 0.1 × 87 × 4 / 2 = 17.4
   });
 });
 
@@ -124,5 +148,11 @@ describe('prompt caching — fixed parts cached, the per-turn part not', () => {
     expect(m2.content).toEqual([{ type: 'text', text: 'run it', cache_control: { type: 'ephemeral' } }]);
     const [a] = withCachedHistory([{ role: 'assistant', content: [{ type: 'text', text: 'x' }, { type: 'thinking', thinking: 'y' }] }]);
     expect(a.content).toEqual([{ type: 'text', text: 'x', cache_control: { type: 'ephemeral' } }, { type: 'thinking', thinking: 'y' }]);
+  });
+  it('caches the conversation only inside a tool loop', () => {
+    const plain = withPromptCache({ system: 'x', messages: [{ role: 'user', content: 'hi' }] });
+    expect((plain.messages as Array<{ content: unknown }>)[0].content).toBe('hi');
+    const loop = withPromptCache({ messages: [{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }] }] });
+    expect((loop.messages as Array<{ content: Array<Record<string, unknown>> }>)[0].content[0].cache_control).toEqual({ type: 'ephemeral' });
   });
 });
