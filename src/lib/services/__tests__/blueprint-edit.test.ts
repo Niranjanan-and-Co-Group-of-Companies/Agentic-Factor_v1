@@ -42,7 +42,7 @@ describe('restoreUnchangedScripts', () => {
   });
 });
 
-import { collectRewrites, REWRITE_SCRIPT } from '../blueprint-edit';
+import { collectRewrites, REWRITE_SCRIPT, scriptFrom } from '../blueprint-edit';
 
 describe('collectRewrites', () => {
   it('lists the agents marked for rewrite with their change notes', () => {
@@ -75,5 +75,18 @@ describe('collectRewrites', () => {
       { agentIndex: 0, scriptChange: 'Call GMAIL_FETCH_EMAILS for the last 24h; print {"emails": [...]}' },
       { agentIndex: 1, scriptChange: 'Summarises the emails' },
     ]);
+  });
+});
+
+describe('scriptFrom — the script in a writer\'s reply', () => {
+  it('reads the JSON field, a similar key, or the longest python block', () => {
+    expect(scriptFrom('{"pythonScript": "print(1)"}')).toEqual({ script: 'print(1)', why: '' });
+    expect(scriptFrom('{"python_script": "print(2)"}').script).toBe('print(2)');
+    expect(scriptFrom('Here it is:\n```python\nimport json\nprint(json.dumps({}))\n```').script).toBe('import json\nprint(json.dumps({}))\n');
+  });
+  it('says why when there is none', () => {
+    expect(scriptFrom(`{"pythonScript": "${REWRITE_SCRIPT}"}`)).toEqual({ why: 'the reply had no script in it' });
+    expect(scriptFrom('Sorry, I cannot do that.').why).toBe('the reply was not valid JSON');
+    expect(scriptFrom('  ').why).toBe('the reply was empty');
   });
 });

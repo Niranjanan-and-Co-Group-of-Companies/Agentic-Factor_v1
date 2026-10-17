@@ -5,6 +5,8 @@
  * Now the editor writes UNCHANGED_SCRIPT for scripts it leaves alone and we restore the original.
  */
 
+import { robustJSONParse } from '../utils/json-parser';
+
 export const UNCHANGED_SCRIPT = '__UNCHANGED__';
 /** Marks an agent whose script is rewritten in its own call, from the editor's scriptChange note. */
 export const REWRITE_SCRIPT = '__REWRITE__';
@@ -59,4 +61,18 @@ export function restoreUnchangedScripts(agents: EditedAgent[], existing: Existin
     if (agent.pythonScript && agent.pythonScript !== before?.pythonScript) changed.add(agent.agentIndex);
   }
   return changed;
+}
+
+/** The script in a writer's reply: its JSON pythonScript (or a similar key), else its longest ```python block. */
+export function scriptFrom(content: string): { script?: string; why: string } {
+  let parsed: unknown;
+  try { parsed = robustJSONParse(content); } catch { parsed = undefined; }
+  if (parsed && typeof parsed === 'object') {
+    const p = parsed as Record<string, unknown>;
+    const script = [p.pythonScript, p.python_script, p.script, p.code].find((v): v is string => typeof v === 'string' && !!v.trim() && v.trim() !== REWRITE_SCRIPT);
+    if (script) return { script, why: '' };
+  }
+  const block = [...content.matchAll(/```(?:python|py)?[ \t]*\n([\s\S]*?)```/g)].map(m => m[1]).sort((a, b) => b.length - a.length)[0];
+  if (block?.trim()) return { script: block, why: '' };
+  return { why: parsed ? 'the reply had no script in it' : content.trim() ? 'the reply was not valid JSON' : 'the reply was empty' };
 }

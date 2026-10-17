@@ -8,6 +8,7 @@
 import { callLLM } from './llm-router';
 import { robustJSONParse } from '../utils/json-parser';
 import { AF_TO_COMPOSIO_APP, pickToolkit, searchComposioToolkits, toolkitForAction } from './composio-actions';
+import { appName } from '../utils/app-name';
 
 export interface RequestedToolkit { name: string; slug?: string }
 
@@ -29,6 +30,31 @@ export async function requestedToolkits(text: string, tenantId?: string): Promis
 
 export function toolkitSlugs(requested: RequestedToolkit[]): string[] {
   return requested.flatMap(r => (r.slug ? [r.slug] : []));
+}
+
+// Everyday words for the connected apps they usually mean ("email me", "a spreadsheet").
+const EVERYDAY_WORDS: Record<string, RegExp> = {
+  gmail: /\b(e-?mails?|inbox|mail)\b/i,
+  googlesheets: /\b(spread ?sheets?|sheets?)\b/i,
+  googledocs: /\b(docs?|documents?)\b/i,
+  googledrive: /\b(drive|folders?)\b/i,
+  googlecalendar: /\b(calendar|meetings?)\b/i,
+};
+
+/**
+ * The connected toolkits a request is about — named ("Zoho Books"), resolved in the catalog, or meant
+ * by an everyday word ("email it to me" → Gmail) — plus the requested ones. All connected toolkits when
+ * it names none. The designer reads these toolkits' full action lists: every connected app's list made
+ * the design call ~175K tokens for a two-app mission.
+ */
+export function focusToolkits(text: string, connected: string[], requested: string[]): string[] {
+  const lower = text.toLowerCase();
+  const named = connected.filter(provider => {
+    const slug = composioSlug(provider);
+    return lower.includes(slug) || lower.includes(appName(slug).toLowerCase()) || !!EVERYDAY_WORDS[slug]?.test(text);
+  }).map(composioSlug);
+  const focus = [...new Set([...requested.map(r => r.toLowerCase()), ...named])];
+  return focus.length > 0 ? focus : [...new Set(connected.map(composioSlug))];
 }
 
 function composioSlug(provider: string): string {

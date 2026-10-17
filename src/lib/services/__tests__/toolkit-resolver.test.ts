@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { pickToolkit } from '../composio-actions';
-import { declareCalledToolkits, permissionCovers, toolkitNotice } from '../toolkit-resolver';
+import { declareCalledToolkits, focusToolkits, permissionCovers, toolkitNotice } from '../toolkit-resolver';
 
 describe('pickToolkit', () => {
   const zoho = [{ slug: 'zoho', name: 'Zoho CRM' }, { slug: 'zoho_books', name: 'Zoho Books' }, { slug: 'zoho_invoice', name: 'Zoho Invoice' }];
@@ -77,5 +77,17 @@ describe('rankActions', () => {
       { slug: 'ZOHO_BOOKS_DELETE_ITEM', description: 'Delete an item' },
     ];
     expect(rankActions(actions, 'list contacts').map(a => a.slug)).toEqual(['ZOHO_BOOKS_LIST_CONTACTS', 'ZOHO_BOOKS_CREATE_CONTACT', 'ZOHO_BOOKS_LIST_INVOICES']);
+  });
+});
+
+describe('focusToolkits — the apps a request is about', () => {
+  const connected = ['gmail', 'zoho_books', 'canva', 'googlesheets', 'github', 'slack', 'notion', 'hubspot', 'youtube'];
+  it('takes named apps, everyday words and resolved toolkits', () => {
+    expect(focusToolkits('Find overdue invoices in Zoho Books, put them in a spreadsheet and email me the link', connected, []).sort())
+      .toEqual(['gmail', 'googlesheets', 'zoho_books']);
+    expect(focusToolkits('Post the summary to Slack', connected, ['github']).sort()).toEqual(['github', 'slack']);
+  });
+  it('falls back to every connected app when the request names none', () => {
+    expect(focusToolkits('Research AI news and write a brief', connected, [])).toEqual(connected);
   });
 });

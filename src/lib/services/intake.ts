@@ -5,8 +5,9 @@ import { callLLM, generateEmbedding } from './llm-router';
 import { robustJSONParse, safeJSONParse } from '../utils/json-parser';
 import { readDecryptedToken } from './vault';
 import { MEMORY_EXTRACTION_PROMPT, cleanTenantFacts, formatTenantMemory } from './tenant-memory';
-import { collectRewrites, REWRITE_SCRIPT, restoreUnchangedScripts, UNCHANGED_SCRIPT, type ScriptRewrite } from './blueprint-edit';
+import { collectRewrites, REWRITE_SCRIPT, restoreUnchangedScripts, scriptFrom, UNCHANGED_SCRIPT, type ScriptRewrite } from './blueprint-edit';
 import { autoFixComposioParams, checkComposioParams } from './composio-param-check';
+import { appName } from '../utils/app-name';
 
 // ============================================================
 // Permission Normalizer — maps free-form service names to exact provider keys
@@ -906,11 +907,19 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
   // Toolkits come from Composio's catalog: connected ones plus every product the request names,
   // even before it is connected, so a "Zoho Books" mission is built with Zoho Books actions.
   const { buildComposioActionsContext } = await import('./composio-actions');
-  const { requestedToolkits, toolkitNotice, toolkitSlugs } = await import('./toolkit-resolver');
+  const { focusToolkits, requestedToolkits, toolkitNotice, toolkitSlugs } = await import('./toolkit-resolver');
   const requested = await requestedToolkits(intent, tenantId).catch(() => []);
   const contextToolkits = [...new Set([...connectedProviders, ...toolkitSlugs(requested)])];
+  // The design reads the full action lists of the apps this request is about; the other connected apps
+  // are only named. Each code step still gets the actions of every app its plan uses.
+  const focus = focusToolkits(intent, connectedProviders, toolkitSlugs(requested));
+  const alsoConnected = contextToolkits.filter(t => !focus.includes(t.toLowerCase()));
+  const alsoNotice = alsoConnected.length
+    ? `\n\nALSO CONNECTED (their actions are not listed here): ${alsoConnected.join(', ')}. If the mission needs one of these, use it — put it in the agent's tools, permissions and scriptPlan (say what the script must do with it, not action names), and its script writer gets its actions.`
+    : '';
   const { lessonsFor } = await import('./toolkit-lessons');
-  const composioActionsContext = `${await buildComposioActionsContext(contextToolkits).catch(() => '')}${toolkitNotice(requested, connectedProviders)}${await lessonsFor(contextToolkits).catch(() => '')}`;
+  const composioActionsContext = `${await buildComposioActionsContext(focus).catch(() => '')}${alsoNotice}${toolkitNotice(requested, connectedProviders)}${await lessonsFor(focus).catch(() => '')}`;
+  console.log(`[intake] Design reads the actions of: ${focus.join(', ') || 'none'}${alsoConnected.length ? ` (also connected: ${alsoConnected.length})` : ''}`);
 
   // Extract facts in the background (fire-and-forget)
   extractAndSaveTenantMemory(intent, tenantId).catch(console.error);
@@ -1117,12 +1126,14 @@ async function composioContextFor(toolkits: string[]): Promise<string> {
   return `${await buildComposioActionsContext(toolkits).catch(() => '')}${await lessonsFor(toolkits).catch(() => '')}`;
 }
 
-/** The toolkits an agent's plan and tools name (all of them when it names none). */
+/**
+ * The toolkits an agent's plan and tools name — none for an agent that only writes text. Falling back
+ * to every connected toolkit put a content writer's prompt near the model's input limit.
+ */
 function toolkitsForAgent(toolkits: string[], text: string): string[] {
   const upper = text.toUpperCase();
   const lower = text.toLowerCase();
-  const named = toolkits.filter(tk => upper.includes(`${tk.toUpperCase()}_`) || lower.includes(tk.toLowerCase().replace(/_/g, ' ')) || lower.includes(tk.toLowerCase()));
-  return named.length ? named : toolkits;
+  return toolkits.filter(tk => upper.includes(`${tk.toUpperCase()}_`) || lower.includes(tk.toLowerCase()) || lower.includes(appName(tk).toLowerCase()));
 }
 
 /**
@@ -1144,14 +1155,24 @@ async function writeScript(prompt: string, context: string[], task: string, role
       { role: 'user', content: 'Your previous answer was cut off at the length limit. Write the script again, shorter: generate long text at runtime with ask_ai / ask_ai_batch and loop over data instead of repeating code.' },
     ], options);
   }
-  let script: unknown;
-  try { script = robustJSONParse(res.content)?.pythonScript; } catch { script = undefined; }
-  if (typeof script !== 'string' || !script.trim() || script.trim() === REWRITE_SCRIPT) {
-    throw new Error(`Could not write the code for "${role}"${res.truncated ? ' — it came out too long' : ''}.`);
+  let read = scriptFrom(res.content);
+  if (!read.script && !res.truncated) {
+    console.warn(`[intake] No script for "${role}" (${read.why}) from ${res.provider}/${res.model}: ${res.content.slice(0, 300)}`);
+    res = await callLLM([
+      ...(messages as any),
+      { role: 'assistant', content: res.content.slice(0, 4000) },
+      { role: 'user', content: 'That reply had no usable script. Answer with ONLY this JSON: {"pythonScript": "<the complete script>"}' },
+    ], options);
+    read = scriptFrom(res.content);
+  }
+  if (!read.script) {
+    console.warn(`[intake] No script for "${role}" (${read.why}) from ${res.provider}/${res.model}: ${res.content.slice(0, 300)}`);
+    throw new Error(`Could not write the code for "${role}": ${res.truncated ? 'it came out too long' : read.why}.`);
   }
   console.log(`[intake] Script for "${role}": ${res.provider}/${res.model}, tokens: ${res.tokensUsed}`);
-  return sanitizePlaceholders(script) as string;
+  return sanitizePlaceholders(read.script) as string;
 }
+
 
 const SCRIPT_WRITE_PROMPT = `You are writing ONE agent's Python script for a new AgenticFactor mission. The mission's design is below: each agent's role, instructions, handoff protocol and "scriptPlan". Write the complete script for the agent named at the end — do everything its plan says, read exactly the input_data fields the earlier agents' plans print, and print exactly the fields later agents' plans read. Follow every script rule below; the rules about the Mission JSON itself don't apply, since you return one script. Return ONLY JSON: {"pythonScript": "<the complete script>"}.
 
