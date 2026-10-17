@@ -62,4 +62,18 @@ describe('collectRewrites', () => {
     ]);
     expect(collectRewrites(undefined, [{ agentIndex: 0, pythonScript: 'x' }])).toEqual([]);
   });
+  it("reads a new design's scriptPlan, and falls back to what the agent itself says", () => {
+    const raw = [
+      { agentIndex: 0, pythonScript: REWRITE_SCRIPT, scriptPlan: 'Call GMAIL_FETCH_EMAILS for the last 24h; print {"emails": [...]}' },
+      { agentIndex: 1, pythonScript: REWRITE_SCRIPT },
+    ];
+    const agents = [
+      { agentIndex: 0, pythonScript: REWRITE_SCRIPT, systemPrompt: 'Reads mail' },
+      { agentIndex: 1, pythonScript: REWRITE_SCRIPT, systemPrompt: 'Summarises the emails' },
+    ];
+    expect(collectRewrites(raw, agents, a => a.systemPrompt)).toEqual([
+      { agentIndex: 0, scriptChange: 'Call GMAIL_FETCH_EMAILS for the last 24h; print {"emails": [...]}' },
+      { agentIndex: 1, scriptChange: 'Summarises the emails' },
+    ]);
+  });
 });

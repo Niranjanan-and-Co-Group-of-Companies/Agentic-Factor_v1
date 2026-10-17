@@ -640,20 +640,22 @@ export const generateBlueprintBackground = inngest.createFunction(
     name: 'Generate Blueprint (Background)',
     retries: 1,
     triggers: [{ event: 'mission/blueprint.generate' }],
+    // A step the platform stops (out of time or memory) never reaches the catch below: without this
+    // the customer waited 12 minutes for a generic "could not create mission".
+    onFailure: async ({ event, error }) => {
+      const { jobId, tenantId } = (event.data.event?.data ?? {}) as { jobId?: string; tenantId?: string };
+      if (!jobId || !tenantId) return;
+      const { reportBuildFailure } = await import('@/lib/services/build-jobs');
+      await reportBuildFailure(createServiceClient(), tenantId, jobId, error?.message ?? '', error?.name);
+    },
   },
   async ({ event, step }) => {
     const { jobId, intent, tenantId, files, priorQuestions, sourceRequest } = event.data;
     const supabase = createServiceClient();
-
-    const updateJobStatus = async (status: string, data: Record<string, any> = {}) => {
-      await supabase.from('events').insert({
-        tenant_id: tenantId,
-        event_type: 'blueprint.job_update',
-        entity_type: 'blueprint_job',
-        entity_id: jobId,
-        payload: { jobId, status, ...data, updatedAt: new Date().toISOString() },
-      });
-    };
+    const { recordJobStatus } = await import('@/lib/services/build-jobs');
+    const updateJobStatus = (status: string, data: Record<string, any> = {}) => recordJobStatus(supabase, tenantId, jobId, status, data);
+    const { withCustomerWords } = await import('@/lib/utils/source-request');
+    const request = withCustomerWords(intent, sourceRequest);
 
     try {
       // ── Step 1: Pre-flight — tool check + initial status (fast) ──
@@ -677,56 +679,71 @@ export const generateBlueprintBackground = inngest.createFunction(
         });
       });
 
-      // ── Step 2: LLM generation (the slow step — 15-30s) ──
-      const discoveryResult = await step.run('generate-mission', async () => {
+      // ── Step 2: the design — agents, flow, permissions and a plan for each agent's script ──
+      // Each step below is its own invocation with its own time limit: designing a mission and
+      // writing all its code in one step ran past the limit on bigger missions.
+      const designed = await step.run('design-mission', async () => {
         await updateJobStatus('processing', { step: '🤖 AI architect is designing your agent team...' });
+        const { designMission } = await import('@/lib/services/intake');
+        const result = await designMission(request, tenantId, files, { priorQuestions });
+        if (result.isDiscovery) return { type: 'discovery' as const, question: result.question };
 
-        const { generateMissionJSON } = await import('@/lib/services/intake');
-        const { withCustomerWords } = await import('@/lib/utils/source-request');
-        const result = await generateMissionJSON(withCustomerWords(intent, sourceRequest), tenantId, files, { priorQuestions });
-
-        if (result.isDiscovery && result.question) {
-          return { type: 'discovery' as const, question: result.question };
-        }
-        if (!result.mission) throw new Error('Blueprint generation returned empty.');
-
-        // Fire a descriptive "designed" message with real agent names so the
-        // frontend can show them in the live log before the blueprint loads.
-        const mission = result.mission;
-        const roles = (mission.agents as any[]).slice(0, 4).map((a) => a.role);
-        const roleStr = roles.join(' → ');
-        const extra = mission.agents.length > 4 ? ` + ${mission.agents.length - 4} more` : '';
+        const { design } = result;
+        const agents = design.llmOutput.agents;
+        const roles = agents.slice(0, 4).map(a => a.role).join(' → ');
+        const extra = agents.length > 4 ? ` + ${agents.length - 4} more` : '';
         await updateJobStatus('processing', {
-          step: `📐 ${mission.agents.length}-agent pipeline designed: ${roleStr}${extra}`,
+          step: `📐 ${agents.length}-agent pipeline designed: ${roles}${extra}`,
+          codeRoles: design.plans.map(p => agents.find(a => a.agentIndex === p.agentIndex)?.role ?? `Agent ${p.agentIndex + 1}`),
         });
-
-        return { type: 'blueprint' as const, mission, rawLLMOutput: result.rawLLMOutput };
+        return { type: 'design' as const, design };
       });
 
       // ── Discovery flow ──
-      if (discoveryResult.type === 'discovery') {
+      if (designed.type === 'discovery') {
         await step.run('save-discovery', async () => {
-          await updateJobStatus('discovery', { question: discoveryResult.question });
+          await updateJobStatus('discovery', { question: designed.question });
           // Keep the question in the saved Command Center message too, so it survives a reload.
           const { data: msg } = await supabase.from('mission_chat_messages')
             .select('id, content').eq('tenant_id', tenantId).eq('action_payload->>jobId', jobId).maybeSingle();
           if (msg) {
             await supabase.from('mission_chat_messages').update({
-              content: withArchitectQuestion(msg.content ?? '', discoveryResult.question),
-              action_payload: { type: 'blueprint_question', question: discoveryResult.question },
+              content: withArchitectQuestion(msg.content ?? '', designed.question),
+              action_payload: { type: 'blueprint_question', question: designed.question },
             }).eq('id', msg.id);
           }
         });
         return { success: true, jobId, type: 'discovery' };
       }
 
-      // ── Step 3: Persist + emit completion data ──
+      // ── Step 3: each agent's code, in its own step, all in parallel ──
+      const { design } = designed;
+      const roleOf = (agentIndex: number) => design.llmOutput.agents.find(a => a.agentIndex === agentIndex)?.role ?? `Agent ${agentIndex + 1}`;
+      const scripts: Record<number, string> = {};
+      await Promise.all(design.plans.map(plan =>
+        step.run(`write-code-${plan.agentIndex}`, async () => {
+          const role = roleOf(plan.agentIndex);
+          await updateJobStatus('processing', { step: `✍️ Writing code for ${role}…`, writing: role });
+          const { writeAgentScript } = await import('@/lib/services/intake');
+          const script = await writeAgentScript(design, plan.agentIndex, request, tenantId, files);
+          await updateJobStatus('processing', { step: `✅ Code ready for ${role}`, codeReady: role });
+          return script;
+        }).then(script => { scripts[plan.agentIndex] = script; })
+      ));
+
+      // ── Step 4: checks — Composio action names and parameters, permissions, ids ──
+      const checked = await step.run('check-mission', async () => {
+        await updateJobStatus('processing', { step: '🔎 Checking actions and settings against each app…' });
+        const { checkMission } = await import('@/lib/services/intake');
+        return checkMission(design, scripts, tenantId);
+      });
+
+      // ── Step 5: Persist + emit completion data ──
       await step.run('save-blueprint', async () => {
         await updateJobStatus('processing', { step: '✅ Validating blueprint structure...' });
-        await new Promise<void>((r) => setTimeout(r, 1200));
 
         // The customer's own words stay with the mission for blueprint edits and the critic.
-        const mission = sourceRequest ? { ...discoveryResult.mission, sourceRequest } : discoveryResult.mission;
+        const mission = sourceRequest ? { ...checked.mission, sourceRequest } : checked.mission;
 
         // Persist mission to the database
         const { persistMission } = await import('@/lib/services/intake');
@@ -762,13 +779,23 @@ export const generateBlueprintBackground = inngest.createFunction(
             return acc;
           }, []);
 
-        await updateJobStatus('completed', {
+        // The conversation that built it moves into the mission's chat; Command Center points there.
+        const { moveBuildThread } = await import('@/lib/services/build-jobs');
+        const chatId = await moveBuildThread(supabase, tenantId, jobId, { id: saved.id, title: saved.title, agentCount: mission.agents.length });
+        const created = {
           missionId: saved.id,
           missionTitle: saved.title,
           agents: agentCards,
           orchestrationPattern: mission.orchestration.pattern,
           requiredConnectors,
-        });
+          movedToChat: !!chatId,
+        };
+        await supabase.from('mission_chat_messages')
+          .update({ action_payload: { type: 'mission_created', jobId, ...created } })
+          .eq('tenant_id', tenantId)
+          .eq('action_payload->>jobId', jobId);
+
+        await updateJobStatus('completed', created);
       });
 
       await step.run('deduct-credit', async () => {
@@ -785,20 +812,8 @@ export const generateBlueprintBackground = inngest.createFunction(
       const isCircuitOpen = rawMsg.includes('Circuit breaker OPEN') || rawMsg.includes('Circuit is OPEN');
 
       await step.run('save-error', async () => {
-        let userMsg = rawMsg;
-        if (isCircuitOpen) {
-          userMsg = "We're briefly managing system load — please wait 30 seconds and try again.";
-        } else if (rawMsg.includes('No LLM provider available')) {
-          userMsg = 'AI services are temporarily unavailable. Please try again in a moment.';
-        } else if (rawMsg.toLowerCase().includes('rate limit') || rawMsg.includes('429')) {
-          userMsg = 'Too many requests right now — please wait a moment and try again.';
-        }
-        else if (error?.name === 'ZodError' || /"code":\s*"invalid_type"|"code":\s*"too_small"/.test(rawMsg)) {
-          // A validation dump means nothing to a customer: say which parts were missing.
-          const fields = [...new Set([...rawMsg.matchAll(/"path":\s*\[\s*"([^"]+)"/g)].map(m => m[1]))];
-          userMsg = `The mission design came back incomplete${fields.length ? ` (missing: ${fields.join(', ')})` : ''}. Please try again.`;
-        }
-        await updateJobStatus('failed', { error: userMsg });
+        const { reportBuildFailure } = await import('@/lib/services/build-jobs');
+        await reportBuildFailure(supabase, tenantId, jobId, rawMsg, error?.name);
       });
 
       // Circuit-open errors must not be retried — each retry re-trips the circuit.

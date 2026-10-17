@@ -11,13 +11,21 @@ export const REWRITE_SCRIPT = '__REWRITE__';
 
 export interface ScriptRewrite { agentIndex: number; scriptChange: string }
 
-/** The agents the editor asked to rewrite, with their change notes (read from the raw output — the schema drops scriptChange). */
-export function collectRewrites(rawAgents: unknown, agents: Array<{ agentIndex: number; pythonScript?: string }>): ScriptRewrite[] {
+/**
+ * The agents whose script is written in its own call, with what it must do: the editor's scriptChange
+ * or a new design's scriptPlan (read from the raw output — the schema drops both), else `fallback`.
+ */
+export function collectRewrites<A extends { agentIndex: number; pythonScript?: string }>(
+  rawAgents: unknown,
+  agents: A[],
+  fallback: (agent: A) => string = () => 'Apply the change instruction to this agent.',
+): ScriptRewrite[] {
   const raw = Array.isArray(rawAgents) ? rawAgents as Array<Record<string, unknown>> : [];
+  const noteOf = (r: Record<string, unknown> | undefined) => r?.scriptChange ?? r?.scriptPlan;
   return agents.flatMap((agent, i) => {
     if (agent.pythonScript?.trim() !== REWRITE_SCRIPT) return [];
-    const note = raw.find(r => r?.agentIndex === agent.agentIndex)?.scriptChange ?? raw[i]?.scriptChange;
-    return [{ agentIndex: agent.agentIndex, scriptChange: typeof note === 'string' && note.trim() ? note.trim() : 'Apply the change instruction to this agent.' }];
+    const note = noteOf(raw.find(r => r?.agentIndex === agent.agentIndex)) ?? noteOf(raw[i]);
+    return [{ agentIndex: agent.agentIndex, scriptChange: typeof note === 'string' && note.trim() ? note.trim() : fallback(agent) }];
   });
 }
 

@@ -207,3 +207,8 @@
   .segActive::after, .skeleton { animation: none; }
   .agentFlow::before { animation: none; }
 }
+
+/* Where a conversation moved in from Command Center, and where the mission was created */
+.threadNote { display: flex; align-items: center; gap: 12px; margin: 4px 0; font-family: var(--font-sans); }
+.threadLine { flex: 1; height: 1px; background: var(--border); }
+.threadText { font-size: 0.72rem; font-weight: 600; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80%; }

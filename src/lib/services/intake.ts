@@ -635,29 +635,73 @@ export function repairMissionPermissions(
 // ============================================================
 // Core: Generate Mission JSON from natural language
 // ============================================================
+/**
+ * A new mission is built in steps, each run as its own background step with its own time limit: the
+ * design (agents, flow, permissions and a plan for each agent's script), one step per agent that writes
+ * its code, and the checks (action names, parameters, permissions). Designing a Canva deck and writing
+ * all its code in one call ran past the 300s limit twice, and the customer waited 12 minutes for a
+ * generic error. generateMissionJSON runs the steps in one go for callers without a background job.
+ */
+export interface MissionDesign {
+  /** The design; each agent's pythonScript is REWRITE_SCRIPT until its code step writes it. */
+  llmOutput: LLMOutput;
+  /** What each agent's script must do, from the design. */
+  plans: ScriptRewrite[];
+  contextToolkits: string[];
+  connectedProviders: string[];
+  /** What the code steps need besides the design: connected-app notes, tenant facts, proven agents, known issues. */
+  notes: string[];
+}
+
+export type MissionDesignResult = { isDiscovery: true; question: string } | { isDiscovery?: false; design: MissionDesign };
+
+type BuildFiles = Array<{ name: string; content: string }>;
+type Budget = { tenantId: string; missionId: string };
+
 export async function generateMissionJSON(
   intent: string,
   tenantId: string,
-  files?: Array<{name: string; content: string}>,
+  files?: BuildFiles,
   options: { priorQuestions?: string[] } = {},
 ): Promise<{ mission?: Mission; rawLLMOutput?: LLMOutput; isDiscovery?: boolean; question?: string }> {
-  // ── Build file context from attached files ──
-  let fileContext = '';
-  if (files && files.length > 0) {
-    fileContext = '\n\n=== ATTACHED FILES ===\n';
-    for (const f of files) {
-      const sizeKB = (f.content.length / 1024).toFixed(1);
-      fileContext += `\n--- File: ${f.name} (${sizeKB}KB) ---\n`;
-      // Truncate to ~8K chars per file to avoid context overflow
-      fileContext += f.content.slice(0, 8192);
-      if (f.content.length > 8192) {
-        fileContext += '\n[... truncated for context limits ...]';
-      }
-      fileContext += '\n';
-    }
-    fileContext += '=== END ATTACHED FILES ===\n';
-    console.log(`[intake] ${files.length} file(s) attached: ${files.map(f => f.name).join(', ')}`);
+  const designed = await designMission(intent, tenantId, files, options);
+  if (designed.isDiscovery) return { isDiscovery: true, question: designed.question };
+  const { design } = designed;
+  const scripts = await Promise.all(design.plans.map(p => writeAgentScript(design, p.agentIndex, intent, tenantId, files)));
+  return checkMission(design, Object.fromEntries(design.plans.map((p, i) => [p.agentIndex, scripts[i]])), tenantId);
+}
+
+/** The attached files as prompt context, each cut to ~8K characters. */
+function fileContextFor(files?: BuildFiles): string {
+  if (!files?.length) return '';
+  let context = '\n\n=== ATTACHED FILES ===\n';
+  for (const f of files) {
+    context += `\n--- File: ${f.name} (${(f.content.length / 1024).toFixed(1)}KB) ---\n${f.content.slice(0, 8192)}`;
+    if (f.content.length > 8192) context += '\n[... truncated for context limits ...]';
+    context += '\n';
   }
+  return `${context}=== END ATTACHED FILES ===\n`;
+}
+
+const DESIGN_CONTRACT = `You are designing a new mission. Return the COMPLETE Mission JSON in the format described below — title, description, agents (role, instructions, tools, capabilities, handoff protocol), orchestration, validation checklist, expected output format and permissions — EXCEPT the scripts: each agent's script is written afterwards, in its own call, from your plan.
+
+DESIGN CONTRACT:
+- For every agent set "pythonScript": "${REWRITE_SCRIPT}" and add "scriptPlan": a precise, self-contained plan for its script — the exact composio_execute action names (from the COMPOSIO ACTIONS list) or SDK functions it calls with their key parameters, the input_data fields it reads, what it computes or writes (long text with ask_ai / ask_ai_batch), and the exact JSON fields it prints. Use the same field names in the plans of the agents that read them.
+- Data the customer gave (records, figures, names, text to quote) is used verbatim: say in the plan which agent uses it and where. The script writer sees the customer's request too.
+- Every permission the scripts will need goes in "permissions", its scope listing the action names the plans call.
+- Keep each scriptPlan under 200 words.
+
+`;
+
+/** Step 1 of a new mission: one clarifying question, or the design with a plan for every script. */
+export async function designMission(
+  intent: string,
+  tenantId: string,
+  files?: BuildFiles,
+  options: { priorQuestions?: string[] } = {},
+): Promise<MissionDesignResult> {
+  const fileContext = fileContextFor(files);
+  if (files?.length) console.log(`[intake] ${files.length} file(s) attached: ${files.map(f => f.name).join(', ')}`);
   // ── Template Matching (GUIDE PATH — helps LLM, doesn't replace it) ──
   let templateHint = '';
   try {
@@ -921,7 +965,7 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
     const discoveryCheck = await callLLM([
       { role: 'system', content: discoveryPrompts[promptKey] },
       { role: 'user', content: `Intent: ${intent}${fileNotice}${fileContext}${globalMemory}${connectedNotice}${defaultsNotice}${priorNotice}` }
-    ], { jsonMode: true, temperature: 0.1, tier: 2, budgetContext: { tenantId, missionId: 'blueprint_generation' } });
+    ], { jsonMode: true, temperature: 0.1, job: 'build', budgetContext: { tenantId, missionId: 'blueprint_generation' } });
     try {
       discoveryData = robustJSONParse(discoveryCheck.content);
     } catch {
@@ -932,10 +976,10 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
     return { isDiscovery: true, question: discoveryData.question as string };
   }
 
-  // 2. Call LLM with system prompt + intent + template hint + memory context
+  // 2. The design: agents, flow, permissions and a plan per script — the scripts come in their own steps.
   const messages: Array<{ role: string; content: string }> = [
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: `Examples for reference:\n${FEW_SHOT_EXAMPLES}` },
+    { role: 'system', content: `${DESIGN_CONTRACT}${SYSTEM_PROMPT}` },
+    { role: 'user', content: `Examples for reference (their pythonScripts show the style the script writer follows — in your answer write a scriptPlan instead):\n${FEW_SHOT_EXAMPLES}` },
   ];
 
   // Inject template hint if matched — gives LLM a structural head start
@@ -948,57 +992,70 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
     messages.push({ role: 'user', content: composioActionsContext });
   }
 
-  // Inject live Buffer channel context — replaces agenticfactor.social for all posting tasks.
-  // bufferContext is an empty string when Buffer is not connected (getBufferContext returns '').
-  if (bufferContext) {
-    messages.push({ role: 'user', content: bufferContext });
-  }
-
-  // Inject OpenAI and Gemini capabilities when connected (static — no live API discovery needed).
-  if (openaiContext) {
-    messages.push({ role: 'user', content: openaiContext });
-  }
-  if (geminiContext) {
-    messages.push({ role: 'user', content: geminiContext });
-  }
+  // Live Buffer channels and the connected OpenAI / Gemini keys (empty strings when not connected).
+  const appNotes = [bufferContext, openaiContext, geminiContext].filter(Boolean);
+  for (const note of appNotes) messages.push({ role: 'user', content: note });
 
   messages.push({
     role: 'user',
     content: `Generate a Mission JSON for the following intent:\n\n"${intent}"${fileContext}${memoryContext}${agentTemplateContext}${feedbackContext}${globalMemory}`,
   });
 
-  const architectOptions = { temperature: 0.3, jsonMode: true, tier: 1 as const, maxTokens: 32000, budgetContext: { tenantId, missionId: 'blueprint_generation' } };
+  const architectOptions = { temperature: 0.3, jsonMode: true, job: 'build' as const, maxTokens: 16000, budgetContext: { tenantId, missionId: 'blueprint_generation' } };
   let llmResponse = await callLLM(messages as any, architectOptions);
-  // A blueprint cut off at the output limit loses its last sections (orchestration, checklist) and ends
-  // its last script mid-line; "repairing" that JSON only hid it — a pitch-deck mission failed with a
-  // schema dump. Ask once more for a shorter design.
+  // A design cut off at the output limit loses its last sections; ask once more for a shorter one.
   if (llmResponse.truncated) {
-    console.warn('[intake] Blueprint reply hit the output limit — asking again for shorter scripts.');
+    console.warn('[intake] Design reply hit the output limit — asking again for a shorter one.');
     llmResponse = await callLLM([
       ...(messages as any),
-      { role: 'user', content: 'Your previous answer was cut off at the length limit. Answer again with the complete Mission JSON and keep every pythonScript short: generate long text (slide copy, emails, documents) at runtime with ask_ai / ask_ai_batch instead of writing it into the script, and loop over data instead of repeating code.' },
+      { role: 'user', content: 'Your previous answer was cut off at the length limit. Answer again with the complete Mission JSON: shorter systemPrompts and scriptPlans, and no scripts — every pythonScript is "__REWRITE__".' },
     ], architectOptions);
     if (llmResponse.truncated) {
       throw new Error('This mission came out too large to design in one go. Try splitting the request into two smaller missions.');
     }
   }
 
-  console.log(`[intake] LLM provider: ${llmResponse.provider}, tokens: ${llmResponse.tokensUsed}`);
+  console.log(`[intake] Design: ${llmResponse.provider}/${llmResponse.model}, tokens: ${llmResponse.tokensUsed}`);
 
-  // ── JSON Auto-Retry with Local Repair ──
-  // Step 1: Try parsing as-is
-  // Step 2: Try local JSON repair (free, no LLM call)
-  // Step 3: Retry LLM with error context (costs credits)
-  let rawJSON: Record<string, unknown>;
-  
+  let rawJSON = sanitizePlaceholders(await parseArchitectJSON(llmResponse.content, tenantId)) as Record<string, unknown>;
+
+  // The two closing sections have safe defaults: a complete design that only left them out
+  // should not fail the whole build (a cut-off reply never gets here — it is retried above).
+  if (!rawJSON.orchestration || typeof rawJSON.orchestration !== 'object') {
+    rawJSON.orchestration = { pattern: 'sequential', timeoutSeconds: 300, edges: [] };
+  }
+  if (!Array.isArray(rawJSON.validationChecklist) || rawJSON.validationChecklist.length === 0) {
+    const roles = Array.isArray(rawJSON.agents) ? (rawJSON.agents as Array<{ role?: string }>).map(a => a?.role).filter(Boolean) : [];
+    rawJSON.validationChecklist = roles.length ? roles.map(r => `${r} completes its step with real data`) : ['Every step completes with real data'];
+  }
+  // An agent the design left without a script still gets one, written from its instructions.
+  if (Array.isArray(rawJSON.agents)) {
+    rawJSON = { ...rawJSON, agents: (rawJSON.agents as Array<Record<string, unknown>>).map(a =>
+      typeof a?.pythonScript === 'string' && a.pythonScript.trim() ? a : { ...a, pythonScript: REWRITE_SCRIPT }) };
+  }
+
+  const llmOutput = LLMOutputSchema.parse(rawJSON);
+  const plans = collectRewrites(rawJSON.agents, llmOutput.agents, agent =>
+    [agent.systemPrompt, agent.handoffProtocol && `Handoff: ${agent.handoffProtocol}`].filter(Boolean).join('\n') || agent.role);
+  console.log(`[intake] Designed ${llmOutput.agents.length} agent(s); ${plans.length} script(s) to write.`);
+
+  return {
+    design: {
+      llmOutput, plans, contextToolkits, connectedProviders,
+      notes: [...appNotes, globalMemory, agentTemplateContext, feedbackContext].map(n => n.trim()).filter(Boolean),
+    },
+  };
+}
+
+/** The architect's reply as JSON: as-is, else repaired locally (free), else by a quick model call. */
+async function parseArchitectJSON(content: string, tenantId: string): Promise<Record<string, unknown>> {
   try {
-    rawJSON = robustJSONParse(llmResponse.content);
+    return robustJSONParse(content);
   } catch (parseError1) {
     console.warn(`[intake] JSON parse failed, attempting local repair...`);
-    
-    // Step 2: Aggressive local JSON repair — fix common LLM JSON mistakes
+    // Aggressive local JSON repair — fix common LLM JSON mistakes
     try {
-      let repaired = llmResponse.content;
+      let repaired = content;
       // Remove markdown code block wrappers (multi-line)
       repaired = repaired.replace(/^[\s\S]*?```json?\s*\n?/i, '');
       repaired = repaired.replace(/\n?```[\s\S]*$/i, '');
@@ -1024,26 +1081,20 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
       const closeBrackets = (repaired.match(/\]/g) || []).length;
       repaired += '}'.repeat(Math.max(0, openBraces - closeBraces));
       repaired += ']'.repeat(Math.max(0, openBrackets - closeBrackets));
-      
-      rawJSON = robustJSONParse(repaired);
+      const parsed = robustJSONParse(repaired);
       console.log(`[intake] Local JSON repair succeeded!`);
-    } catch (repairError) {
+      return parsed;
+    } catch {
       console.warn(`[intake] Local repair failed, trying lightweight LLM JSON fix...`);
-      
-      // Step 3: Lightweight JSON-fix-only call (NOT full regeneration)
-      // Send the FULL raw output and ask the LLM to ONLY fix JSON syntax
-      // Uses tier 2 (faster, cheaper) and caps output tokens
+      // JSON-syntax-only fix (not a regeneration): a simple job for the light model.
       const retryResponse = await callLLM([
         { role: 'system', content: 'You are a JSON repair tool. The user will give you malformed JSON. Your ONLY job is to fix the JSON syntax and return valid JSON. Do NOT change any content, values, or structure. Do NOT add commentary. Return ONLY the repaired JSON.' },
-        { role: 'user', content: `Fix this JSON (error: ${(parseError1 as Error).message}):\n\n${llmResponse.content}` }
-      ], { temperature: 0, jsonMode: true, tier: 2, maxTokens: 16384, budgetContext: { tenantId, missionId: 'blueprint_repair' } });
-      
+        { role: 'user', content: `Fix this JSON (error: ${(parseError1 as Error).message}):\n\n${content}` }
+      ], { temperature: 0, jsonMode: true, job: 'light', maxTokens: 16384, budgetContext: { tenantId, missionId: 'blueprint_repair' } });
       console.log(`[intake] JSON repair LLM: ${retryResponse.provider}, tokens: ${retryResponse.tokensUsed}`);
-      
       try {
-        rawJSON = robustJSONParse(retryResponse.content);
-        console.log(`[intake] LLM JSON repair succeeded!`);
-      } catch (parseError2) {
+        return robustJSONParse(retryResponse.content);
+      } catch {
         // Last attempt: clean the retry response too
         let cleaned = retryResponse.content;
         cleaned = cleaned.replace(/^[\s\S]*?```json?\s*\n?/i, '').replace(/\n?```[\s\S]*$/i, '');
@@ -1052,224 +1103,109 @@ IMPORTANT: NEVER call api.call('gemini', ...) — use google.generativeai direct
         const lb = cleaned.lastIndexOf('}');
         if (lb > 0) cleaned = cleaned.substring(0, lb + 1);
         cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
-        rawJSON = robustJSONParse(cleaned); // If this fails, the error propagates to the user
+        return robustJSONParse(cleaned); // If this fails, the error propagates to the user
       }
     }
   }
+}
 
-  // 3. Strip any PLACEHOLDER values that slipped past the system prompt
-  rawJSON = sanitizePlaceholders(rawJSON) as Record<string, unknown>;
+/** Composio's live actions (and lessons learned) for the toolkits, as prompt context. */
+async function composioContextFor(toolkits: string[]): Promise<string> {
+  if (toolkits.length === 0) return '';
+  const { buildComposioActionsContext } = await import('./composio-actions');
+  const { lessonsFor } = await import('./toolkit-lessons');
+  return `${await buildComposioActionsContext(toolkits).catch(() => '')}${await lessonsFor(toolkits).catch(() => '')}`;
+}
 
-  // 3.5 The two closing sections have safe defaults: a complete design that only left them out
-  // should not fail the whole build (a cut-off reply never gets here — it is retried above).
-  if (!rawJSON.orchestration || typeof rawJSON.orchestration !== 'object') {
-    rawJSON.orchestration = { pattern: 'sequential', timeoutSeconds: 300, edges: [] };
+/** The toolkits an agent's plan and tools name (all of them when it names none). */
+function toolkitsForAgent(toolkits: string[], text: string): string[] {
+  const upper = text.toUpperCase();
+  const lower = text.toLowerCase();
+  const named = toolkits.filter(tk => upper.includes(`${tk.toUpperCase()}_`) || lower.includes(tk.toLowerCase().replace(/_/g, ' ')) || lower.includes(tk.toLowerCase()));
+  return named.length ? named : toolkits;
+}
+
+/**
+ * Writes one script with the build model: the change or plan in `task`, the script rules in the system
+ * prompt. A reply cut off at the output limit is asked for again, shorter.
+ */
+async function writeScript(prompt: string, context: string[], task: string, role: string, budget?: Budget): Promise<string> {
+  const messages = [
+    { role: 'system', content: `${prompt}${SYSTEM_PROMPT}` },
+    ...context.filter(Boolean).map(content => ({ role: 'user', content })),
+    { role: 'user', content: task },
+  ];
+  const options = { jsonMode: true, temperature: 0.2, job: 'build' as const, maxTokens: 16000, ...(budget ? { budgetContext: budget } : {}) };
+  let res = await callLLM(messages as any, options);
+  if (res.truncated) {
+    console.warn(`[intake] The script for "${role}" hit the output limit — asking again for a shorter one.`);
+    res = await callLLM([
+      ...(messages as any),
+      { role: 'user', content: 'Your previous answer was cut off at the length limit. Write the script again, shorter: generate long text at runtime with ask_ai / ask_ai_batch and loop over data instead of repeating code.' },
+    ], options);
   }
-  if (!Array.isArray(rawJSON.validationChecklist) || rawJSON.validationChecklist.length === 0) {
-    const roles = Array.isArray(rawJSON.agents) ? (rawJSON.agents as Array<{ role?: string }>).map(a => a?.role).filter(Boolean) : [];
-    rawJSON.validationChecklist = roles.length ? roles.map(r => `${r} completes its step with real data`) : ['Every step completes with real data'];
+  let script: unknown;
+  try { script = robustJSONParse(res.content)?.pythonScript; } catch { script = undefined; }
+  if (typeof script !== 'string' || !script.trim() || script.trim() === REWRITE_SCRIPT) {
+    throw new Error(`Could not write the code for "${role}"${res.truncated ? ' — it came out too long' : ''}.`);
   }
+  console.log(`[intake] Script for "${role}": ${res.provider}/${res.model}, tokens: ${res.tokensUsed}`);
+  return sanitizePlaceholders(script) as string;
+}
 
-  // 4. Validate LLM output against schema
-  const llmOutput = LLMOutputSchema.parse(rawJSON);
+const SCRIPT_WRITE_PROMPT = `You are writing ONE agent's Python script for a new AgenticFactor mission. The mission's design is below: each agent's role, instructions, handoff protocol and "scriptPlan". Write the complete script for the agent named at the end — do everything its plan says, read exactly the input_data fields the earlier agents' plans print, and print exactly the fields later agents' plans read. Follow every script rule below; the rules about the Mission JSON itself don't apply, since you return one script. Return ONLY JSON: {"pythonScript": "<the complete script>"}.
 
-  // 4.5 Normalize permission service names (safety net for LLM hallucinations)
-  if (llmOutput.permissions?.length > 0) {
-    llmOutput.permissions = normalizePermissions(llmOutput.permissions as any) as any;
-  }
+`;
 
-  // 4.5.1 Auto-grant composio_oauth permissions for providers already connected by this tenant.
-  // The LLM always emits granted: false (it doesn't know the tenant's connection state).
-  // Correcting it here ensures validation-agent.ts sees granted: true for connected services,
-  // preventing the quality gate from failing on missions where everything IS connected.
-  if (llmOutput.permissions?.length > 0 && connectedProviders.length > 0) {
-    const { AF_TO_COMPOSIO_APP } = await import('./composio-actions');
-    const connectedSlugs = new Set<string>();
-    for (const cp of connectedProviders) {
-      connectedSlugs.add(cp.toLowerCase());
-      const slug = AF_TO_COMPOSIO_APP[cp];
-      if (slug) connectedSlugs.add(slug.toLowerCase());
-    }
-    llmOutput.permissions = (llmOutput.permissions as any[]).map((perm: any) => {
-      if (perm.type !== 'composio_oauth') return perm;
-      const service = (perm.service ?? '').toLowerCase().trim();
-      return { ...perm, granted: connectedSlugs.has(service) };
-    });
-  }
+/** Step 2 of a new mission, once per agent: writes its script from the design's plan. */
+export async function writeAgentScript(
+  design: MissionDesign,
+  agentIndex: number,
+  intent: string,
+  tenantId: string,
+  files?: BuildFiles,
+): Promise<string> {
+  const agent = design.llmOutput.agents.find(a => a.agentIndex === agentIndex);
+  if (!agent) throw new Error(`The design has no agent #${agentIndex + 1}.`);
+  const planOf = (index: number) => design.plans.find(p => p.agentIndex === index)?.scriptChange;
+  const plan = planOf(agentIndex) ?? agent.systemPrompt ?? agent.role;
+  const toolkits = toolkitsForAgent(design.contextToolkits, `${plan}\n${(agent.tools ?? []).map(t => t.name).join(', ')}`);
+  const missionView = JSON.stringify({
+    ...design.llmOutput,
+    agents: design.llmOutput.agents.map(a => {
+      const { pythonScript, ...rest } = a;
+      const p = planOf(a.agentIndex);
+      return p ? { ...rest, scriptPlan: p } : { ...rest, pythonScript: (pythonScript ?? '').slice(0, 1500) };
+    }),
+  }, null, 2);
+  return writeScript(
+    SCRIPT_WRITE_PROMPT,
+    [`Examples of complete missions (for the script style):\n${FEW_SHOT_EXAMPLES}`, await composioContextFor(toolkits), ...design.notes],
+    `THE CUSTOMER'S REQUEST:\n${intent}${fileContextFor(files)}\n\nTHE MISSION DESIGN:\n${missionView}\n\nAGENT TO WRITE — agentIndex ${agentIndex}, role "${agent.role}"\nInstructions: ${agent.systemPrompt ?? ''}\nHandoff: ${agent.handoffProtocol ?? ''}\n\nPLAN FOR ITS SCRIPT:\n${plan}`,
+    agent.role,
+    { tenantId, missionId: 'blueprint_generation' },
+  );
+}
 
-  // 4.5.2 Repair pass — infer any permissions the LLM missed from agent tool declarations.
-  // Runs after normalise (4.5) and auto-grant (4.5.1) so all existing entries are on
-  // canonical keys and newly-added entries start with granted: false (auto-grant will
-  // not rerun, so the command-chat route's own diff handles the connected check).
-  llmOutput.permissions = repairMissionPermissions(
-    llmOutput.agents as Array<{ role: string; tools: Array<{ name: string; type: string }> }>,
-    llmOutput.permissions as RawPermission[]
-  ) as typeof llmOutput.permissions;
-
-  // 4.6 Validate composio_execute action names against Composio's live action list.
-  // If the LLM invented a name (e.g. "TRELLO_ADD_CARDS" instead of "TRELLO_CREATE_TRELLO_CARD"),
-  // we catch it here and fix the script before the blueprint is saved — not at runtime after
-  // credits are burned on 5 failed retries.
-  if (contextToolkits.length > 0) {
-    try {
-      const { getValidComposioActionNames } = await import('./composio-actions');
-      const validActions = await getValidComposioActionNames(contextToolkits);
-
-      if (validActions.size > 0) {
-        const invalidActions = new Set<string>();
-        const actionRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
-
-        for (const agent of llmOutput.agents) {
-          if (!agent.pythonScript) continue;
-          actionRegex.lastIndex = 0;
-          let match;
-          while ((match = actionRegex.exec(agent.pythonScript)) !== null) {
-            if (!validActions.has(match[1])) invalidActions.add(match[1]);
-          }
-        }
-
-        if (invalidActions.size > 0) {
-          console.warn(`[intake] Invalid Composio action names detected: ${[...invalidActions].join(', ')} — auto-correcting`);
-
-          const correctionResponse = await callLLM([
-            {
-              role: 'system',
-              content: `You are a Python script corrector. Fix ONLY composio_execute() action names that do not exist.
-Invalid names found: ${[...invalidActions].join(', ')}
-Valid action names available: ${[...validActions].join(', ')}
-Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected script"}]}
-Include only agents whose scripts were changed. Change nothing else — not logic, not structure, not variable names.`,
-            },
-            {
-              role: 'user',
-              content: JSON.stringify(
-                llmOutput.agents
-                  .filter(a => a.pythonScript)
-                  .map(a => ({ agentIndex: a.agentIndex, pythonScript: a.pythonScript }))
-              ),
-            },
-          ], { temperature: 0, jsonMode: true, tier: 2, budgetContext: { tenantId, missionId: 'composio_action_fix' } });
-
-          try {
-            const corrections = robustJSONParse(correctionResponse.content);
-            if (Array.isArray(corrections?.agents)) {
-              for (const fix of corrections.agents) {
-                const agent = llmOutput.agents.find(a => a.agentIndex === fix.agentIndex);
-                if (agent && fix.pythonScript) {
-                  agent.pythonScript = fix.pythonScript;
-                }
-              }
-              console.log(`[intake] Composio action names auto-corrected for ${corrections.agents.length} agent(s)`);
-            }
-          } catch {
-            console.warn('[intake] Composio action name correction LLM call failed — proceeding with original (non-fatal)');
-          }
-        } else {
-          console.log(`[intake] Composio action name validation passed — all names are valid`);
-        }
-      }
-    } catch (err) {
-      console.warn('[intake] Composio action validation failed (non-fatal):', err);
-    }
+/** Step 3 of a new mission: the written scripts checked against Composio, permissions settled, ids given. */
+export async function checkMission(
+  design: MissionDesign,
+  scripts: Record<number, string>,
+  tenantId: string,
+): Promise<{ mission: Mission; rawLLMOutput: LLMOutput }> {
+  const llmOutput: LLMOutput = structuredClone(design.llmOutput);
+  const { contextToolkits, connectedProviders } = design;
+  for (const agent of llmOutput.agents) {
+    const script = scripts[agent.agentIndex];
+    if (typeof script === 'string' && script.trim()) agent.pythonScript = script;
+    if (agent.pythonScript?.trim() === REWRITE_SCRIPT) throw new Error(`The code for "${agent.role}" was not written.`);
   }
 
-  // 4.7 Validate composio_execute() parameter names against live Composio schemas.
-  // The action name correction above (4.6) catches wrong ACTION names.
-  // This catches wrong PARAMETER names — e.g. passing {recipient: ...} when the
-  // schema requires {recipient_email: ...}. Both errors fail silently at runtime,
-  // burning credits. We fix both before the blueprint is ever saved.
-  if (contextToolkits.length > 0) {
-    try {
-      const { getComposioActionSchemas } = await import('./composio-actions');
-      const actionSchemas = await getComposioActionSchemas(contextToolkits);
+  await settlePermissions(llmOutput, connectedProviders);
+  await fixComposioCalls(llmOutput.agents, contextToolkits, '[intake]', { tenantId, missionId: 'composio_action_fix' });
+  await declareToolkits(llmOutput, connectedProviders, '[intake]');
 
-      if (actionSchemas.size > 0) {
-        // Collect every action name actually used in the generated scripts
-        const usedActions = new Set<string>();
-        const usedActionRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
-        for (const agent of llmOutput.agents) {
-          if (!agent.pythonScript) continue;
-          usedActionRegex.lastIndex = 0;
-          let m;
-          while ((m = usedActionRegex.exec(agent.pythonScript)) !== null) {
-            usedActions.add(m[1]);
-          }
-        }
-
-        // Build a compact schema reference for only the actions that are actually used
-        const schemaRef: Record<string, { required: string[]; properties: Record<string, string> }> = {};
-        for (const actionName of usedActions) {
-          const schema = actionSchemas.get(actionName);
-          if (schema) {
-            const props: Record<string, string> = {};
-            for (const [param, info] of Object.entries(schema.input_parameters?.properties ?? {})) {
-              props[param] = info.type ?? 'any';
-            }
-            schemaRef[actionName] = {
-              required: schema.input_parameters?.required ?? [],
-              properties: props,
-            };
-          }
-        }
-
-        if (Object.keys(schemaRef).length > 0) {
-          const paramReviewResponse = await callLLM([
-            {
-              role: 'system',
-              content: `You are a Python parameter validator. Review each agent's pythonScript for composio_execute() calls.
-For each call, verify:
-1. All REQUIRED parameters are present and spelled EXACTLY as in the schema
-2. No parameter names are invented — they must match the schema exactly
-3. Parameter value types match the expected type (e.g. string vs array)
-
-Composio action schemas (format: {required: [...], properties: {name: type}}):
-${JSON.stringify(schemaRef, null, 2)}
-
-Fix any mismatched or missing required parameter names. Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected script"}]}
-Include ONLY agents whose scripts were changed. Change nothing else — not logic, not variable names, not structure.`,
-            },
-            {
-              role: 'user',
-              content: JSON.stringify(
-                llmOutput.agents
-                  .filter(a => a.pythonScript)
-                  .map(a => ({ agentIndex: a.agentIndex, pythonScript: a.pythonScript }))
-              ),
-            },
-          ], { temperature: 0, jsonMode: true, tier: 2, budgetContext: { tenantId, missionId: 'composio_param_fix' } });
-
-          try {
-            const paramFixes = robustJSONParse(paramReviewResponse.content);
-            if (Array.isArray(paramFixes?.agents) && paramFixes.agents.length > 0) {
-              for (const fix of paramFixes.agents) {
-                const agent = llmOutput.agents.find(a => a.agentIndex === fix.agentIndex);
-                if (agent && fix.pythonScript) agent.pythonScript = fix.pythonScript;
-              }
-              console.log(`[intake] Parameter names validated and corrected for ${paramFixes.agents.length} agent(s)`);
-            } else {
-              console.log(`[intake] Parameter validation passed — all parameter names are correct`);
-            }
-          } catch {
-            console.warn('[intake] Parameter validation LLM parse failed (non-fatal)');
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[intake] Parameter validation failed (non-fatal):', err);
-    }
-  }
-
-  // Every toolkit the scripts call gets a permission, from the toolkit Composio records per action.
-  try {
-    const { declareCalledToolkits } = await import('./toolkit-resolver');
-    llmOutput.permissions = await declareCalledToolkits(
-      llmOutput.agents.map(a => a.pythonScript ?? ''), llmOutput.permissions as any, connectedProviders,
-    ) as typeof llmOutput.permissions;
-  } catch (err) {
-    console.warn('[intake] Toolkit permission check failed (non-fatal):', err);
-  }
-
-  // 4. Hydrate with IDs, tenantId, timestamps
+  // Hydrate with IDs, tenantId, timestamps
   const now = new Date().toISOString();
   const missionId = uuidv4();
 
@@ -1299,7 +1235,7 @@ Include ONLY agents whose scripts were changed. Change nothing else — not logi
     agentIdMap.get(llmOutput.orchestration.entryAgent || 'agent-0') ||
     hydratedAgents[0].id;
 
-  // 5. Build the full Mission object
+  // Build the full Mission object
   const mission: Mission = MissionSchema.parse({
     id: missionId,
     tenantId,
@@ -1321,6 +1257,124 @@ Include ONLY agents whose scripts were changed. Change nothing else — not logi
   });
 
   return { mission, rawLLMOutput: llmOutput };
+}
+
+/**
+ * Permissions on canonical service names, granted where the tenant already connected the app (the model
+ * always writes granted: false, which failed the quality gate on fully connected missions), plus any
+ * the agents' tools imply that the model left out.
+ */
+async function settlePermissions(llmOutput: LLMOutput, connectedProviders: string[]): Promise<void> {
+  if (llmOutput.permissions?.length > 0) {
+    llmOutput.permissions = normalizePermissions(llmOutput.permissions as any) as any;
+  }
+  if (llmOutput.permissions?.length > 0 && connectedProviders.length > 0) {
+    try {
+      const { AF_TO_COMPOSIO_APP } = await import('./composio-actions');
+      const connectedSlugs = new Set<string>();
+      for (const cp of connectedProviders) {
+        connectedSlugs.add(cp.toLowerCase());
+        const slug = AF_TO_COMPOSIO_APP[cp];
+        if (slug) connectedSlugs.add(slug.toLowerCase());
+      }
+      llmOutput.permissions = (llmOutput.permissions as any[]).map((perm: any) => {
+        if (perm.type !== 'composio_oauth') return perm;
+        const service = (perm.service ?? '').toLowerCase().trim();
+        return { ...perm, granted: connectedSlugs.has(service) };
+      });
+    } catch { /* non-fatal */ }
+  }
+  // Runs after the two above, so existing entries are on canonical keys and added ones start ungranted.
+  llmOutput.permissions = repairMissionPermissions(
+    llmOutput.agents as Array<{ role: string; tools: Array<{ name: string; type: string }> }>,
+    llmOutput.permissions as RawPermission[]
+  ) as typeof llmOutput.permissions;
+}
+
+/** Every toolkit the scripts call gets a permission, from the toolkit Composio records per action. */
+async function declareToolkits(llmOutput: LLMOutput, connectedProviders: string[], log: string): Promise<void> {
+  try {
+    const { declareCalledToolkits } = await import('./toolkit-resolver');
+    llmOutput.permissions = await declareCalledToolkits(
+      llmOutput.agents.map(a => a.pythonScript ?? ''), llmOutput.permissions as any, connectedProviders,
+    ) as typeof llmOutput.permissions;
+  } catch (err) {
+    console.warn(`${log} Toolkit permission check failed (non-fatal):`, err);
+  }
+}
+
+const COMPOSIO_CALL = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
+
+/**
+ * Checks the scripts' composio_execute() calls against Composio's live catalog before the mission is
+ * saved — action names it doesn't have (e.g. "TRELLO_ADD_CARDS" for "TRELLO_CREATE_TRELLO_CARD"), then
+ * parameter names and missing required parameters — and fixes them one script at a time, in parallel.
+ * Both mistakes otherwise fail at runtime after credits are spent on retries.
+ */
+async function fixComposioCalls(
+  agents: Array<{ agentIndex: number; pythonScript?: string }>,
+  contextToolkits: string[],
+  log: string,
+  budget?: Budget,
+  emit?: (step: string, label: string) => Promise<void>,
+): Promise<void> {
+  if (contextToolkits.length === 0) return;
+  const scripted = () => agents.filter((a): a is { agentIndex: number; pythonScript: string } => !!a.pythonScript);
+  const options = { temperature: 0, jsonMode: true, job: 'build' as const, maxTokens: 16000, ...(budget ? { budgetContext: budget } : {}) };
+  const corrected = async (system: string, user: string): Promise<string | null> => {
+    try {
+      const fixed = robustJSONParse((await callLLM([{ role: 'system', content: system }, { role: 'user', content: user }], options)).content)?.pythonScript;
+      return typeof fixed === 'string' && fixed.trim() ? fixed : null;
+    } catch {
+      return null; // non-fatal — the runtime fixer catches what's left
+    }
+  };
+
+  await emit?.('validating_actions', 'Validating Composio action names…');
+  try {
+    const { getValidComposioActionNames } = await import('./composio-actions');
+    const validActions = await getValidComposioActionNames(contextToolkits);
+    if (validActions.size > 0) {
+      await Promise.all(scripted().map(async agent => {
+        const invalid = [...new Set([...agent.pythonScript.matchAll(COMPOSIO_CALL)].map(m => m[1]))].filter(name => !validActions.has(name));
+        if (invalid.length === 0) return;
+        console.warn(`${log} Agent ${agent.agentIndex} calls unknown Composio actions: ${invalid.join(', ')} — correcting`);
+        const fixed = await corrected(
+          `You are a Python script corrector. Fix ONLY composio_execute() action names that do not exist.
+Invalid names found: ${invalid.join(', ')}
+Valid action names available: ${[...validActions].join(', ')}
+Return JSON: {"pythonScript": "corrected script"}
+Change nothing else — not logic, not structure, not variable names.`,
+          agent.pythonScript,
+        );
+        if (fixed) agent.pythonScript = fixed;
+      }));
+    }
+  } catch (err) {
+    console.warn(`${log} Action name validation failed (non-fatal):`, err);
+  }
+
+  await emit?.('validating_params', 'Validating parameter names…');
+  try {
+    const { getComposioActionSchemas } = await import('./composio-actions');
+    const actionSchemas = await getComposioActionSchemas(contextToolkits);
+    if (actionSchemas.size > 0) {
+      // The unambiguous mistakes are renamed in place; only scripts that still have problems go to the model.
+      await Promise.all(scripted().map(async agent => {
+        agent.pythonScript = autoFixComposioParams(agent.pythonScript, actionSchemas).code;
+        const problems = checkComposioParams(agent.pythonScript, actionSchemas);
+        if (problems.length === 0) return;
+        const fixed = await corrected(
+          `Fix the listed composio_execute() parameter problems. Change nothing else.
+Return JSON: {"pythonScript": "corrected script"}`,
+          JSON.stringify({ agentIndex: agent.agentIndex, pythonScript: agent.pythonScript, problems }),
+        );
+        if (fixed) agent.pythonScript = fixed;
+      }));
+    }
+  } catch (err) {
+    console.warn(`${log} Parameter validation failed (non-fatal):`, err);
+  }
 }
 
 // ============================================================
@@ -1401,7 +1455,7 @@ ${SYSTEM_PROMPT}`;
   const llmResponse = await callLLM(messages as any, {
     jsonMode: true,
     temperature: 0.2,
-    tier: 1,
+    job: 'build',
     ...(tenantId ? { budgetContext: { tenantId, missionId: currentBlueprint.id || 'blueprint_edit' } } : {}),
   });
 
@@ -1415,7 +1469,7 @@ ${SYSTEM_PROMPT}`;
     const healResponse = await callLLM([
       { role: 'system', content: 'You are a JSON recovery expert. Fix the JSON so it perfectly matches the LLMOutputSchema format. Return ONLY valid JSON.' },
       { role: 'user', content: `Bad Output: ${llmResponse.content}\n\nError: ${err.message}` }
-    ], { jsonMode: true, temperature: 0.1, tier: 1 });
+    ], { jsonMode: true, temperature: 0.1, job: 'build' });
     rawJSON = sanitizePlaceholders(robustJSONParse(healResponse.content)) as Record<string, unknown>;
     llmOutput = LLMOutputSchema.parse(rawJSON);
   }
@@ -1445,12 +1499,7 @@ export async function rewriteAgentScripts(
   const emit = onProgress ?? (async () => {});
   await emit('generating', `Rewriting ${rewrites.length} agent script${rewrites.length === 1 ? '' : 's'} in parallel…`);
 
-  let composioActionsContext = '';
-  if (draft.contextToolkits.length > 0) {
-    const { buildComposioActionsContext } = await import('./composio-actions');
-    const { lessonsFor } = await import('./toolkit-lessons');
-    composioActionsContext = `${await buildComposioActionsContext(draft.contextToolkits).catch(() => '')}${await lessonsFor(draft.contextToolkits).catch(() => '')}`;
-  }
+  const composioActionsContext = await composioContextFor(draft.contextToolkits);
   // The other agents shortened: enough to see what flows in and out of the one being rewritten.
   const missionView = JSON.stringify({
     ...draft.llmOutput,
@@ -1463,23 +1512,13 @@ export async function rewriteAgentScripts(
     const agent = llmOutput.agents.find(a => a.agentIndex === agentIndex);
     if (!agent) return;
     const before = currentBlueprint.agents.find(a => a.id === agent.id || a.role === agent.role)?.pythonScript ?? '';
-    const messages = [
-      { role: 'system', content: `${SCRIPT_REWRITE_PROMPT}${SYSTEM_PROMPT}` },
-      ...(composioActionsContext ? [{ role: 'user', content: composioActionsContext }] : []),
-      {
-        role: 'user',
-        content: `THE MISSION (other agents' scripts shortened):\n${missionView}\n\nTHE CUSTOMER'S CHANGE REQUEST:\n${instruction}\n\nAGENT TO REWRITE — agentIndex ${agentIndex}, role "${agent.role}"\nInstructions: ${agent.systemPrompt ?? ''}\n\nCURRENT SCRIPT:\n${before ? '```python\n' + before + '\n```' : '(new agent — none yet)'}\n\nCHANGE TO MAKE:\n${scriptChange}`,
-      },
-    ];
-    const res = await callLLM(messages as any, {
-      jsonMode: true, temperature: 0.2, tier: 1,
-      ...(tenantId ? { budgetContext: { tenantId, missionId: currentBlueprint.id || 'blueprint_edit' } } : {}),
-    });
-    const script = robustJSONParse(res.content)?.pythonScript;
-    if (typeof script !== 'string' || !script.trim() || script.trim() === REWRITE_SCRIPT) {
-      throw new Error(`Could not rewrite the script for "${agent.role}"`);
-    }
-    agent.pythonScript = sanitizePlaceholders(script) as string;
+    agent.pythonScript = await writeScript(
+      SCRIPT_REWRITE_PROMPT,
+      [composioActionsContext],
+      `THE MISSION (other agents' scripts shortened):\n${missionView}\n\nTHE CUSTOMER'S CHANGE REQUEST:\n${instruction}\n\nAGENT TO REWRITE — agentIndex ${agentIndex}, role "${agent.role}"\nInstructions: ${agent.systemPrompt ?? ''}\n\nCURRENT SCRIPT:\n${before ? '```python\n' + before + '\n```' : '(new agent — none yet)'}\n\nCHANGE TO MAKE:\n${scriptChange}`,
+      agent.role,
+      tenantId ? { tenantId, missionId: currentBlueprint.id || 'blueprint_edit' } : undefined,
+    );
   }));
   return { ...draft, llmOutput, rewrites: [] };
 }
@@ -1497,127 +1536,9 @@ export async function finalizeBlueprintEdit(
   const changedScripts = restoreUnchangedScripts(llmOutput.agents, currentBlueprint.agents);
   const scriptsToValidate = () => llmOutput.agents.filter((a): a is typeof a & { pythonScript: string } => !!a.pythonScript && changedScripts.has(a.agentIndex));
 
-  // Normalize permission service names
-  if (llmOutput.permissions?.length > 0) {
-    llmOutput.permissions = normalizePermissions(llmOutput.permissions as any) as any;
-  }
-
-  // Auto-grant composio_oauth permissions for already-connected providers
-  if (llmOutput.permissions?.length > 0 && connectedProviders.length > 0) {
-    try {
-      const { AF_TO_COMPOSIO_APP } = await import('./composio-actions');
-      const connectedSlugs = new Set<string>();
-      for (const cp of connectedProviders) {
-        connectedSlugs.add(cp.toLowerCase());
-        const slug = AF_TO_COMPOSIO_APP[cp];
-        if (slug) connectedSlugs.add(slug.toLowerCase());
-      }
-      llmOutput.permissions = (llmOutput.permissions as any[]).map((perm: any) => {
-        if (perm.type !== 'composio_oauth') return perm;
-        const service = (perm.service ?? '').toLowerCase().trim();
-        return { ...perm, granted: connectedSlugs.has(service) };
-      });
-    } catch { /* non-fatal */ }
-  }
-
-  // Repair missing permissions inferred from agent tool declarations
-  llmOutput.permissions = repairMissionPermissions(
-    llmOutput.agents as Array<{ role: string; tools: Array<{ name: string; type: string }> }>,
-    llmOutput.permissions as RawPermission[]
-  ) as typeof llmOutput.permissions;
-
-  // 4.6: Validate Composio action names against live list
-  if (contextToolkits.length > 0) {
-    await emit('validating_actions', 'Validating Composio action names…');
-    try {
-      const { getValidComposioActionNames } = await import('./composio-actions');
-      const validActions = await getValidComposioActionNames(contextToolkits);
-      if (validActions.size > 0) {
-        const invalidActions = new Set<string>();
-        const actionRegex = /composio_execute\s*\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g;
-        for (const agent of scriptsToValidate()) {
-          actionRegex.lastIndex = 0;
-          let match;
-          while ((match = actionRegex.exec(agent.pythonScript)) !== null) {
-            if (!validActions.has(match[1])) invalidActions.add(match[1]);
-          }
-        }
-        if (invalidActions.size > 0) {
-          console.warn(`[intake/edit] Invalid Composio actions: ${[...invalidActions].join(', ')} — auto-correcting`);
-          const corrResp = await callLLM([
-            {
-              role: 'system',
-              content: `Fix ONLY the invalid composio_execute() action names.
-Invalid: ${[...invalidActions].join(', ')}
-Valid: ${[...validActions].join(', ')}
-Return JSON: {"agents": [{"agentIndex": number, "pythonScript": "corrected script"}]}`,
-            },
-            {
-              role: 'user',
-              content: JSON.stringify(scriptsToValidate().map(a => ({ agentIndex: a.agentIndex, pythonScript: a.pythonScript }))),
-            },
-          ], { temperature: 0, jsonMode: true, tier: 2 });
-          try {
-            const fixes = robustJSONParse(corrResp.content);
-            if (Array.isArray(fixes?.agents)) {
-              for (const fix of fixes.agents) {
-                const agent = llmOutput.agents.find(a => a.agentIndex === fix.agentIndex);
-                if (agent && fix.pythonScript) agent.pythonScript = fix.pythonScript;
-              }
-            }
-          } catch { /* non-fatal */ }
-        }
-      }
-    } catch (err) {
-      console.warn('[intake/edit] Action name validation failed (non-fatal):', err);
-    }
-  }
-
-  // 4.7: Validate Composio parameter names against live schemas
-  if (contextToolkits.length > 0) {
-    await emit('validating_params', 'Validating parameter names…');
-    try {
-      const { getComposioActionSchemas } = await import('./composio-actions');
-      const actionSchemas = await getComposioActionSchemas(contextToolkits);
-      if (actionSchemas.size > 0) {
-        // Rename the unambiguous mistakes in place; only scripts that still have problems go to the LLM.
-        const needsFix: Array<{ agentIndex: number; pythonScript: string; problems: string[] }> = [];
-        for (const agent of scriptsToValidate()) {
-          agent.pythonScript = autoFixComposioParams(agent.pythonScript, actionSchemas).code;
-          const problems = checkComposioParams(agent.pythonScript, actionSchemas);
-          if (problems.length > 0) needsFix.push({ agentIndex: agent.agentIndex, pythonScript: agent.pythonScript, problems });
-        }
-        // One call per script, in parallel: one call for every flagged script of a five-agent edit
-        // took three minutes of a step's 300s.
-        await Promise.all(needsFix.map(async fix => {
-          try {
-            const paramResp = await callLLM([
-              {
-                role: 'system',
-                content: `Fix the listed composio_execute() parameter problems. Change nothing else.
-Return JSON: {"pythonScript": "corrected script"}`,
-              },
-              { role: 'user', content: JSON.stringify(fix) },
-            ], { temperature: 0, jsonMode: true, tier: 2 });
-            const corrected = robustJSONParse(paramResp.content)?.pythonScript;
-            const agent = llmOutput.agents.find(a => a.agentIndex === fix.agentIndex);
-            if (agent && typeof corrected === 'string' && corrected.trim()) agent.pythonScript = corrected;
-          } catch { /* non-fatal — the runtime fixer catches what's left */ }
-        }));
-      }
-    } catch (err) {
-      console.warn('[intake/edit] Parameter validation failed (non-fatal):', err);
-    }
-  }
-
-  try {
-    const { declareCalledToolkits } = await import('./toolkit-resolver');
-    llmOutput.permissions = await declareCalledToolkits(
-      llmOutput.agents.map(a => a.pythonScript ?? ''), llmOutput.permissions as any, connectedProviders,
-    ) as typeof llmOutput.permissions;
-  } catch (err) {
-    console.warn('[intake/edit] Toolkit permission check failed (non-fatal):', err);
-  }
+  await settlePermissions(llmOutput, connectedProviders);
+  await fixComposioCalls(scriptsToValidate(), contextToolkits, '[intake/edit]', tenantId ? { tenantId, missionId: currentBlueprint.id || 'blueprint_edit' } : undefined, emit);
+  await declareToolkits(llmOutput, connectedProviders, '[intake/edit]');
 
   // Preserve UUIDs from the current blueprint; map agent-N refs and new agents to new UUIDs
   const oldToNewIdMap: Record<string, string> = {};

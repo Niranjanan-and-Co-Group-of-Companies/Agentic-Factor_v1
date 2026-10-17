@@ -132,7 +132,7 @@ export async function reportModelFailure(provider: string, modelName: string): P
 const MODEL_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 const modelHealthCache = new Map<string, { model: string; timestamp: number }>();
 
-function getCachedModel(provider: string, tier: number): string | null {
+function getCachedModel(provider: string, tier: number | string): string | null {
   const key = `${provider}:${tier}`;
   const cached = modelHealthCache.get(key);
   if (cached && (Date.now() - cached.timestamp) < MODEL_CACHE_TTL_MS) {
@@ -143,7 +143,7 @@ function getCachedModel(provider: string, tier: number): string | null {
   return null;
 }
 
-function setCachedModel(provider: string, tier: number, model: string): void {
+function setCachedModel(provider: string, tier: number | string, model: string): void {
   modelHealthCache.set(`${provider}:${tier}`, { model, timestamp: Date.now() });
 }
 
@@ -152,16 +152,31 @@ function setCachedModel(provider: string, tier: number, model: string): void {
 export { getModelCreditCost } from '@/lib/middleware/billing';
 
 /**
+ * The model for a job, whatever the plan: building (designing agents, writing and fixing their code,
+ * checking actions) runs on Sonnet; quick yes/no checks on Haiku; code still failing after two fixes
+ * goes to Opus. Each chain falls back in order (a model the account can't use is skipped), then to the
+ * tier's configured chain and the other providers.
+ */
+export type LLMJob = 'build' | 'light' | 'escalate';
+export const JOB_MODELS: Record<LLMJob, string[]> = {
+  build: ['claude-sonnet-5-5', 'claude-sonnet-5'],
+  light: ['claude-haiku-5-5', 'claude-haiku-4-5-20251001', 'claude-sonnet-5'],
+  escalate: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5'],
+};
+const JOB_TIER: Record<LLMJob, 1 | 2 | 3> = { build: 1, light: 3, escalate: 1 };
+
+/**
  * Call the best available LLM provider with self-healing fallback.
  * Returns the response including the actual model used for credit billing.
  */
 export async function callLLM(
   messages: LLMMessage[],
-  options: { temperature?: number; jsonMode?: boolean; tier?: 1 | 2 | 3; budgetContext?: { tenantId: string; missionId: string }; maxTokens?: number; planTenantId?: string } = {}
+  options: { temperature?: number; jsonMode?: boolean; tier?: 1 | 2 | 3; budgetContext?: { tenantId: string; missionId: string }; maxTokens?: number; planTenantId?: string; job?: LLMJob } = {}
 ): Promise<LLMResponse> {
-  const { temperature = 0.3, jsonMode = true, tier = 2, budgetContext, maxTokens = 16384 } = options;
-  // Paid plans get the best Claude model for code and blueprint generation; free plans the standard one.
-  const premium = await isPaidTenant(options.planTenantId ?? budgetContext?.tenantId);
+  const { temperature = 0.3, jsonMode = true, budgetContext, maxTokens = 16384, job } = options;
+  const tier = job ? JOB_TIER[job] : options.tier ?? 2;
+  // Without a job, paid plans get the best Claude model for tier 1 work; free plans the standard one.
+  const premium = job ? false : await isPaidTenant(options.planTenantId ?? budgetContext?.tenantId);
 
   let result: LLMResponse | null = null;
 
@@ -173,7 +188,7 @@ export async function callLLM(
   // ── 1st: Try Anthropic Claude ──
   if (!result && process.env.ANTHROPIC_API_KEY) {
     try {
-      result = await callAnthropicWithFallback(messages, temperature, tier, jsonMode, maxTokens, premium);
+      result = await callAnthropicWithFallback(messages, temperature, tier, jsonMode, maxTokens, premium, job);
     } catch (err) {
       console.warn('[LLM] All Anthropic models failed, trying Gemini:', (err as Error).message);
     }
@@ -268,12 +283,12 @@ async function alertProviderDown(provider: string, detail: string): Promise<void
   }
 }
 
-async function callAnthropicWithFallback(messages: LLMMessage[], temperature: number, tier: number, jsonMode: boolean, maxTokens: number, premium = false): Promise<LLMResponse> {
+async function callAnthropicWithFallback(messages: LLMMessage[], temperature: number, tier: number, jsonMode: boolean, maxTokens: number, premium = false, job?: LLMJob): Promise<LLMResponse> {
   const configured = await getModelChain('anthropic', tier);
-  const preferred = PREFERRED_CLAUDE[premium ? 'premium' : 'standard'][tier] ?? [];
+  const preferred = job ? JOB_MODELS[job] : PREFERRED_CLAUDE[premium ? 'premium' : 'standard'][tier] ?? [];
   const chain = [...preferred, ...configured.filter(m => !preferred.includes(m))];
-  // Cached per plan class, so a free-plan call never demotes paid-plan calls to its model.
-  const cacheTier = premium ? tier + 10 : tier;
+  // Cached per job or plan class, so a free-plan call never demotes paid-plan calls to its model.
+  const cacheTier = job ? `job:${job}` : premium ? tier + 10 : tier;
   const cachedModel = getCachedModel('anthropic', cacheTier);
   
   // Reorder chain: put cached model first if it exists

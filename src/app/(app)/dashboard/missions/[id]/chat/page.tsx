@@ -15,7 +15,8 @@ import { kickLive, useMissionLive } from '@/components/runs/useLiveRun';
 import { ApprovalRecord, recordOf, type ApprovalRecordPayload } from '@/components/runs/Approval';
 import { decisionText } from '@/lib/services/approval-records';
 import { AppDescription, AppName } from '@/components/apps/AppInfo';
-import { ActionResult, PendingResult, entryType, type ActionResultEntry, type ResultKind } from '@/components/runs/ActionResult';
+import { ActionResult, PendingResult, ThreadNote, entryType, type ActionResultEntry, type ResultKind } from '@/components/runs/ActionResult';
+import type { ThreadNote as ThreadNoteEntry } from '@/lib/services/build-jobs';
 import { appNameNow } from '@/components/apps/useAppInfo';
 import { describeNextRun } from '@/lib/services/cron-match';
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -1799,7 +1800,9 @@ export default function MissionChatPage() {
               )}
 
               {/* Messages */}
-              {messages.map((msg, i) => (
+              {messages.map((msg, i) => entryType(msg.action_payload) === 'thread_note' ? (
+                <ThreadNote key={i} note={msg.action_payload as unknown as ThreadNoteEntry} />
+              ) : (
                 <div key={i} style={{ display: 'flex', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row', gap: 12, alignItems: 'flex-start' }}>
                   {/* Avatar */}
                   <div style={{

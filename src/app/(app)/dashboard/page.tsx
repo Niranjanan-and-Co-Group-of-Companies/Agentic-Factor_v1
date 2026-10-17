@@ -60,7 +60,11 @@ interface ActionPayload {
   agents?: AgentCard[];
   orchestrationPattern?: string;
   requiredConnectors?: RequiredConnector[];
+  /** The build conversation was moved into the new mission's chat. */
+  movedToChat?: boolean;
 }
+/** How far a build's code steps have got: one entry per agent whose code is being written. */
+interface BuildProgress { roles: string[]; ready: string[] }
 interface MissionShortcut { id: string; title: string; status: string; }
 /** Cards that do something once (navigation cards stay usable). */
 const ONE_SHOT_ACTIONS = new Set(['run_mission', 'schedule_mission', 'pause_mission', 'resume_mission', 'unschedule_mission']);
@@ -141,6 +145,7 @@ function CommandCenterPageInner() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [blueprintSteps, setBlueprintSteps] = useState<Record<string, string>>({});
+  const [blueprintProgress, setBlueprintProgress] = useState<Record<string, BuildProgress>>({});
 
   // Inline connector state (for connecting directly from blueprint card in chat)
   const [connectingSlug, setConnectingSlug] = useState<string | null>(null);
@@ -407,10 +412,11 @@ function CommandCenterPageInner() {
           missionId?: string; missionTitle?: string;
           agents?: AgentCard[]; orchestrationPattern?: string;
           requiredConnectors?: RequiredConnector[]; error?: string;
-          question?: string;
+          question?: string; progress?: BuildProgress; movedToChat?: boolean;
         };
 
         if (data.step) setBlueprintSteps(prev => ({ ...prev, [jobId]: data.step! }));
+        if (data.progress) setBlueprintProgress(prev => ({ ...prev, [jobId]: data.progress! }));
 
         if (data.status === 'completed' && data.missionId) {
           clearInterval(poll); blueprintPollsRef.current.delete(jobId);
@@ -423,6 +429,7 @@ function CommandCenterPageInner() {
               missionId: data.missionId, missionTitle: data.missionTitle,
               agents: data.agents ?? [], orchestrationPattern: data.orchestrationPattern,
               requiredConnectors: data.requiredConnectors ?? [],
+              movedToChat: data.movedToChat,
             }};
             return updated;
           });
@@ -444,7 +451,8 @@ function CommandCenterPageInner() {
             const updated = [...prev];
             const idx = updated.findIndex(m => m.action_payload?.type === 'building_blueprint' && m.action_payload.jobId === jobId);
             if (idx === -1) return prev;
-            updated[idx] = { ...updated[idx], action_payload: { type: 'mission_create_error', error: data.error ?? 'Blueprint generation failed.' }};
+            // The real reason, and the job, so "Try again" can rebuild it as it was asked for.
+            updated[idx] = { ...updated[idx], action_payload: { type: 'mission_create_error', error: data.error ?? 'The build stopped without saying why.', jobId }};
             return updated;
           });
         }
@@ -453,7 +461,7 @@ function CommandCenterPageInner() {
 
     blueprintPollsRef.current.set(jobId, poll);
 
-    // Stop polling after 12 minutes and show a timeout message
+    // A failed build reports itself straight away; this only covers a job that never reports back.
     setTimeout(() => {
       if (!blueprintPollsRef.current.has(jobId)) return;
       clearInterval(blueprintPollsRef.current.get(jobId)!);
@@ -462,12 +470,37 @@ function CommandCenterPageInner() {
         const updated = [...prev];
         const idx = updated.findIndex(m => m.action_payload?.type === 'building_blueprint' && m.action_payload.jobId === jobId);
         if (idx === -1 || updated[idx]?.action_payload?.type !== 'building_blueprint') return prev;
-        updated[idx] = { ...updated[idx], action_payload: { type: 'mission_create_error', error: 'Timed out. Check your Missions list — it may have been created. Otherwise try again.' }};
+        updated[idx] = { ...updated[idx], action_payload: { type: 'mission_create_error', error: 'No word from the build for 20 minutes. Check your Missions list — it may have been created. Otherwise try again.', jobId }};
         return updated;
       });
-    }, 12 * 60 * 1000);
+    }, 20 * 60 * 1000);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Try a failed build again, with the request it was started with ─────────
+  const retryBuild = async (jobId: string | undefined, msgIndex: number) => {
+    const showError = (error: string) => setMessages(prev => prev.map((m, i) =>
+      i === msgIndex && m.action_payload ? { ...m, action_payload: { ...m.action_payload, error } } : m));
+    if (!jobId) { setInput('Create a mission that '); inputRef.current?.focus(); return; }
+    setApplyingAction(msgIndex);
+    try {
+      const res = await fetch('/api/blueprint-status/retry', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId }),
+      });
+      const data = await res.json().catch(() => ({})) as { jobId?: string; error?: string };
+      if (res.ok && data.jobId) {
+        const next = data.jobId;
+        setMessages(prev => prev.map((m, i) => i === msgIndex ? { ...m, action_payload: { type: 'building_blueprint', jobId: next } } : m));
+        startBlueprintPolling(next);
+      } else {
+        showError(data.error ?? 'Could not start the build again.');
+        if (res.status === 404) { setInput('Create a mission that '); inputRef.current?.focus(); }
+      }
+    } catch {
+      showError('Could not reach the server to start the build again.');
+    }
+    setApplyingAction(null);
+  };
 
   // The reply is saved before its stream ends, but a stream can stall on the way to the browser
   // (the server had finished; the chat spun for minutes). Finds this message's saved reply instead.
@@ -712,7 +745,7 @@ function CommandCenterPageInner() {
 
   // ── Action Card Renderer ───────────────────────────────────────────────────
   // ── Processing card (shown while server builds the action result) ─────────────
-  const renderProcessingCard = (actionType: string, liveStep?: string) => {
+  const renderProcessingCard = (actionType: string, liveStep?: string, progress?: BuildProgress) => {
     type CfgEntry = { icon: string; title: string; sub: string; steps?: string[] };
     const cfg: Record<string, CfgEntry> = {
       create_mission: {
@@ -768,6 +801,27 @@ function CommandCenterPageInner() {
               borderRadius: 99, animation: 'af-bar 1.6s cubic-bezier(0.4,0,0.6,1) infinite',
             }} />
           </div>
+
+          {/* Each agent's code, written in its own step */}
+          {progress && progress.roles.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }} aria-label="Writing each agent's code">
+              {progress.roles.map((role, i) => {
+                const ready = progress.ready.includes(role);
+                return (
+                  <div key={`${role}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{
+                      width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                      background: ready ? 'var(--emerald)' : 'var(--accent)',
+                      animation: ready ? undefined : 'pulse 1s ease-in-out infinite',
+                    }} />
+                    <div style={{ fontSize: '0.67rem', fontWeight: ready ? 400 : 600, color: ready ? 'var(--text-muted)' : 'var(--text-primary)' }}>
+                      {ready ? `Code ready · ${role}` : `Writing code · ${role}`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Steps during initial streaming (before Inngest sends real updates) */}
           {!liveStep && c.steps && (
@@ -852,7 +906,7 @@ function CommandCenterPageInner() {
       const liveStep = blueprintSteps[action.jobId];
       const isActive = blueprintPollsRef.current.has(action.jobId);
       if (isActive || liveStep) {
-        return renderProcessingCard('create_mission', liveStep);
+        return renderProcessingCard('create_mission', liveStep, blueprintProgress[action.jobId]);
       }
       // Historical message — job is no longer active
       return (
@@ -1088,8 +1142,17 @@ function CommandCenterPageInner() {
           <div style={{
             background: 'var(--bg-card)', border: '1px solid var(--border)',
             borderTop: 'none', borderRadius: '0 0 14px 14px',
-            padding: '12px 14px', display: 'flex', gap: 8,
+            padding: '12px 14px', display: 'flex', gap: 8, flexWrap: 'wrap',
           }}>
+            {action.movedToChat && (
+              <button
+                type="button"
+                onClick={() => router.push(`/dashboard/missions/${action.missionId}/chat`)}
+                style={{ flexBasis: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '0 0 4px', fontSize: '0.74rem', fontWeight: 600, color: 'var(--accent)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
+              >
+                This conversation continues in the mission chat →
+              </button>
+            )}
             <button
               style={{
                 flex: 2, padding: '9px 0', borderRadius: 8,
@@ -1138,9 +1201,12 @@ function CommandCenterPageInner() {
     );
 
     if (action.type === 'mission_create_error') return (
-      <div style={{ ...card, borderColor: 'var(--red,var(--rose))' }}>
-        <div style={{ fontSize: '0.78rem', color: 'var(--red,var(--rose))' }}><Glyph e="⚠️" /> Could not create mission. Try describing it differently or add more detail.</div>
-        <button style={{ ...btnStyle, alignSelf: 'flex-start', background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }} onClick={() => { setInput('Create a mission that '); inputRef.current?.focus(); }}>Try Again →</button>
+      <div style={{ ...card, borderColor: 'var(--red,var(--rose))' }} role="alert">
+        <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--red,var(--rose))' }}><Glyph e="⚠️" /> Could not create the mission</div>
+        {action.error && <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{action.error}</div>}
+        <button style={{ ...ghostBtn, alignSelf: 'flex-start' }} disabled={applying} onClick={() => retryBuild(action.jobId, msgIndex)}>
+          {applying ? 'Starting again…' : 'Try again'}
+        </button>
       </div>
     );
 

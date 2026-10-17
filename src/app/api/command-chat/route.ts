@@ -798,9 +798,13 @@ export async function POST(request: NextRequest) {
             const { architectQuestionsIn } = await import('@/lib/utils/architect-question');
             const priorQuestions = architectQuestionsIn(recentMessages);
             const { customerWords } = await import('@/lib/utils/source-request');
+            const buildRequest = { intent: actionPayload.intent as string, priorQuestions, sourceRequest: customerWords(recentMessages) };
+            // Kept with the job, so a failed build can be tried again exactly as it was asked for.
+            const { recordJobStatus } = await import('@/lib/services/build-jobs');
+            await recordJobStatus(supabase, tenantId, jobId, 'pending', { step: 'Queued…', request: buildRequest });
             await inngest.send({
               name: 'mission/blueprint.generate',
-              data: { jobId, intent: actionPayload.intent as string, tenantId, priorQuestions, sourceRequest: customerWords(recentMessages) },
+              data: { jobId, tenantId, ...buildRequest },
             });
             actionPayload = { type: 'building_blueprint', jobId };
           } catch (inngestErr) {

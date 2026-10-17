@@ -1049,6 +1049,8 @@ export async function executeAgent(
 
   let attempts = 0;
   const maxAttempts = 5;
+  // Fixes asked for so far: code still failing after two of them goes to the strongest model.
+  let fixesAsked = 0;
   let lastError = '';
   // What the script's Composio calls actually returned on the last attempt — shown to the fixers.
   let lastResponseShapes = '';
@@ -1253,6 +1255,9 @@ export async function executeAgent(
       );
       pythonCode = startingScript;
     } else {
+      // Writing and fixing code runs on the build model; a third fix and later on the escalation model.
+      const codeJob = lastError && fixesAsked >= 2 ? 'escalate' as const : 'build' as const;
+      if (lastError) fixesAsked++;
       // Long scripts are fixed with edits — unless the last edits did not apply.
       const fixByEdits = !!lastError && lastPythonCode.length >= EDIT_MIN_CHARS && !editFailure;
       // Composio actions that do what the script's raw API calls do — the fixer should prefer them.
@@ -1332,7 +1337,7 @@ ${fixByEdits ? `\n${EDIT_FORMAT}` : '- Return the COMPLETE corrected Python scri
 
           const composioFixResponse = await callLLM(
             [{ role: 'system', content: composioFixPrompt }],
-            { temperature: 0.0, jsonMode: false, tier: 1, planTenantId: tenantId }
+            { temperature: 0.0, jsonMode: false, job: codeJob, planTenantId: tenantId }
           );
 
           const { code: composioFixCode, problem: editProblem } = codeFromFix(composioFixResponse.content, lastPythonCode);
@@ -1538,10 +1543,9 @@ INSTRUCTIONS:
         ? `${systemPrompt}\n\nTHIS IS A FIX TO THE BROKEN SCRIPT ABOVE — keep everything that works. In place of instructions 1 and 10:\n${EDIT_FORMAT}`
         : systemPrompt;
 
-      // Writing the agent's code is tier 1: paid plans get the strongest model.
       const response = await callLLM(
         [{ role: 'system', content: regenPrompt }],
-        { temperature: 0.1, jsonMode: false, tier: 1, planTenantId: tenantId }
+        { temperature: 0.1, jsonMode: false, job: codeJob, planTenantId: tenantId }
       );
 
       // ── Deduct LLM credit: token-proportional at 4× real cost via live USD/INR ──

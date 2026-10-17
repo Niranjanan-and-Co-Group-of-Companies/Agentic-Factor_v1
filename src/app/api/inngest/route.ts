@@ -16,7 +16,8 @@ import { editBlueprintBackground } from '@/lib/inngest/blueprint-edit-function';
 
 // Each Inngest step is one invocation of this route; an agent step (codegen + sandbox + critic,
 // with retries) needs the full budget. executeAgent stops starting new attempts well before it.
-export const maxDuration = 300;
+// 800s is the most the plan allows: headroom for a long build step, not a budget to plan around.
+export const maxDuration = 800;
 
 export const { GET, POST, PUT } = serve({
   client: inngest,

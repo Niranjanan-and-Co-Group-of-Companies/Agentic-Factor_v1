@@ -5,6 +5,7 @@
 import Link from 'next/link';
 import { ArrowRight, CircleAlert, CircleCheck, LoaderCircle, RotateCcw } from 'lucide-react';
 import { resultTitle, type ActionResultEntry, type ResultKind } from '@/lib/services/chat-log';
+import type { ThreadNote as ThreadNoteEntry } from '@/lib/services/build-jobs';
 import s from './runs.module.css';
 
 export type { ActionResultEntry, ResultKind } from '@/lib/services/chat-log';
@@ -61,8 +62,22 @@ export function ActionResult({ entry, onRetry, showMission = false }: {
   );
 }
 
-/** A saved chat entry of a given kind (run card, action result, approval record), or null. */
-export function entryType(payload: unknown): 'run_card' | 'action_result' | 'approval_record' | null {
+/** Where a conversation moved from Command Center into the mission's chat, and where the mission was created. */
+export function ThreadNote({ note }: { note: ThreadNoteEntry }) {
+  const when = new Date(note.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  return (
+    <div className={s.threadNote} role="note">
+      <span className={s.threadLine} aria-hidden />
+      <span className={s.threadText}>
+        {note.kind === 'started' ? `Started in Command Center · ${when}` : `Mission created · ${when} · continue here`}
+      </span>
+      <span className={s.threadLine} aria-hidden />
+    </div>
+  );
+}
+
+/** A saved chat entry of a given kind (run card, action result, approval record, thread note), or null. */
+export function entryType(payload: unknown): 'run_card' | 'action_result' | 'approval_record' | 'thread_note' | null {
   const t = payload && typeof payload === 'object' ? (payload as { type?: string }).type : undefined;
-  return t === 'run_card' || t === 'action_result' || t === 'approval_record' ? t : null;
+  return t === 'run_card' || t === 'action_result' || t === 'approval_record' || t === 'thread_note' ? t : null;
 }
