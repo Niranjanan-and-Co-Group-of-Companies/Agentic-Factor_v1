@@ -72,6 +72,7 @@ interface ActionPayload {
   agents?: string[]; // used by run_selective — array of agent IDs
   executionMode?: 'sequential' | 'parallel'; // used by run_selective
   versionNumber?: number; // used by revert_version
+  resolved?: 'applied' | 'skipped'; // set once the card is used, saved with the message
 }
 
 // ── ToolCallCards component ───────────────────────────────────────────────────
@@ -549,6 +550,20 @@ export default function MissionChatPage() {
       : [...prev, { role: 'assistant', content: decisionText(record), action_payload: record as unknown as ActionPayload, action_applied: true, ts: Date.now() }]);
   }, []);
 
+  // ── An assistant's action card, once used, stays used (saved with its message) ──
+  const resolveCard = (index: number, outcome: 'applied' | 'skipped') => {
+    const target = messages[index];
+    setMessages(prev => prev.map((m, j) => (j === index && m.action_payload
+      ? { ...m, action_applied: true, action_payload: { ...m.action_payload, resolved: outcome } }
+      : m)));
+    if (target?.id && !target.id.startsWith('pending-')) {
+      fetch('/api/chat-messages/resolve', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId: target.id, outcome }),
+      }).catch(() => { /* it is used on screen; it may show again after a reload */ });
+    }
+  };
+
   // ── Button results, kept in the chat ─────────────────────────
   // A button shows "Applying…" here, then its saved result (✓ or ✗ with the reason). Saved to the mission's
   // chat, so the history keeps it after a reload. Failures can be retried from the card.
@@ -867,7 +882,7 @@ export default function MissionChatPage() {
     waitingForInngestRef.current = false;
 
     // ── Handlers for Inngest Realtime events ────────────────────
-    const finaliseFromInngest = (cleanText: string, action: ActionPayload | null, sid?: string) => {
+    const finaliseFromInngest = (cleanText: string, action: ActionPayload | null, sid?: string, messageId?: string) => {
       const supabase = getSupabase();
       if (realtimeChannelRef.current) {
         supabase.removeChannel(realtimeChannelRef.current);
@@ -886,7 +901,7 @@ export default function MissionChatPage() {
         setMessages(prev => {
           const updated = [...prev];
           updated[updated.length - 1] = {
-            role: 'assistant', content: finalText,
+            id: messageId, role: 'assistant', content: finalText,
             action_payload: action, isStreaming: false, isAgentRunning: false, ts: Date.now(),
             toolCards: currentCards.length > 0 ? [...currentCards] : undefined,
           };
@@ -982,7 +997,7 @@ export default function MissionChatPage() {
           if (!line.startsWith('data: ')) continue;
           try {
             const evt = JSON.parse(line.slice(6)) as {
-              type: string; text?: string; cleanText?: string; executionId?: string; approvalRecord?: ApprovalRecordPayload | null;
+              type: string; text?: string; cleanText?: string; executionId?: string; approvalRecord?: ApprovalRecordPayload | null; messageId?: string | null;
               action?: ActionPayload | null; sessionId?: string; message?: string;
               name?: string; provider?: string; displayName?: string;
               status?: 'running' | 'done' | 'error'; label?: string; summary?: string; logoUrl?: string | null;
@@ -1084,6 +1099,7 @@ export default function MissionChatPage() {
                         (p.cleanText as string) ?? '',
                         (p.action as ActionPayload | null) ?? null,
                         p.sessionId as string | undefined,
+                        (p.messageId as string | null | undefined) ?? undefined,
                       );
                       if (p.approvalRecord) appendRecord(p.approvalRecord as ApprovalRecordPayload);
                     }
@@ -1106,7 +1122,7 @@ export default function MissionChatPage() {
               setMessages(prev => {
                 const updated = [...prev];
                 updated[updated.length - 1] = {
-                  role: 'assistant', content: ft,
+                  id: evt.messageId ?? undefined, role: 'assistant', content: ft,
                   action_payload: evt.action ?? null, isStreaming: false, ts: Date.now(),
                 };
                 return updated;
@@ -1232,11 +1248,7 @@ export default function MissionChatPage() {
     }
 
     setApplyingAction(msgIndex);
-    setMessages(prev => {
-      const u = [...prev];
-      if (u[msgIndex]) u[msgIndex] = { ...u[msgIndex], action_applied: true };
-      return u;
-    });
+    resolveCard(msgIndex, 'applied');
 
     // Starts a run and follows it with a live card. A run that is already going shows its card instead.
     const startRun = async (body?: Record<string, unknown>) => {
@@ -1944,11 +1956,7 @@ export default function MissionChatPage() {
                               <button
                                 className="btn btn-ghost btn-sm"
                                 style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}
-                                onClick={() => setMessages(prev => {
-                                  const u = [...prev];
-                                  if (u[i]) u[i] = { ...u[i], action_applied: true };
-                                  return u;
-                                })}
+                                onClick={() => resolveCard(i, 'skipped')}
                               >Skip</button>
                               {isConnector ? (
                                 isAlreadyConnected ? (
@@ -1958,7 +1966,7 @@ export default function MissionChatPage() {
                                     className="btn btn-primary btn-sm"
                                     style={{ fontSize: '0.73rem', minWidth: 80 }}
                                     disabled={isConnecting}
-                                    onClick={() => handleConnectInChat(connectorSlug, connectorLabel)}
+                                    onClick={() => { resolveCard(i, 'applied'); void handleConnectInChat(connectorSlug, connectorLabel); }}
                                   >
                                     {isConnecting ? (
                                       <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -1985,7 +1993,9 @@ export default function MissionChatPage() {
                     })()}
 
                     {msg.role === 'assistant' && msg.action_payload && msg.action_applied && !entryType(msg.action_payload) && (
-                      <div style={{ marginTop: 5, fontSize: '0.7rem', color: 'var(--emerald)', paddingLeft: 4 }}>✓ Applied</div>
+                      msg.action_payload.resolved === 'skipped'
+                        ? <div style={{ marginTop: 5, fontSize: '0.7rem', color: 'var(--text-muted)', paddingLeft: 4 }}>Skipped</div>
+                        : <div style={{ marginTop: 5, fontSize: '0.7rem', color: 'var(--emerald)', paddingLeft: 4 }}>✓ Applied</div>
                     )}
 
                     {/* Quick chips — only after last assistant message */}

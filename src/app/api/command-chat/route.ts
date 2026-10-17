@@ -815,21 +815,28 @@ export async function POST(request: NextRequest) {
 
         const userMsg = recentMessages[recentMessages.length - 1];
         // Awaited before 'done': once the stream closes the function can be frozen mid-insert.
-        await (async () => {
+        // The reply's id goes back with 'done', so its action card can be marked used later.
+        let replyId: string | null = null;
+        try {
           const { error: ue } = await supabase.from('mission_chat_messages').insert({
             chat_id: chatId, tenant_id: tenantId, role: userMsg.role, content: userMsg.content,
           });
-          if (ue) { console.error('[command-chat/persist user]', ue); return; }
-          const { error: ae } = await supabase.from('mission_chat_messages').insert({
-            chat_id: chatId, tenant_id: tenantId, role: 'assistant', content: cleanText,
-            action_payload: actionPayload, input_tokens: inputTokens,
-            output_tokens: outputTokens, credits_deducted: credits,
-          });
-          if (ae) console.error('[command-chat/persist assistant]', ae);
-          await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
-        })().catch(console.error);
+          if (ue) console.error('[command-chat/persist user]', ue);
+          else {
+            const { data: saved, error: ae } = await supabase.from('mission_chat_messages').insert({
+              chat_id: chatId, tenant_id: tenantId, role: 'assistant', content: cleanText,
+              action_payload: actionPayload, input_tokens: inputTokens,
+              output_tokens: outputTokens, credits_deducted: credits,
+            }).select('id').single();
+            if (ae) console.error('[command-chat/persist assistant]', ae);
+            replyId = (saved?.id as string | undefined) ?? null;
+            await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
+          }
+        } catch (persistErr) {
+          console.error(persistErr);
+        }
 
-        send({ type: 'done', credits, inputTokens, outputTokens, sessionId: chatId, cleanText, action: actionPayload });
+        send({ type: 'done', credits, inputTokens, outputTokens, sessionId: chatId, cleanText, action: actionPayload, messageId: replyId });
 
       } catch (err) {
         console.error('[command-chat/stream]', err);

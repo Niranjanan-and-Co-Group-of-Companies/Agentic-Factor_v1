@@ -28,6 +28,8 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   action_payload?: ActionPayload | null;
+  /** The action card was used (applied); saved with the message so it stays used after a reload. */
+  action_applied?: boolean;
   isStreaming?: boolean;
   processingAction?: string;
   ts?: number;
@@ -60,6 +62,8 @@ interface ActionPayload {
   requiredConnectors?: RequiredConnector[];
 }
 interface MissionShortcut { id: string; title: string; status: string; }
+/** Cards that do something once (navigation cards stay usable). */
+const ONE_SHOT_ACTIONS = new Set(['run_mission', 'schedule_mission', 'pause_mission', 'resume_mission', 'unschedule_mission']);
 type RunInChat = (
   kind: ResultKind, label: string, mission: { id?: string; title?: string },
   work: () => Promise<{ ok: boolean; detail?: string; error?: string }>, action?: ActionPayload,
@@ -335,6 +339,19 @@ function CommandCenterPageInner() {
     }
   }, [activeSessionId]);
 
+  // ── An assistant's action card, once used, stays used (saved with its message) ──
+  const markCardUsed = (index: number) => {
+    const target = messages[index];
+    if (!target) return;
+    setMessages(prev => prev.map((m, j) => (j === index ? { ...m, action_applied: true } : m)));
+    if (target.id && !target.id.startsWith('pending-')) {
+      fetch('/api/chat-messages/resolve', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId: target.id, outcome: 'applied' }),
+      }).catch(() => { /* used on screen; may show again after a reload */ });
+    }
+  };
+
   // ── A button's result, kept in the chat: "Applying…", then ✓ or ✗ with the reason ──
   const runInChat = useCallback(async (
     kind: ResultKind, label: string, mission: { id?: string; title?: string },
@@ -528,7 +545,7 @@ function CommandCenterPageInner() {
           try {
             const evt = JSON.parse(line.slice(6)) as {
               type: string; text?: string; message?: string; cleanText?: string;
-              action?: ActionPayload; sessionId?: string;
+              action?: ActionPayload; sessionId?: string; messageId?: string | null;
               credits?: number; inputTokens?: number; outputTokens?: number;
             };
             if (evt.type === 'delta' && evt.text) {
@@ -550,7 +567,7 @@ function CommandCenterPageInner() {
               finished = true;
               const final = evt.cleanText ?? streamed;
               const action = evt.action ?? null;
-              setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: final, action_payload: action, isStreaming: false, ts: Date.now() }; return u; });
+              setMessages(prev => { const u = [...prev]; u[u.length - 1] = { id: evt.messageId ?? undefined, role: 'assistant', content: final, action_payload: action, isStreaming: false, ts: Date.now() }; return u; });
               // If the server queued a blueprint generation job, start polling for completion
               if (action?.type === 'building_blueprint' && action.jobId) {
                 startBlueprintPolling(action.jobId);
@@ -581,6 +598,7 @@ function CommandCenterPageInner() {
   // ── Apply action card ──────────────────────────────────────────────────────
   const applyAction = async (action: ActionPayload, msgIndex: number) => {
     setApplyingAction(msgIndex);
+    if (ONE_SHOT_ACTIONS.has(action.type)) markCardUsed(msgIndex);
     try {
       const mission = { id: action.missionId, title: action.missionTitle };
       // Pause / resume / remove schedule: one request, its result kept in the chat.
@@ -777,6 +795,8 @@ function CommandCenterPageInner() {
 
   const renderActionCard = (action: ActionPayload, msgIndex: number) => {
     const applying = applyingAction === msgIndex;
+    const used = !!messages[msgIndex]?.action_applied;
+    const usedNote = <div style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--emerald)' }}>✓ Applied</div>;
     const btnStyle: React.CSSProperties = {
       background: 'var(--accent)', color: 'var(--on-accent)', border: 'none', borderRadius: 'var(--radius-sm)',
       padding: '6px 14px', fontSize: '0.78rem', fontWeight: 600, cursor: applying ? 'not-allowed' : 'pointer',
@@ -788,9 +808,9 @@ function CommandCenterPageInner() {
     if (action.type === 'run_mission') return (
       <div style={card}>
         <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}><Glyph e="▶" /> Run "{action.missionTitle}"</div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button style={btnStyle} onClick={() => applyAction(action, msgIndex)} disabled={applying}>{applying ? 'Starting…' : 'Run Now'}</button>
-          <button style={ghostBtn} onClick={() => router.push(`/dashboard/missions/${action.missionId}`)}>View Mission</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {used ? usedNote : <button style={btnStyle} onClick={() => applyAction(action, msgIndex)} disabled={applying}>{applying ? 'Starting…' : 'Run Now'}</button>}
+          <button style={ghostBtn} onClick={() => router.push(`/dashboard/missions/${action.missionId}/chat`)}>Open mission</button>
         </div>
       </div>
     );
@@ -809,14 +829,14 @@ function CommandCenterPageInner() {
       <div style={card}>
         <div style={{ fontSize: '0.8rem', fontWeight: 600 }}><Glyph e="📅" /> Schedule "{action.missionTitle}"</div>
         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{action.label ?? action.cron}</div>
-        <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => applyAction(action, msgIndex)} disabled={applying}>{applying ? 'Applying…' : 'Apply Schedule'}</button>
+        {used ? usedNote : <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => applyAction(action, msgIndex)} disabled={applying}>{applying ? 'Applying…' : 'Apply Schedule'}</button>}
       </div>
     );
 
     if (action.type === 'pause_mission' || action.type === 'resume_mission' || action.type === 'unschedule_mission') return (
       <div style={card}>
         <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{action.type === 'pause_mission' ? 'Pause' : action.type === 'unschedule_mission' ? 'Remove schedule for' : 'Resume'} "{action.missionTitle}"</div>
-        <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => applyAction(action, msgIndex)} disabled={applying}>{applying ? 'Working…' : 'Confirm'}</button>
+        {used ? usedNote : <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => applyAction(action, msgIndex)} disabled={applying}>{applying ? 'Working…' : 'Confirm'}</button>}
       </div>
     );
 

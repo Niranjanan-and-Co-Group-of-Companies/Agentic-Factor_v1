@@ -344,7 +344,7 @@ export async function POST(
           allMsgs.push({ role: 'assistant', content: finalText });
           writeEpisode(tenantId, missionId, allMsgs, []).catch(console.error);
 
-          send({ type: 'done', credits, inputTokens, outputTokens, sessionId: chatId, cleanText: finalText, action: cardAction, approvalRecord });
+          send({ type: 'done', credits, inputTokens, outputTokens, sessionId: chatId, cleanText: finalText, action: cardAction, approvalRecord, messageId: replyId });
           controller.close();
           return;
         }
