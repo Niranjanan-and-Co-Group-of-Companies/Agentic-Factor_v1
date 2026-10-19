@@ -65,6 +65,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // ── The end of connecting an app: identified by its signed ticket (services/connect-state.ts), not a
+  //    session — the mobile app's sign-in browser isn't signed in to the website.
+  if (pathname === '/api/composio/callback') {
+    return NextResponse.next();
+  }
+
   // ── Allow admin panel routes (secured by their own bcrypt+OTP auth, not Supabase) ──
   if (pathname.startsWith('/api/mgmt-x7k9/') || pathname.startsWith('/mgmt-x7k9')) {
     return NextResponse.next();
