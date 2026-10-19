@@ -12,7 +12,7 @@ import { ApprovalRecordCard, PendingCard, ResultCard, ThreadNoteRow } from '@/co
 import { RunCard } from '@/components/cards/RunCard';
 import { UpdateCard } from '@/components/cards/UpdateCard';
 import { ChatView } from '@/components/chat/ChatView';
-import { AppText, Badge, Button, Card } from '@/components/ui';
+import { AppText, Button, Card } from '@/components/ui';
 import { connectApp, createWebhook, goLive, markUsed, patchMission, revertVersion, saveResult, startRun, updateMission, type Outcome } from '@/lib/actions';
 import { api } from '@/lib/api';
 import { newKey, type ChatItem } from '@/lib/chat';
@@ -146,12 +146,14 @@ export default function MissionChat() {
     <>
       <Stack.Screen options={{
         title: mission?.title ?? '',
-        headerRight: () => (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-            {mission ? <Badge label={mission.rehearsal ? 'Rehearsal' : 'Live'} tone={mission.rehearsal ? 'amber' : 'emerald'} /> : null}
-            <Button label={mission?.rehearsal ? 'Rehearse' : 'Run'} variant="ghost" onPress={() => run('Run this mission')} />
+        // The title over its mode, so a long title never runs under the button.
+        headerTitle: () => (
+          <View style={{ maxWidth: 240 }}>
+            <AppText weight="700" numberOfLines={1}>{mission?.title ?? ''}</AppText>
+            {mission ? <AppText size="xs" tone={mission.rehearsal ? 'amber' : 'emerald'} weight="600">{mission.rehearsal ? 'Next run: rehearsal' : 'Live'}</AppText> : null}
           </View>
         ),
+        headerRight: () => <Button label={mission?.rehearsal ? 'Rehearse' : 'Run'} variant="ghost" onPress={() => run('Run this mission')} />,
       }} />
       <ChatView
         items={chat.items}
