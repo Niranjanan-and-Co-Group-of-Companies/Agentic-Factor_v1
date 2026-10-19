@@ -2,49 +2,33 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 
+// Which onboarding steps the customer has finished, kept on their own account (user metadata).
+// It used to read and write a `tenants` table that doesn't exist, so progress was never saved.
+
 export async function GET(request: NextRequest) {
   const authResult = await extractTenantContext(request);
   if (isAuthError(authResult)) return authResult;
-  const { tenantId } = authResult;
 
-  const supabase = createServiceClient();
-  const { data, error } = await supabase
-    .from('tenants')
-    .select('settings')
-    .eq('id', tenantId)
-    .single();
-
-  if (error || !data) {
-    return NextResponse.json({ completed: [] });
-  }
-
-  const completed: string[] = (data.settings as Record<string, unknown>)?.onboarding_completed as string[] ?? [];
-  return NextResponse.json({ completed });
+  const { data } = await createServiceClient().auth.admin.getUserById(authResult.userId);
+  const completed = data?.user?.user_metadata?.onboarding_completed;
+  return NextResponse.json({ completed: Array.isArray(completed) ? completed.filter((s): s is string => typeof s === 'string') : [] });
 }
 
 export async function POST(request: NextRequest) {
   const authResult = await extractTenantContext(request);
   if (isAuthError(authResult)) return authResult;
-  const { tenantId } = authResult;
 
-  const body = await request.json() as { completed: string[] };
-  const completed: string[] = Array.isArray(body.completed) ? body.completed : [];
+  const body = await request.json().catch(() => ({})) as { completed?: unknown };
+  const completed = Array.isArray(body.completed)
+    ? [...new Set(body.completed.filter((s): s is string => typeof s === 'string' && s.length <= 64))].slice(0, 50)
+    : [];
 
   const supabase = createServiceClient();
-
-  // Read current settings first to avoid overwriting other keys
-  const { data: existing } = await supabase
-    .from('tenants')
-    .select('settings')
-    .eq('id', tenantId)
-    .single();
-
-  const currentSettings = (existing?.settings ?? {}) as Record<string, unknown>;
-  const updatedSettings = { ...currentSettings, onboarding_completed: completed };
-
-  await supabase
-    .from('tenants')
-    .upsert({ id: tenantId, settings: updatedSettings }, { onConflict: 'id' });
-
+  const { data } = await supabase.auth.admin.getUserById(authResult.userId);
+  // Keep the other metadata (name, avatar…) as it is.
+  const { error } = await supabase.auth.admin.updateUserById(authResult.userId, {
+    user_metadata: { ...(data?.user?.user_metadata ?? {}), onboarding_completed: completed },
+  });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, completed });
 }

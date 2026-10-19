@@ -10,7 +10,7 @@ interface Run {
   mission_id: string;
   run_number: number;
   status: string;
-  trigger_type: string | null;
+  trigger: string | null;
   started_at: string;
   completed_at: string | null;
   duration_ms: number | null;
@@ -65,7 +65,7 @@ export default function RunsPage() {
     const [{ data: runsData }, { data: missionsData }] = await Promise.all([
       supabase
         .from('mission_runs')
-        .select('id, mission_id, run_number, status, trigger_type, started_at, completed_at, duration_ms, agents_total, agents_done, agents_failed')
+        .select('id, mission_id, run_number, status, trigger, started_at, completed_at, duration_ms, agents_total, agents_done, agents_failed')
         .eq('tenant_id', user.id)
         .order('started_at', { ascending: false })
         .limit(100),
@@ -182,7 +182,7 @@ export default function RunsPage() {
                         <span style={{ color: STATUS_COLOR[run.status] ?? 'var(--text-secondary)', fontWeight: 600 }}>{run.status}</span>
                       </span>
                     </td>
-                    <td style={{ padding: '10px 14px', color: 'var(--text-muted)', fontSize: '0.75rem' }}>{run.trigger_type ?? 'manual'}</td>
+                    <td style={{ padding: '10px 14px', color: 'var(--text-muted)', fontSize: '0.75rem' }}>{run.trigger ?? 'manual'}</td>
                     <td style={{ padding: '10px 14px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{formatDate(run.started_at)}</td>
                     <td style={{ padding: '10px 14px', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{formatDuration(run.duration_ms)}</td>
                     <td style={{ padding: '10px 14px', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>

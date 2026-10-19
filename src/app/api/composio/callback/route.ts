@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
-import { appReturnUrl, withOutcome } from '@/lib/utils/app-return';
+import { withOutcome } from '@/lib/utils/app-return';
+import { readConnectState } from '@/lib/services/connect-state';
 
 // ============================================================
 // GET /api/composio/callback
 // Composio redirects here after the user grants OAuth access.
-// Query params: tenantId, provider (encoded in the callback_url we pass to link.create)
+// Query params: state — our signed ticket naming the account, the app and where to return
+// (see services/connect-state.ts); error, when the customer did not grant access.
 //
 // 1. Write minimal row to tenant_permissions so executor knows
 //    this provider is connected (Composio manages tokens internally)
@@ -13,25 +15,32 @@ import { appReturnUrl, withOutcome } from '@/lib/utils/app-return';
 // 3. Send OAUTH_SUCCESS postMessage to close the popup
 // ============================================================
 
+// Values go into the page as JSON (in the script) and escaped text (in the page): the error comes from
+// the address, and pasting it in raw let a crafted link run its own script on our site.
+const inScript = (v: string) => JSON.stringify(v).replace(/</g, '\\u003c');
+const asText = (v: string) => v.replace(/[&<>"']/g, ch => `&#${ch.charCodeAt(0)};`);
+
 const successHtml = (provider: string) => `
 <html><body><script>
-  window.opener && window.opener.postMessage({ type: 'OAUTH_SUCCESS', provider: '${provider}' }, '*');
+  window.opener && window.opener.postMessage({ type: 'OAUTH_SUCCESS', provider: ${inScript(provider)} }, '*');
   window.close();
 </script><p>Connected! You can close this window.</p></body></html>`;
 
 const errorHtml = (msg: string) => `
 <html><body><script>
-  window.opener && window.opener.postMessage({ type: 'OAUTH_ERROR', payload: '${msg}' }, '*');
+  window.opener && window.opener.postMessage({ type: 'OAUTH_ERROR', payload: ${inScript(msg)} }, '*');
   window.close();
-</script><p>Error: ${msg}</p></body></html>`;
+</script><p>Error: ${asText(msg)}</p></body></html>`;
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
-  const tenantId = searchParams.get('tenantId');
-  const provider = searchParams.get('provider');
+  // Who is connecting what comes only from our own signed ticket, never from loose parameters.
+  const state = readConnectState(searchParams.get('state'));
+  const tenantId = state?.tenantId;
+  const provider = state?.provider;
   const error = searchParams.get('error');
   // From the mobile app: send the customer back into it instead of closing a popup.
-  const returnTo = appReturnUrl(searchParams.get('returnTo'));
+  const returnTo = state?.returnTo ?? null;
   const fail = (msg: string) => returnTo
     ? NextResponse.redirect(withOutcome(returnTo, { status: 'error', provider: provider ?? '', message: msg }))
     : new NextResponse(errorHtml(msg), { headers: { 'Content-Type': 'text/html' } });
@@ -42,7 +51,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (!tenantId || !provider) {
-    return fail('Missing tenantId or provider');
+    return fail('This connection link has expired or is not valid. Please connect the app again.');
   }
 
   try {

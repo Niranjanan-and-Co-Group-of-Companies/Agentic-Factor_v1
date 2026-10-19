@@ -69,11 +69,12 @@ export default function PermissionsPage() {
 
     // Fetch mission-requested permissions (legacy table — may not exist)
     try {
+      // The mission's title comes through its link to missions (the table has no title or created_at).
       const { data: rows } = await supabase
         .from("permissions")
-        .select("id, service, type, scope, confidentiality_level, granted, mission_title")
+        .select("id, service, type, scope, confidentiality_level, granted, mission_id, missions(title)")
         .eq("tenant_id", user.id)
-        .order("created_at", { ascending: false });
+        .order("service", { ascending: true });
 
       if (rows) {
         setPermissions(rows.map((r: Record<string, unknown>) => ({
@@ -83,7 +84,7 @@ export default function PermissionsPage() {
           scope: (r.scope as string) || "read",
           confidentialityLevel: (r.confidentiality_level as Permission["confidentialityLevel"]) || "internal",
           granted: (r.granted as boolean) ?? false,
-          missionTitle: (r.mission_title as string) || "Mission",
+          missionTitle: ((r.missions as { title?: string } | null)?.title) || "Mission",
         })));
       }
     } catch {

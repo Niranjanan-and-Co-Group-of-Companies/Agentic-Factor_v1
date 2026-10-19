@@ -34,6 +34,20 @@ export const executeMissionBackground = inngest.createFunction(
   async ({ event, step }) => {
     const { missionId, tenantId, runId: incomingRunId, trigger: incomingTrigger, webhookPayload, selectedAgents, executionMode, resumeRunIds } = event.data;
 
+    // An account waiting to be deleted runs nothing — not a schedule, a webhook, an email or a button.
+    const beingDeleted = await step.run('account-check', async () => {
+      const { deletionStatus } = await import('@/lib/services/account-deletion');
+      const status = await deletionStatus(createServiceClient(), tenantId);
+      if (status.pending && incomingRunId) {
+        await createServiceClient().from('mission_runs').update({
+          status: 'failed', completed_at: new Date().toISOString(),
+          summary: 'This account is being deleted, so nothing runs. Keep the account (Account → Keep my account) to run missions again.',
+        }).eq('id', incomingRunId).eq('tenant_id', tenantId);
+      }
+      return status.pending;
+    });
+    if (beingDeleted) return { skipped: 'account deletion pending' };
+
     // ── Step 1: Fetch mission data + initialise run tracking ──
     const missionData = await step.run('fetch-mission', async () => {
       const supabase = createServiceClient();

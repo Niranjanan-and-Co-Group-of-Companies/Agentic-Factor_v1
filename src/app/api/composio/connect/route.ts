@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { initiateComposioConnection } from '@/lib/services/composio';
 import { appReturnUrl } from '@/lib/utils/app-return';
+import { connectCallbackUrl } from '@/lib/services/connect-state';
 
 // ============================================================
 // POST /api/composio/connect
@@ -25,8 +26,7 @@ export async function POST(request: NextRequest) {
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-  const back = appReturnUrl(returnTo);
-  const redirectUri = `${appUrl}/api/composio/callback?tenantId=${tenantId}&provider=${provider}${back ? `&returnTo=${encodeURIComponent(back)}` : ''}`;
+  const redirectUri = connectCallbackUrl(appUrl, { tenantId, provider, returnTo: appReturnUrl(returnTo) ?? undefined });
 
   try {
     const authUrl = await initiateComposioConnection(tenantId, provider, redirectUri);

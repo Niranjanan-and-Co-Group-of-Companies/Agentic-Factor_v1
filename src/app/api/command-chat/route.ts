@@ -107,13 +107,16 @@ async function buildCommandContext(tenantId: string): Promise<{
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false });
 
-  // Fetch last 10 runs across all missions
-  const { data: runs } = await supabase
+  // Recent runs across all missions — far enough back that each mission's last run is usually in it.
+  // (This selected a column that doesn't exist, trigger_type, so it always failed and the assistant
+  // told customers their missions had never run.)
+  const { data: runs, error: runsError } = await supabase
     .from('mission_runs')
-    .select('id, mission_id, run_number, status, started_at, duration_ms, agents_total, agents_done, agents_failed, trigger_type')
+    .select('id, mission_id, run_number, status, started_at, duration_ms, agents_total, agents_done, agents_failed, trigger')
     .eq('tenant_id', tenantId)
     .order('started_at', { ascending: false })
-    .limit(10);
+    .limit(100);
+  if (runsError) console.error('[command-chat] Could not load runs:', runsError.message);
 
   // Fetch billing/credits
   const { data: billing } = await supabase
@@ -141,16 +144,17 @@ async function buildCommandContext(tenantId: string): Promise<{
   const missionLines = (missions ?? []).map(m => {
     const lastRun = runs?.find(r => r.mission_id === m.id);
     const lastRunStr = lastRun
-      ? `last ran ${formatAgo(lastRun.started_at)} — ${lastRun.status}`
-      : 'never run';
+      ? `last ran ${formatAgo(lastRun.started_at)} (run #${lastRun.run_number}, ${lastRun.trigger ?? 'manual'}) — ${lastRun.status}`
+      : runsError ? 'run history unavailable' : (runs?.length ?? 0) < 100 ? 'never run' : 'no run among the latest 100';
     return `  • [${m.status.toUpperCase()}] "${m.title}" (id: ${m.id}) — ${lastRunStr} — ${describeSchedule(schedules.get(m.id))}`;
   }).join('\n') || '  (no missions yet)';
 
-  const recentRunLines = (runs ?? []).slice(0, 5).map(r => {
+  const recentRunLines = (runs ?? []).slice(0, 10).map(r => {
     const mTitle = missions?.find(m => m.id === r.mission_id)?.title ?? 'Unknown';
-    const dur = r.duration_ms ? `${Math.round(r.duration_ms / 1000)}s` : 'in progress';
-    return `  • Run #${r.run_number} of "${mTitle}" — ${r.status} — ${formatAgo(r.started_at)} (${dur})`;
-  }).join('\n') || '  (no recent runs)';
+    const dur = r.duration_ms ? `${Math.round(r.duration_ms / 1000)}s` : r.status === 'running' || r.status === 'queued' ? 'in progress' : '';
+    const agents = r.agents_total ? `, ${r.agents_done ?? 0}/${r.agents_total} agents done${r.agents_failed ? `, ${r.agents_failed} failed` : ''}` : '';
+    return `  • Run #${r.run_number} of "${mTitle}" — ${r.status} — ${formatAgo(r.started_at)}${dur ? ` (${dur})` : ''}${agents} — ${r.trigger ?? 'manual'}`;
+  }).join('\n') || (runsError ? '  (run history could not be loaded right now)' : '  (no runs yet)');
 
   const creditsInfo = billing
     ? `${billing.credits_remaining} monthly + ${billing.credits_topup ?? 0} top-up remaining (${billing.plan} plan, ${billing.credits_used_this_month} used this period)`

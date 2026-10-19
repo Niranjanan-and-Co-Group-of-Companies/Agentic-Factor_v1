@@ -23,9 +23,11 @@ export default function Account() {
   const [deleting, setDeleting] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
+  const [deletion, setDeletion] = useState<{ pending: boolean; deleteAfter?: string } | null>(null);
 
   useFocusEffect(useCallback(() => {
     api<Usage>('/api/billing/usage').then(setUsage).catch(() => {});
+    api<{ pending: boolean; deleteAfter?: string }>('/api/account/delete').then(setDeletion).catch(() => {});
   }, []));
 
   const b = usage?.billing;
@@ -34,15 +36,33 @@ export default function Account() {
   const requestDeletion = async () => {
     setBusy(true);
     try {
-      const res = await api<{ message: string }>('/api/account/delete', { method: 'POST', body: { confirm } });
-      Alert.alert('Deletion requested', res.message);
-      await signOut();
+      const res = await api<{ message: string; deleteAfter?: string }>('/api/account/delete', { method: 'POST', body: { confirm } });
+      setDeletion({ pending: true, deleteAfter: res.deleteAfter });
+      setDeleting(false);
+      setConfirm('');
+      Alert.alert('Deletion scheduled', res.message);
     } catch (err) {
       Alert.alert('Could not request deletion', (err as Error).message);
     } finally {
       setBusy(false);
     }
   };
+
+  const keepAccount = async () => {
+    setBusy(true);
+    try {
+      const res = await api<{ message: string }>('/api/account/delete', { method: 'DELETE' });
+      setDeletion({ pending: false });
+      Alert.alert('Your account is staying', res.message);
+    } catch (err) {
+      Alert.alert('Could not cancel the deletion', (err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const deleteOn = deletion?.deleteAfter
+    ? new Date(deletion.deleteAfter).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+    : '';
 
   return (
     <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={[styles.wrap, { paddingTop: insets.top + space.lg }]}>
@@ -67,11 +87,19 @@ export default function Account() {
         <Button label="Sign out" variant="ghost" onPress={() => signOut()} />
       </Card>
 
-      <Card>
+      {deletion?.pending ? (
+        <Card tone="error">
+          <AppText weight="700" tone="rose">Your account will be deleted{deleteOn ? ` on ${deleteOn}` : ''}</AppText>
+          <AppText size="sm" tone="secondary">Nothing runs until then. Keep it, and your missions run and are scheduled as before.</AppText>
+          <Button label="Keep my account" loading={busy} onPress={keepAccount} style={{ alignSelf: 'flex-start' }} />
+        </Card>
+      ) : null}
+
+      {deletion?.pending ? null : <Card>
         {deleting ? (
           <>
             <AppText weight="700" tone="rose">Delete your account</AppText>
-            <AppText size="sm" tone="secondary">Your missions stop at once, and your account and all its data are deleted within 30 days. Type DELETE to confirm.</AppText>
+            <AppText size="sm" tone="secondary">Your missions stop at once. After 7 days your account, missions, chats, files and app connections are deleted for good — you can keep it until then. Type DELETE to confirm.</AppText>
             <TextInput
               value={confirm} onChangeText={setConfirm} autoCapitalize="characters" placeholder="DELETE" placeholderTextColor={c.textMuted}
               style={[styles.input, { color: c.text, borderColor: c.border, backgroundColor: c.input }]} accessibilityLabel="Type DELETE to confirm"
@@ -84,7 +112,7 @@ export default function Account() {
         ) : (
           <Button label="Delete account" variant="danger" onPress={() => setDeleting(true)} />
         )}
-      </Card>
+      </Card>}
 
       <AppText size="xs" tone="muted" style={{ textAlign: 'center' }}>Agentic Factor {Constants.expoConfig?.version ?? ''}</AppText>
     </ScrollView>

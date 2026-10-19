@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { initiateComposioConnection } from '@/lib/services/composio';
+import { connectCallbackUrl } from '@/lib/services/connect-state';
 
 // ============================================================
 // Legacy OAuth initiation — upgraded to Composio
@@ -38,7 +39,7 @@ export async function GET(
   const { tenantId } = authResult;
   const composioSlug = LEGACY_TO_COMPOSIO[provider] ?? provider;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-  const callbackUrl = `${appUrl}/api/composio/callback?tenantId=${tenantId}&provider=${composioSlug}`;
+  const callbackUrl = connectCallbackUrl(appUrl, { tenantId, provider: composioSlug });
 
   try {
     const authUrl = await initiateComposioConnection(tenantId, composioSlug, callbackUrl);
