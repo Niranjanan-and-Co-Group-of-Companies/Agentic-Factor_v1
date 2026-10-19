@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { appReturnUrl, withOutcome } from '@/lib/utils/app-return';
 
 // ============================================================
 // GET /api/composio/callback
@@ -29,14 +30,19 @@ export async function GET(request: NextRequest) {
   const tenantId = searchParams.get('tenantId');
   const provider = searchParams.get('provider');
   const error = searchParams.get('error');
+  // From the mobile app: send the customer back into it instead of closing a popup.
+  const returnTo = appReturnUrl(searchParams.get('returnTo'));
+  const fail = (msg: string) => returnTo
+    ? NextResponse.redirect(withOutcome(returnTo, { status: 'error', provider: provider ?? '', message: msg }))
+    : new NextResponse(errorHtml(msg), { headers: { 'Content-Type': 'text/html' } });
 
   if (error) {
     console.error('[Composio Callback] OAuth error:', error);
-    return new NextResponse(errorHtml(error), { headers: { 'Content-Type': 'text/html' } });
+    return fail(error);
   }
 
   if (!tenantId || !provider) {
-    return new NextResponse(errorHtml('Missing tenantId or provider'), { headers: { 'Content-Type': 'text/html' } });
+    return fail('Missing tenantId or provider');
   }
 
   try {
@@ -68,10 +74,11 @@ export async function GET(request: NextRequest) {
       console.error('[Composio Callback] Tool refresh error:', err)
     );
 
+    if (returnTo) return NextResponse.redirect(withOutcome(returnTo, { status: 'connected', provider }));
     return new NextResponse(successHtml(provider), { headers: { 'Content-Type': 'text/html' } });
   } catch (err) {
     console.error('[Composio Callback] Error:', err);
-    return new NextResponse(errorHtml('Connection failed'), { headers: { 'Content-Type': 'text/html' } });
+    return fail('Connection failed');
   }
 }
 

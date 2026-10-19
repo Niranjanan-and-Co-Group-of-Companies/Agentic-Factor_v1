@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { initiateComposioConnection } from '@/lib/services/composio';
+import { appReturnUrl } from '@/lib/utils/app-return';
 
 // ============================================================
 // POST /api/composio/connect
-// Body: { provider: string }
+// Body: { provider: string, returnTo?: string }
 // Starts a Composio-managed OAuth flow for the given provider.
-// Returns { authUrl } — frontend opens it in a popup.
+// Returns { authUrl } — the website opens it in a popup; the mobile app in its sign-in browser,
+// passing returnTo (its own agenticfactor:// address) so the callback can send the customer back.
 // After auth, Composio redirects to /api/composio/callback.
 // ============================================================
 
@@ -17,13 +19,14 @@ export async function POST(request: NextRequest) {
   }
   const { tenantId } = authResult;
 
-  const { provider } = await request.json();
+  const { provider, returnTo } = await request.json() as { provider?: string; returnTo?: unknown };
   if (!provider) {
     return NextResponse.json({ error: 'Missing provider' }, { status: 400 });
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-  const redirectUri = `${appUrl}/api/composio/callback?tenantId=${tenantId}&provider=${provider}`;
+  const back = appReturnUrl(returnTo);
+  const redirectUri = `${appUrl}/api/composio/callback?tenantId=${tenantId}&provider=${provider}${back ? `&returnTo=${encodeURIComponent(back)}` : ''}`;
 
   try {
     const authUrl = await initiateComposioConnection(tenantId, provider, redirectUri);

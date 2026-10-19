@@ -1,0 +1,98 @@
+import Constants from 'expo-constants';
+import { useFocusEffect } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import { useCallback, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { AppText, Button, Card } from '@/components/ui';
+import { api } from '@/lib/api';
+import { signOut, useAuth } from '@/lib/auth';
+import { API_URL } from '@/lib/config';
+import { font, maxContentWidth, radius, space, useColors } from '@/theme';
+
+interface Usage {
+  billing: { plan?: string; credits_remaining?: number; credits_topup?: number; credits_used_this_month?: number; is_trial?: boolean } | null;
+}
+
+export default function Account() {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+  const { session } = useAuth();
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useFocusEffect(useCallback(() => {
+    api<Usage>('/api/billing/usage').then(setUsage).catch(() => {});
+  }, []));
+
+  const b = usage?.billing;
+  const credits = b ? (b.credits_remaining ?? 0) + (b.credits_topup ?? 0) : null;
+
+  const requestDeletion = async () => {
+    setBusy(true);
+    try {
+      const res = await api<{ message: string }>('/api/account/delete', { method: 'POST', body: { confirm } });
+      Alert.alert('Deletion requested', res.message);
+      await signOut();
+    } catch (err) {
+      Alert.alert('Could not request deletion', (err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={[styles.wrap, { paddingTop: insets.top + space.lg }]}>
+      <AppText size="xxl" weight="800" accessibilityRole="header">Account</AppText>
+
+      <Card>
+        <AppText size="sm" tone="muted">Signed in as</AppText>
+        <AppText weight="600" selectable>{session?.user.email ?? '—'}</AppText>
+      </Card>
+
+      <Card>
+        <AppText size="sm" tone="muted">Plan</AppText>
+        <AppText weight="700" size="lg">{b?.plan ? b.plan[0].toUpperCase() + b.plan.slice(1) : '—'}{b?.is_trial ? ' (trial)' : ''}</AppText>
+        <AppText size="sm" tone="muted" style={{ marginTop: space.sm }}>Credits left</AppText>
+        <AppText weight="700" size="xxl">{credits === null ? '—' : credits.toLocaleString()}</AppText>
+        {b?.credits_used_this_month ? <AppText size="sm" tone="secondary">{b.credits_used_this_month.toLocaleString()} used this month</AppText> : null}
+      </Card>
+
+      <Card>
+        <Button label="Privacy policy" variant="ghost" onPress={() => WebBrowser.openBrowserAsync(`${API_URL}/privacy`)} />
+        <Button label="Terms of service" variant="ghost" onPress={() => WebBrowser.openBrowserAsync(`${API_URL}/terms`)} />
+        <Button label="Sign out" variant="ghost" onPress={() => signOut()} />
+      </Card>
+
+      <Card>
+        {deleting ? (
+          <>
+            <AppText weight="700" tone="rose">Delete your account</AppText>
+            <AppText size="sm" tone="secondary">Your missions stop at once, and your account and all its data are deleted within 30 days. Type DELETE to confirm.</AppText>
+            <TextInput
+              value={confirm} onChangeText={setConfirm} autoCapitalize="characters" placeholder="DELETE" placeholderTextColor={c.textMuted}
+              style={[styles.input, { color: c.text, borderColor: c.border, backgroundColor: c.input }]} accessibilityLabel="Type DELETE to confirm"
+            />
+            <View style={styles.buttons}>
+              <Button label="Delete my account" variant="danger" disabled={confirm !== 'DELETE'} loading={busy} onPress={requestDeletion} />
+              <Button label="Cancel" variant="ghost" onPress={() => { setDeleting(false); setConfirm(''); }} />
+            </View>
+          </>
+        ) : (
+          <Button label="Delete account" variant="danger" onPress={() => setDeleting(true)} />
+        )}
+      </Card>
+
+      <AppText size="xs" tone="muted" style={{ textAlign: 'center' }}>Agentic Factor {Constants.expoConfig?.version ?? ''}</AppText>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrap: { padding: space.lg, gap: space.md, width: '100%', maxWidth: maxContentWidth, alignSelf: 'center', paddingBottom: space.xxl * 2 },
+  input: { minHeight: 44, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: space.md, fontSize: font.md },
+  buttons: { flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' },
+});

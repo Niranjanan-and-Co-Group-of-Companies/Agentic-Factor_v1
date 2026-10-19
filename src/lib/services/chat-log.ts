@@ -4,40 +4,13 @@
 // whose action_payload lets the chat draw it as a card.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ApprovalRecordPayload } from '@/lib/services/approval-records';
 
-export const RESULT_KINDS = ['run', 'schedule', 'unschedule', 'pause', 'resume', 'go_live', 'connect', 'webhook', 'revert', 'update'] as const;
-export type ResultKind = typeof RESULT_KINDS[number];
+export const RESULT_KINDS = ['run', 'schedule', 'unschedule', 'pause', 'resume', 'go_live', 'connect', 'webhook', 'revert', 'update'] as const satisfies readonly ResultKind[];
+export type { ResultKind } from '@/lib/contracts';
+import type { ResultKind } from '@/lib/contracts';
 
-export interface RunCardEntry {
-  type: 'run_card';
-  runId: string;
-  runNumber?: number;
-  trigger?: string;
-  missionId: string;
-  missionTitle?: string;
-}
-
-export interface ActionResultEntry {
-  type: 'action_result';
-  kind: ResultKind;
-  ok: boolean;
-  /** What was asked for, e.g. "Every Monday 9am IST". */
-  label: string;
-  /** The outcome in a line, e.g. "Next run Mon 20 Oct, 9:00 am". */
-  detail?: string;
-  /** Why it failed. */
-  error?: string;
-  missionId?: string;
-  missionTitle?: string;
-  via?: 'mission_chat' | 'command_center';
-  by?: string;
-  at: string;
-  /** The original chat action, so a failed one can be retried from the history. */
-  action?: Record<string, unknown>;
-}
-
-export type ChatEntry = RunCardEntry | ActionResultEntry | (ApprovalRecordPayload & { missionId?: string; missionTitle?: string });
+export type { ActionResultEntry, ChatEntry, RunCardEntry } from '@/lib/contracts';
+import type { ActionResultEntry, ChatEntry, RunCardEntry } from '@/lib/contracts';
 
 const KIND_DONE: Record<ResultKind, string> = {
   run: 'Run started', schedule: 'Schedule set', unschedule: 'Schedule removed', pause: 'Mission paused',

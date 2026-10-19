@@ -9,66 +9,8 @@ import { actionLabel, declaredActions, missionCatalog } from '@/lib/services/app
 
 export { humanizeAction };
 
-export type RunStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed';
-export type AgentStep = 'waiting' | 'working' | 'repairing' | 'checking' | 'acting' | 'approval' | 'paused' | 'done' | 'failed' | 'skipped';
-
-export interface LiveAgent {
-  id: string;
-  role: string;
-  /** Composio toolkit slugs this agent's script calls, for its app logos. */
-  apps: string[];
-  step: AgentStep;
-  /** Attempt number while repairing (2 = first repair). */
-  attempt?: number;
-  maxAttempts?: number;
-  /** Short plain-language detail: the error being repaired, or why it stopped. */
-  note?: string;
-  startedAt?: string;
-  finishedAt?: string;
-  /** Time of the latest sign of life from this agent. */
-  lastSignalAt?: string;
-}
-
-export interface LiveApproval {
-  id: string;
-  agentId: string;
-  agentRole: string;
-  /** rehearsal = a preview to check (nothing real happens); live = permission for a real action. */
-  kind: 'rehearsal' | 'live';
-  actions: string[];
-  preview?: string;
-  submittedAt?: string;
-}
-
-export interface LiveRun {
-  id: string;
-  number: number;
-  status: RunStatus;
-  mode: 'rehearsal' | 'live';
-  trigger: string;
-  startedAt: string;
-  completedAt: string | null;
-  durationMs: number | null;
-  agentsTotal: number;
-  agentsDone: number;
-  agentsFailed: number;
-  error?: string;
-  summary?: string;
-  /** Credits charged for this run so far (at the failure rate once it has failed). */
-  credits?: number;
-}
-
-export interface LiveRunView {
-  mission: { id: string; title: string; status: string; /** the next run is a rehearsal */ rehearsal: boolean };
-  run: LiveRun | null;
-  agents: LiveAgent[];
-  approval: LiveApproval | null;
-  /** Official name and logo of each app the agents use, from Composio's catalog. */
-  apps: Record<string, { name: string; logo: string }>;
-  /** Median duration of recent completed runs, for "usually ~25s". */
-  typicalMs: number | null;
-  serverTime: string;
-}
+export type { AgentStep, LiveAgent, LiveApproval, LiveRun, LiveRunView, RunStatus } from '@/lib/contracts';
+import type { AgentStep, LiveAgent, LiveApproval, LiveRunView, RunStatus } from '@/lib/contracts';
 
 export interface RunEventRow {
   event_type: string;

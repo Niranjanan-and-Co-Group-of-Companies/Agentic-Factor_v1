@@ -139,7 +139,8 @@ export function buildThread(messages: ThreadMessage[], { maxGapMs = 2 * 60 * 60_
   return thread;
 }
 
-export interface ThreadNote { type: 'thread_note'; kind: 'started' | 'created'; at: string; missionId?: string; missionTitle?: string }
+export type { ThreadNote } from '@/lib/contracts';
+import type { ThreadNote } from '@/lib/contracts';
 
 const shortDate = (iso: string) => new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 

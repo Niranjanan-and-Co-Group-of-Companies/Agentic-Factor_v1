@@ -23,5 +23,6 @@
       "path": "/api/cron/cost-check",
       "schedule": "30 2 * * *"
     }
-  ]
+  ],
+  "ignoreCommand": "git diff --quiet ${VERCEL_GIT_PREVIOUS_SHA:-HEAD^} HEAD -- . ':(exclude)mobile'"
 }

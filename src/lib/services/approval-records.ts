@@ -5,39 +5,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { humanizeAction } from '@/lib/utils/app-name';
 
-export type ApprovalKind = 'rehearsal' | 'live';
-export type ApprovalVia = 'mission_chat' | 'command_center' | 'chat_message' | 'approvals_page' | 'api';
-
-export interface ApprovalSummary {
-  id: string;
-  missionId: string;
-  missionTitle: string;
-  agentId: string;
-  agentRole: string;
-  kind: ApprovalKind;
-  /** The app actions it will run, e.g. "Gmail: send email". */
-  actions: string[];
-  /** The platform's own description of the calls and the prepared content. */
-  preview: string;
-  runId?: string;
-  submittedAt?: string;
-  status: 'pending' | 'approved' | 'rejected';
-}
-
-export interface ApprovalRecordPayload {
-  type: 'approval_record';
-  actionId: string;
-  decision: 'approved' | 'rejected';
-  kind: ApprovalKind;
-  agentRole: string;
-  actions: string[];
-  preview?: string;
-  reason?: string;
-  via: ApprovalVia;
-  decidedBy?: string;
-  decidedAt: string;
-  runId?: string;
-}
+export type { ApprovalKind, ApprovalRecordPayload, ApprovalSummary, ApprovalVia } from '@/lib/contracts';
+import type { ApprovalRecordPayload, ApprovalSummary, ApprovalVia } from '@/lib/contracts';
 
 export interface ProposedActionRow {
   id: string;
