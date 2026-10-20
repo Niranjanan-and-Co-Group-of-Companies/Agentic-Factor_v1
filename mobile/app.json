@@ -49,6 +49,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "cc0f095c-b8bb-4777-9d77-5dfd6025bc5e"
+      }
+    },
+    "owner": "agenticfactors-team"
   }
 }
