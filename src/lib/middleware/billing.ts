@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getUsdToInr } from '@/lib/services/fx-rate';
 import { tokenCostUsd } from '@/lib/services/prices';
@@ -85,9 +86,7 @@ export interface BillingCheck {
  * Ensure a tenant has a billing record. If not, create one with free trial credits.
  * Called automatically before any credit check or deduction.
  */
-export async function ensureBillingRecord(tenantId: string): Promise<void> {
-  const supabase = createServiceClient();
-  
+export async function ensureBillingRecord(tenantId: string, supabase: SupabaseClient = createServiceClient()): Promise<void> {
   const { data: existing } = await supabase
     .from('tenant_billing')
     .select('tenant_id')

@@ -240,3 +240,33 @@ export interface MissionListItem {
   created_at: string;
   updated_at: string;
 }
+
+// ── Billing for the app (GET /api/billing/store) ──
+
+/** Where a paid plan is billed: an app store, the website (Razorpay), or by hand (enterprise). */
+export type PlanBilledBy = 'app_store' | 'play_store' | 'test_store' | 'website' | 'other';
+
+export interface StoreBillingStatus {
+  plan: string;
+  isTrial: boolean;
+  /** Monthly plus top-up credits available now. */
+  credits: number;
+  billingStatus: string;
+  periodEnd: string | null;
+  /** null when on the free plan (or the plan has lapsed). */
+  billedBy: PlanBilledBy | null;
+  storeProductId: string | null;
+  /** Payments recorded so far (packs and plan periods): goes up once a purchase has been applied. */
+  payments: number;
+  /** What the app sells, by store product id (prices come from the store). */
+  products: StoreProductInfo[];
+}
+
+export interface StoreProductInfo {
+  id: string;
+  kind: 'pack' | 'plan';
+  name: string;
+  /** A pack's credits, or a plan's credits per month. */
+  credits: number;
+  maxActiveMissions?: number;
+}

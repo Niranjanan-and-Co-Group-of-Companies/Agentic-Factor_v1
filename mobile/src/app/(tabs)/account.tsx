@@ -1,8 +1,8 @@
 import Constants from 'expo-constants';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppText, Button, Card } from '@/components/ui';
@@ -79,6 +79,7 @@ export default function Account() {
         <AppText size="sm" tone="muted" style={{ marginTop: space.sm }}>Credits left</AppText>
         <AppText weight="700" size="xxl">{credits === null ? '—' : credits.toLocaleString()}</AppText>
         {b?.credits_used_this_month ? <AppText size="sm" tone="secondary">{b.credits_used_this_month.toLocaleString()} used this month</AppText> : null}
+        {Platform.OS !== 'web' ? <Button label="Buy credits" onPress={() => router.push('/buy-credits')} style={{ marginTop: space.sm, alignSelf: 'flex-start' }} /> : null}
       </Card>
 
       <Card>

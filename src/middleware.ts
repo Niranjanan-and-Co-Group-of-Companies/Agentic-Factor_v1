@@ -55,6 +55,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // ── Allow RevenueCat webhook (app-store purchases; secured by its Authorization secret) ──
+  if (pathname === '/api/revenuecat/webhook') {
+    return NextResponse.next();
+  }
+
   // ── Machine-to-machine mission triggers: external systems have no session, and each of these
   //    routes authenticates the caller itself (webhook secret / customer API key / inbound secret).
   if (

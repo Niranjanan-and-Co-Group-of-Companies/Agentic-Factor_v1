@@ -38,6 +38,16 @@ export async function POST(request: NextRequest) {
       .eq('tenant_id', tenantId)
       .single();
 
+    // A plan bought in the app is billed by Apple or Google: subscribing here too would charge twice.
+    const { data: store } = await supabase.from('tenant_billing').select('store_platform').eq('tenant_id', tenantId).maybeSingle();
+    if (store?.store_platform && billing?.plan !== 'free' && ['active', 'cancellation_pending', 'past_due'].includes(billing?.billing_status ?? '')) {
+      const where = store.store_platform === 'play_store' ? 'Google Play' : 'the App Store';
+      return NextResponse.json(
+        { error: `Your plan is billed through ${where}. Cancel it there first — it keeps running to the end of the month you paid for.` },
+        { status: 409 }
+      );
+    }
+
     if (billing?.billing_status === 'active' && billing.plan !== 'free') {
       const planRank: Record<string, number> = {
         free: 0, individual: 1, individual_annual: 1, pro: 2, pro_annual: 2, enterprise: 3,

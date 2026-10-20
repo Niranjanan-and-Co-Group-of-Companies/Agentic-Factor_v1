@@ -2,25 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyWebhookSignature, fetchOrder, getSubscription } from '@/lib/services/razorpay';
 import { createServiceClient } from '@/lib/supabase/server';
 import { sendEmail } from '@/lib/services/notifications';
+import { PLAN_CONFIGS, freePlanFields } from '@/lib/services/plans';
+import { ensureBillingRecord } from '@/lib/middleware/billing';
 
 // ============================================================
 // POST /api/razorpay/webhook
 // Handles Razorpay webhook events for subscription lifecycle.
 // All handlers are idempotent — safe to receive duplicate events.
 // ============================================================
-
-// Single source of truth for plan configs (mirrors billing.ts PLAN_DEFAULTS)
-const PLAN_CONFIGS: Record<string, {
-  credits: number; maxActiveMissions: number; modelTier: string;
-  maxStorageMb: number; governance: string; annual?: boolean; basePlan?: string;
-}> = {
-  free:               { credits: 30,    maxActiveMissions: 1,     modelTier: 'flash',  maxStorageMb: 100,       governance: 'none' },
-  individual:         { credits: 1000,  maxActiveMissions: 5,     modelTier: 'mixed',  maxStorageMb: 10_240,    governance: 'basic_memory' },
-  individual_annual:  { credits: 1000,  maxActiveMissions: 5,     modelTier: 'mixed',  maxStorageMb: 10_240,    governance: 'basic_memory', annual: true, basePlan: 'individual' },
-  pro:                { credits: 2500,  maxActiveMissions: 50,    modelTier: 'all',    maxStorageMb: 102_400,   governance: 'rbac' },
-  pro_annual:         { credits: 2500,  maxActiveMissions: 50,    modelTier: 'all',    maxStorageMb: 102_400,   governance: 'rbac', annual: true, basePlan: 'pro' },
-  enterprise:         { credits: 99999, maxActiveMissions: 99999, modelTier: 'custom', maxStorageMb: 1_048_576, governance: 'full_audit' },
-};
 
 function resolveLocalPlanName(razorpayPlanId: string): string {
   const envMap: Record<string, string> = {
@@ -35,19 +24,7 @@ function resolveLocalPlanName(razorpayPlanId: string): string {
 
 // Downgrade a tenant to free plan (used by halted, completed, cancelled)
 async function downgradeToFree(tenantId: string, status: string, supabase: ReturnType<typeof createServiceClient>) {
-  const freeConfig = PLAN_CONFIGS['free'];
-  await supabase.from('tenant_billing').update({
-    plan: 'free',
-    billing_status: status,
-    credits_remaining: 0,
-    credits_total: 0,
-    max_active_missions: freeConfig.maxActiveMissions,
-    model_tier: freeConfig.modelTier,
-    max_storage_mb: freeConfig.maxStorageMb,
-    governance: freeConfig.governance,
-    is_trial: false,
-    updated_at: new Date().toISOString(),
-  }).eq('tenant_id', tenantId);
+  await supabase.from('tenant_billing').update(freePlanFields(status)).eq('tenant_id', tenantId);
 }
 
 export async function POST(request: NextRequest) {
@@ -114,6 +91,10 @@ export async function POST(request: NextRequest) {
           is_trial: false,
           billing_period_start: new Date().toISOString(),
           billing_period_end: periodEnd,
+          // The plan is billed by the website now, not an app store
+          store_platform: null,
+          store_product_id: null,
+          store_original_transaction_id: null,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'tenant_id' });
 
@@ -173,12 +154,13 @@ export async function POST(request: NextRequest) {
           updated_at: new Date().toISOString(),
         }).eq('tenant_id', tenantId);
 
+        // entity_id is a UUID column: the subscription id goes in the payload
         await supabase.from('events').insert({
           tenant_id: tenantId,
           event_type: 'billing.payment_success',
           entity_type: 'billing',
-          entity_id: subscription.id,
-          payload: { amount: payment?.amount, currency: payment?.currency, method: payment?.method, creditsRefilled: renewalCredits, seats: renewalSeats },
+          entity_id: tenantId,
+          payload: { subscriptionId: subscription.id, paymentId: payment?.id, amount: payment?.amount, currency: payment?.currency, method: payment?.method, creditsRefilled: renewalCredits, seats: renewalSeats },
         });
 
         // Send renewal confirmation email
@@ -403,25 +385,29 @@ export async function POST(request: NextRequest) {
           const packId = notes.pack_id || 'unknown';
 
           if (packCredits > 0) {
-            // Idempotent grant via DB function — skips if payment_id already processed
-            const { data: grantResult } = await supabase.rpc('grant_topup_idempotent', {
+            // Records the payment and adds its credits together, once per payment (billing_payments).
+            // A failure answers 500, so Razorpay sends the event again.
+            await ensureBillingRecord(tenantId);
+            const { data: granted, error: grantError } = await supabase.rpc('grant_purchase_credits', {
+              p_payment_id: `razorpay:${payment.id}`,
               p_tenant_id:  tenantId,
-              p_payment_id: payment.id,
+              p_source:     'razorpay',
+              p_product:    packId,
               p_credits:    packCredits,
             });
+            if (grantError) throw new Error(`Top-up ${payment.id} not credited: ${grantError.message}`);
 
-            if (grantResult === false) {
+            if (granted === false) {
               console.log(`[Razorpay Webhook] Top-up ${payment.id} already processed — skipping duplicate`);
               break;
             }
 
-            // Log the event (grant_topup_idempotent already checked for this, so this insert is safe)
             await supabase.from('events').insert({
               tenant_id: tenantId,
               event_type: 'billing.topup_purchased',
               entity_type: 'billing',
-              entity_id: payment.id,
-              payload: { packId, credits: packCredits, amount: payment.amount, currency: payment.currency },
+              entity_id: tenantId,
+              payload: { paymentId: payment.id, source: 'razorpay', packId, credits: packCredits, amount: payment.amount, currency: payment.currency },
             });
 
             const email = notes.email;

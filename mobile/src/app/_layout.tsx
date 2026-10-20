@@ -23,6 +23,7 @@ function Navigator() {
       </Stack.Protected>
       <Stack.Protected guard={!!session}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="buy-credits" options={{ presentation: 'modal' }} />
       </Stack.Protected>
     </Stack>
   );
