@@ -36,10 +36,18 @@ END$$;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM anon, authenticated;
 ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
--- Check: every function above should show false, false.
-SELECT p.proname,
+-- Check: every function shows false, false — except team_has_access and mission_has_access (true, true).
+SELECT p.proname AS function,
        has_function_privilege('anon', p.oid, 'EXECUTE')          AS anyone_can_run,
        has_function_privilege('authenticated', p.oid, 'EXECUTE') AS signed_in_users_can_run
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
- WHERE n.nspname = 'public' AND p.prokind = 'f'
+ WHERE n.nspname = 'public'
+   AND p.proname IN (
+     'add_credits_atomic_refund', 'deduct_credits_atomic', 'grant_topup_idempotent',
+     'reset_monthly_usage', 'reset_daily_tokens',
+     'get_tenant_stats', 'get_seat_count', 'get_approval_streak', 'get_next_snapshot_version',
+     'touch_heartbeat', 'detect_deadlocked_missions',
+     'match_agent_templates', 'match_asset_chunks', 'match_feedback_examples', 'match_mission_patterns',
+     'team_has_access', 'mission_has_access'
+   )
  ORDER BY 1;
