@@ -1,14 +1,16 @@
 import Constants from 'expo-constants';
 import { router, useFocusEffect } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { useCallback, useState } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { MenuButton } from '@/components/MenuButton';
 import { AppText, Button, Card } from '@/components/ui';
 import { api } from '@/lib/api';
 import { signOut, useAuth } from '@/lib/auth';
 import { API_URL } from '@/lib/config';
+import { loadThemeChoice, setThemeChoice, type ThemeChoice } from '@/lib/theme-preference';
 import { font, maxContentWidth, radius, space, useColors } from '@/theme';
 
 interface Usage {
@@ -24,6 +26,9 @@ export default function Account() {
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [deletion, setDeletion] = useState<{ pending: boolean; deleteAfter?: string } | null>(null);
+  const [theme, setTheme] = useState<ThemeChoice>('system');
+  useEffect(() => { loadThemeChoice().then(setTheme).catch(() => {}); }, []);
+  const chooseTheme = (choice: ThemeChoice) => { setTheme(choice); void setThemeChoice(choice); };
 
   useFocusEffect(useCallback(() => {
     api<Usage>('/api/billing/usage').then(setUsage).catch(() => {});
@@ -65,8 +70,11 @@ export default function Account() {
     : '';
 
   return (
-    <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={[styles.wrap, { paddingTop: insets.top + space.lg }]}>
-      <AppText size="xxl" weight="800" accessibilityRole="header">Account</AppText>
+    <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={[styles.wrap, { paddingTop: insets.top + space.xs }]}>
+      <View style={styles.titleRow}>
+        <MenuButton />
+        <AppText size="xxl" weight="800" accessibilityRole="header">Account</AppText>
+      </View>
 
       <Card>
         <AppText size="sm" tone="muted">Signed in as</AppText>
@@ -81,6 +89,28 @@ export default function Account() {
         {b?.credits_used_this_month ? <AppText size="sm" tone="secondary">{b.credits_used_this_month.toLocaleString()} used this month</AppText> : null}
         {Platform.OS !== 'web' ? <Button label="Buy credits" onPress={() => router.push('/buy-credits')} style={{ marginTop: space.sm, alignSelf: 'flex-start' }} /> : null}
       </Card>
+
+      {Platform.OS !== 'web' ? (
+        <Card>
+          <AppText size="sm" tone="muted">Appearance</AppText>
+          <View accessibilityRole="radiogroup" style={[styles.segment, { backgroundColor: c.bgSecondary, borderColor: c.border }]}>
+            {(['system', 'light', 'dark'] as const).map(choice => (
+              <Pressable
+                key={choice}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: theme === choice }}
+                onPress={() => chooseTheme(choice)}
+                style={[styles.segmentItem, theme === choice && { backgroundColor: c.card }]}
+              >
+                <AppText size="sm" weight="700" tone={theme === choice ? 'primary' : 'muted'}>
+                  {choice === 'system' ? 'System' : choice === 'light' ? 'Light' : 'Dark'}
+                </AppText>
+              </Pressable>
+            ))}
+          </View>
+          <AppText size="xs" tone="muted">System follows your phone’s light or dark setting.</AppText>
+        </Card>
+      ) : null}
 
       <Card>
         <Button label="Privacy policy" variant="ghost" onPress={() => WebBrowser.openBrowserAsync(`${API_URL}/privacy`)} />
@@ -124,4 +154,7 @@ const styles = StyleSheet.create({
   wrap: { padding: space.lg, gap: space.md, width: '100%', maxWidth: maxContentWidth, alignSelf: 'center', paddingBottom: space.xxl * 2 },
   input: { minHeight: 44, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: space.md, fontSize: font.md },
   buttons: { flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginLeft: -space.sm },
+  segment: { flexDirection: 'row', borderWidth: 1, borderRadius: radius.md, padding: 3, gap: 3 },
+  segmentItem: { flex: 1, minHeight: 40, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
 });

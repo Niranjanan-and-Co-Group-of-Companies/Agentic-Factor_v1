@@ -6,9 +6,12 @@ import { useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from '@/lib/auth';
+import { loadThemeChoice } from '@/lib/theme-preference';
 import { useColors } from '@/theme';
 
 SplashScreen.preventAutoHideAsync();
+// Light, dark or the phone's setting, as chosen in Account — applied before the first screen.
+loadThemeChoice().catch(() => {});
 
 function Navigator() {
   const { session, loading } = useAuth();
@@ -22,7 +25,7 @@ function Navigator() {
         <Stack.Screen name="sign-in" />
       </Stack.Protected>
       <Stack.Protected guard={!!session}>
-        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="(app)" />
         <Stack.Screen name="buy-credits" options={{ presentation: 'modal' }} />
       </Stack.Protected>
     </Stack>

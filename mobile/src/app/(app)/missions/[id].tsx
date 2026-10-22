@@ -3,7 +3,7 @@
 import type { ActionResultEntry, ApprovalRecordPayload, ChatAction, LiveRunView, MissionAction, ResultKind, ThreadNote } from '@contracts';
 import * as Clipboard from 'expo-clipboard';
 import * as Crypto from 'expo-crypto';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, View } from 'react-native';
 import { useHeaderHeight } from '@react-navigation/elements';
@@ -168,7 +168,6 @@ export default function MissionChat() {
           <View style={{ gap: space.sm, alignItems: 'center' }}>
             <AppText weight="700">Talk to this mission’s agent</AppText>
             <AppText tone="secondary" style={{ textAlign: 'center' }}>Ask it to run, explain a result, change what it does, or put it on a schedule.</AppText>
-            <Button label="Back to missions" variant="ghost" onPress={() => router.back()} />
           </View>
         }
       />

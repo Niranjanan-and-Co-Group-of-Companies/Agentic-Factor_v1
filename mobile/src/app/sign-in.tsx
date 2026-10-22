@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, useC
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { LogoMark } from '@/components/Logo';
 import { AppText, Button } from '@/components/ui';
 import { appleSignInAvailable, signInWithApple, signInWithEmail, signInWithGoogle, signUpWithEmail } from '@/lib/auth';
 import { font, radius, space, useColors } from '@/theme';
@@ -41,8 +42,9 @@ export default function SignIn() {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={[styles.wrap, { paddingTop: insets.top + space.xxl, paddingBottom: insets.bottom + space.xl }]} keyboardShouldPersistTaps="handled">
         <View style={styles.inner}>
+          <LogoMark height={44} />
           <AppText size="xxl" weight="800" accessibilityRole="header">Agentic Factor</AppText>
-          <AppText tone="secondary">Your AI chief of staff. Tell it what you need done — it builds the agents and gets it done.</AppText>
+          <AppText tone="secondary">Your AI chief of staff. Ask for anything — it gets it done with your apps, and runs the things you need regularly by itself.</AppText>
 
           <View style={{ gap: space.sm, marginTop: space.lg }}>
             {apple ? (

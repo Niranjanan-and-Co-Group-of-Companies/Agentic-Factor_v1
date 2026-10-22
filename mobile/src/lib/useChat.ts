@@ -5,7 +5,8 @@ import type { ApprovalRecordPayload, ChatAction, ChatSession, ChatStreamEvent, S
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { api, stream } from './api';
+import { api, ApiError, stream } from './api';
+import { chatsChanged } from './chat-store';
 import { fromSaved, historyFor, newKey, type ChatItem, type ToolLine } from './chat';
 import { stripActionTags } from './markdown';
 import { supabase } from './supabase';
@@ -17,21 +18,26 @@ export interface ChatOptions {
   sessionsPath: string;
   /** Ask for the proactive alert when the conversation is empty. */
   firstLoadAlert?: boolean;
+  /** Open the latest conversation only if it was used this recently; otherwise start a new one. */
+  resumeWithinMs?: number;
 }
 
-/** A saved conversation: the given session, or the latest one. */
-async function fetchConversation(sessionsPath: string, id?: string | null): Promise<{ sessionId: string | null; items: ChatItem[] }> {
+/** A saved conversation: the given session, or the latest one (if used within resumeWithinMs). */
+async function fetchConversation(sessionsPath: string, id?: string | null, resumeWithinMs?: number): Promise<{ sessionId: string | null; items: ChatItem[] }> {
   try {
     let sessionId = id ?? null;
     if (!sessionId) {
       const { sessions } = await api<{ sessions: ChatSession[] }>(sessionsPath);
-      sessionId = sessions?.[0]?.id ?? null;
+      const latest = sessions?.[0];
+      const recent = !resumeWithinMs || (latest && Date.now() - new Date(latest.updated_at).getTime() < resumeWithinMs);
+      sessionId = recent ? latest?.id ?? null : null;
     }
     if (!sessionId) return { sessionId: null, items: [] };
     const { messages } = await api<{ messages: SavedChatMessage[] }>(sessionsPath, { method: 'POST', body: { sessionId } });
     return { sessionId, items: (messages ?? []).map(fromSaved) };
-  } catch {
-    return { sessionId: id ?? null, items: [] };
+  } catch (err) {
+    // Gone (deleted, or not this account's): a new conversation, not writing into it. Offline: keep it.
+    return { sessionId: err instanceof ApiError && err.status === 404 ? null : id ?? null, items: [] };
   }
 }
 
@@ -42,7 +48,7 @@ function upsertTool(tools: ToolLine[] | undefined, line: ToolLine): ToolLine[] {
   return list;
 }
 
-export function useChat({ endpoint, sessionsPath, firstLoadAlert }: ChatOptions) {
+export function useChat({ endpoint, sessionsPath, firstLoadAlert, resumeWithinMs }: ChatOptions) {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,7 +79,7 @@ export function useChat({ endpoint, sessionsPath, firstLoadAlert }: ChatOptions)
 
   useEffect(() => {
     let cancelled = false;
-    fetchConversation(sessionsPath).then(conversation => {
+    fetchConversation(sessionsPath, null, resumeWithinMs).then(conversation => {
       if (cancelled) return;
       setSessionId(conversation.sessionId);
       setItems(conversation.items);
@@ -84,7 +90,7 @@ export function useChat({ endpoint, sessionsPath, firstLoadAlert }: ChatOptions)
       abort.current?.abort();
       if (channel.current) supabase.removeChannel(channel.current);
     };
-  }, [sessionsPath]);
+  }, [sessionsPath, resumeWithinMs]);
 
   // The proactive alert (a failed run, an approval waiting…) when there is no conversation yet.
   useEffect(() => {
@@ -130,7 +136,8 @@ export function useChat({ endpoint, sessionsPath, firstLoadAlert }: ChatOptions)
       .subscribe();
   }, [updateLast]);
 
-  const send = useCallback(async (text: string) => {
+  /** Sends a message; `extra` goes with it (the OK on a plan card, an accepted mission offer). */
+  const send = useCallback(async (text: string, extra?: Record<string, unknown>) => {
     const message = text.trim();
     if (!message || sending) return;
     setAlert(null);
@@ -145,7 +152,7 @@ export function useChat({ endpoint, sessionsPath, firstLoadAlert }: ChatOptions)
     let finished = false;
     const record = (r: ApprovalRecordPayload) => append({ key: newKey(), role: 'assistant', content: '', action: r as unknown as ChatAction, applied: true });
     try {
-      for await (const evt of stream<ChatStreamEvent>(endpoint, { messages: history, sessionId }, abort.current.signal)) {
+      for await (const evt of stream<ChatStreamEvent>(endpoint, { messages: history, sessionId, ...extra }, abort.current.signal)) {
         if (evt.type === 'delta' && evt.text) {
           streamed += evt.text;
           const shown = stripActionTags(streamed);
@@ -165,6 +172,7 @@ export function useChat({ endpoint, sessionsPath, firstLoadAlert }: ChatOptions)
           }));
           if (evt.sessionId) setSessionId(prev => prev ?? evt.sessionId!);
           if (evt.approvalRecord) record(evt.approvalRecord);
+          chatsChanged();
         } else if (evt.type === 'error') {
           finished = true;
           updateLast(last => ({ ...last, streaming: false, tools: undefined, content: evt.message ?? 'Something went wrong. Please try again.' }));
@@ -190,5 +198,5 @@ export function useChat({ endpoint, sessionsPath, firstLoadAlert }: ChatOptions)
     setSending(false);
   }, []);
 
-  return { items, setItems, append, sessionId, loading, sending, alert, send, reload: () => load(sessionId), newConversation };
+  return { items, setItems, append, sessionId, loading, sending, alert, send, load, reload: () => load(sessionId), newConversation };
 }
