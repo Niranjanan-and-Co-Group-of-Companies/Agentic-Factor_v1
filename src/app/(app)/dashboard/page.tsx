@@ -106,6 +106,10 @@ function statusDot(status: string) {
 
 
 const QUICK_CHIPS = ['What ran today?', 'Check my credits', 'Show all missions', 'Create a new mission'];
+// The conversation this tab had open: back on the Command Center within this time (after connecting an
+// app or opening a mission), it reopens instead of starting empty.
+const LAST_CHAT_KEY = 'af.commandCenter.lastChat';
+const RESUME_MS = 30 * 60_000;
 // Connector names come from Composio's catalog (any app); this is for plain-text messages.
 const connectorMeta = (s: string) => ({ label: appNameNow(s) });
 
@@ -163,6 +167,9 @@ function CommandCenterPageInner() {
   const blueprintPollsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   // Connector callbacks are set up before runInChat exists; they reach it through this.
   const runInChatRef = useRef<RunInChat | null>(null);
+  // Connecting from a "connect this app" card: once connected, the conversation carries on by itself.
+  const continueAfterConnectRef = useRef<string | null>(null);
+  const sendMessageRef = useRef<((text: string) => Promise<void>) | null>(null);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
 
@@ -236,7 +243,13 @@ function CommandCenterPageInner() {
         const provider = e.data.provider as string ?? '';
         setConnectedInSession(prev => { const s = new Set(prev); s.add(provider); return s; });
         setConnectingSlug(null);
-        void runInChatRef.current?.('connect', connectorMeta(provider).label, {}, async () => ({ ok: true, detail: 'Ready to use in your missions.' }));
+        if (continueAfterConnectRef.current === provider) {
+          // The assistant asked for this app: tell it, so it continues where it left off.
+          continueAfterConnectRef.current = null;
+          void sendMessageRef.current?.(`I've connected ${connectorMeta(provider).label}.`);
+        } else {
+          void runInChatRef.current?.('connect', connectorMeta(provider).label, {}, async () => ({ ok: true, detail: 'Ready to use in your missions.' }));
+        }
       } else if (e.data?.type === 'OAUTH_ERROR') {
         setConnectingSlug(null);
         const why = typeof e.data.payload === 'string' ? e.data.payload : 'The sign-in did not complete.';
@@ -255,6 +268,8 @@ function CommandCenterPageInner() {
       return;
     }
     setConnectingSlug(service);
+    // Opened straight from the click, before the request: Safari blocks a window opened after waiting on one.
+    const popup = window.open('', 'oauth_window', 'width=500,height=700,scrollbars=yes');
     try {
       const res = await fetch('/api/composio/connect', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -263,16 +278,29 @@ function CommandCenterPageInner() {
       const data = await res.json() as { authUrl?: string; error?: string };
       if (!res.ok || !data.authUrl) {
         // OAuth unavailable — fall back to API key modal
+        popup?.close();
         setConnectingSlug(null);
         setInlineApiKeyValue(''); setInlineApiKeyError(null);
         setInlineApiKeySuccess(false); setInlineApiKeyModal({ service });
         return;
       }
-      const popup = window.open(data.authUrl, 'oauth_window', 'width=500,height=700,scrollbars=yes');
+      if (!popup) {
+        setConnectingSlug(null);
+        continueAfterConnectRef.current = null;
+        void runInChatRef.current?.('connect', connectorMeta(service).label, {}, async () => ({ ok: false, error: 'Your browser blocked the sign-in window. Allow pop-ups for this site, then click Connect again.' }));
+        return;
+      }
+      popup.location.href = data.authUrl;
       const poll = setInterval(() => {
-        if (popup?.closed) { clearInterval(poll); setConnectingSlug(null); }
+        if (!popup.closed) return;
+        clearInterval(poll);
+        setConnectingSlug(null);
+        // Closed without connecting: no longer waiting. (Its success message arrives just before it closes.)
+        setTimeout(() => { if (continueAfterConnectRef.current === service) continueAfterConnectRef.current = null; }, 2000);
       }, 500);
     } catch {
+      popup?.close();
+      continueAfterConnectRef.current = null;
       setConnectingSlug(null);
       void runInChatRef.current?.('connect', connectorMeta(service).label, {}, async () => ({ ok: false, error: 'Could not start the connection. Try again.' }));
     }
@@ -301,7 +329,12 @@ function CommandCenterPageInner() {
       const svc = inlineApiKeyModal.service;
       setConnectedInSession(prev => { const s = new Set(prev); s.add(svc); return s; });
       setTimeout(() => {
-        void runInChatRef.current?.('connect', connectorMeta(svc).label, {}, async () => ({ ok: true, detail: 'Your key is saved and checked.' }));
+        if (continueAfterConnectRef.current === svc) {
+          continueAfterConnectRef.current = null;
+          void sendMessageRef.current?.(`I've connected ${connectorMeta(svc).label}.`);
+        } else {
+          void runInChatRef.current?.('connect', connectorMeta(svc).label, {}, async () => ({ ok: true, detail: 'Your key is saved and checked.' }));
+        }
         setInlineApiKeyModal(null); setInlineApiKeyValue(''); setInlineApiKeySuccess(false);
       }, 1000);
     } catch { setInlineApiKeyError('Network error. Please try again.'); }
@@ -316,9 +349,43 @@ function CommandCenterPageInner() {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId }),
-    });
-    if (res.ok) { const d = await res.json() as { messages: ChatMessage[] }; setMessages(d.messages ?? []); }
+    }).catch(() => null);
+    if (res?.ok) { const d = await res.json() as { messages: ChatMessage[] }; setMessages(d.messages ?? []); return; }
+    // Gone (deleted, or not this account's): start fresh instead of writing into it.
+    setActiveSessionId(null);
+    try { sessionStorage.removeItem(LAST_CHAT_KEY); } catch { /* storage unavailable */ }
+    router.replace('/dashboard', { scroll: false });
   };
+
+  const startNewChat = () => {
+    setActiveSessionId(null); setMessages([]); setInput('');
+    try { sessionStorage.removeItem(LAST_CHAT_KEY); } catch { /* storage unavailable */ }
+    router.replace('/dashboard', { scroll: false });
+    inputRef.current?.focus();
+  };
+
+  // Reopen the conversation: the one the address names, or — back on the Command Center soon after leaving
+  // it (to connect an app, open a mission…) — the one this tab had open.
+  useEffect(() => {
+    let id = searchParams.get('chat');
+    if (!id && searchParams.get('new') !== '1') {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(LAST_CHAT_KEY) ?? 'null') as { id?: string; at?: number } | null;
+        if (saved?.id && saved.at && Date.now() - saved.at < RESUME_MS) id = saved.id;
+      } catch { /* storage unavailable */ }
+    }
+    // Loaded a moment later, not inside the effect itself (it sets state).
+    if (id) { const chatId = id; void Promise.resolve().then(() => loadSession(chatId)); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The open conversation is in the address (Back and refresh keep it) and remembered for this tab.
+  useEffect(() => {
+    if (!activeSessionId) return;
+    if (searchParams.get('chat') !== activeSessionId) router.replace(`/dashboard?chat=${activeSessionId}`, { scroll: false });
+    try { sessionStorage.setItem(LAST_CHAT_KEY, JSON.stringify({ id: activeSessionId, at: Date.now() })); } catch { /* storage unavailable */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId, messages.length]);
 
   // ── Delete session ─────────────────────────────────────────────────────────
   const deleteSession = async (sessionId: string, e: React.MouseEvent) => {
@@ -630,6 +697,8 @@ function CommandCenterPageInner() {
     } catch { setMessages([...newMessages, { role: 'assistant', content: 'Connection error. Please try again.' }]); }
     setIsStreaming(false); inputRef.current?.focus();
   };
+  // The connect callbacks (set up once) send through the current sendMessage, which sees the current chat.
+  useEffect(() => { sendMessageRef.current = sendMessage; });
 
   // ── Apply action card ──────────────────────────────────────────────────────
   const applyAction = async (action: ActionPayload, msgIndex: number) => {
@@ -682,7 +751,9 @@ function CommandCenterPageInner() {
         await patchMission('resume', action.missionTitle || 'This mission', { action: 'resume' }, 'Scheduled runs continue.');
 
       } else if (action.type === 'suggest_connector' && action.provider) {
-        router.push(`/connectors?search=${encodeURIComponent(action.provider)}`);
+        // Connected right here, in a sign-in window: leaving for the Connectors page lost the conversation.
+        continueAfterConnectRef.current = action.provider;
+        await handleConnectInChat(action.provider);
 
       } else if (action.type === 'open_mission' && action.missionId) {
         router.push(`/dashboard/missions/${action.missionId}`);
@@ -897,13 +968,23 @@ function CommandCenterPageInner() {
       </div>
     );
 
-    if (action.type === 'suggest_connector') return (
-      <div style={card}>
-        <div style={{ fontSize: '0.8rem', fontWeight: 600 }}><Glyph e="🔗" /> Connect <AppName slug={action.provider ?? ''} /></div>
-        {action.reason && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{action.reason}</div>}
-        <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => applyAction(action, msgIndex)}>Connect Now →</button>
-      </div>
-    );
+    if (action.type === 'suggest_connector') {
+      const slug = action.provider ?? '';
+      const connected = connectedInSession.has(slug);
+      return (
+        <div style={card}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', fontWeight: 600 }}>
+            <span style={{ display: 'inline-flex' }}><ConnectorLogo id={slug} size={18} /></span> Connect <AppName slug={slug} />
+          </div>
+          {action.reason && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{action.reason}</div>}
+          {connected
+            ? <span style={{ alignSelf: 'flex-start', fontSize: '0.72rem', fontWeight: 700, color: 'var(--emerald)' }}>✓ Connected</span>
+            : <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => { continueAfterConnectRef.current = slug; void handleConnectInChat(slug); }} disabled={connectingSlug === slug}>
+                {connectingSlug === slug ? 'Connecting…' : APIKEY_CONNECTORS.has(slug) ? 'Add API key' : 'Connect →'}
+              </button>}
+        </div>
+      );
+    }
 
     if (action.type === 'building_blueprint' && action.jobId) {
       const liveStep = blueprintSteps[action.jobId];
@@ -1342,6 +1423,9 @@ function CommandCenterPageInner() {
               <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Command Center</div>
               <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>Your AI Chief of Staff</div>
             </div>
+            {(activeSessionId || messages.length > 0) && (
+              <button onClick={startNewChat} disabled={isStreaming} className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem', flexShrink: 0, whiteSpace: 'nowrap' }}>New chat</button>
+            )}
             <button onClick={() => { setInput('Create a new mission: '); inputRef.current?.focus(); }} className="btn btn-primary btn-sm" style={{ fontSize: '0.75rem', flexShrink: 0, whiteSpace: 'nowrap' }}>+ New Mission</button>
           </div>
 

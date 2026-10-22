@@ -579,14 +579,25 @@ const API_KEY_PROVIDERS = new Set([
 // translated to a real Composio slug before being used as a composio_oauth service.
 const LEGACY_TO_COMPOSIO: Record<string, string> = { linkedin_oidc: 'linkedin', teams: 'microsoftteams' };
 
-function composioSlugFor(canonical: string, toolLower: string): string {
-  if (canonical === 'google') {
-    if (toolLower.includes('sheet')) return 'googlesheets';
-    if (toolLower.includes('drive')) return 'googledrive';
-    if (toolLower.includes('doc')) return 'googledocs';
-    if (toolLower.includes('calendar')) return 'googlecalendar';
-    return 'gmail';
-  }
+// Each Google app is its own connection. A Google tool that names none of them gets no permission here
+// (it used to get Gmail — "Google Slides" asked the customer to connect Gmail): the build declares the
+// toolkits of the actions its scripts actually call (toolkit-resolver).
+const GOOGLE_TOOL_APPS: Array<[RegExp, string]> = [
+  [/sheet/, 'googlesheets'],
+  [/drive/, 'googledrive'],
+  [/\bdocs?\b|document/, 'googledocs'],
+  [/calendar/, 'googlecalendar'],
+  [/slide/, 'googleslides'],
+  [/\bforms?\b/, 'googleforms'],
+  [/\bmeet\b/, 'googlemeet'],
+  [/\btasks?\b/, 'googletasks'],
+  [/contact/, 'googlecontacts'],
+  [/photo/, 'googlephotos'],
+  [/gmail|\be-?mails?\b|\bmail\b|inbox/, 'gmail'],
+];
+
+function composioSlugFor(canonical: string, toolLower: string): string | null {
+  if (canonical === 'google') return GOOGLE_TOOL_APPS.find(([pattern]) => pattern.test(toolLower))?.[1] ?? null;
   return LEGACY_TO_COMPOSIO[canonical] ?? canonical;
 }
 
@@ -615,7 +626,7 @@ export function repairMissionPermissions(
 
       const authType = API_KEY_PROVIDERS.has(canonical) ? 'api_key' : 'composio_oauth';
       const service = authType === 'composio_oauth' ? composioSlugFor(canonical, toolLower) : canonical;
-      if (declared.has(service)) continue;
+      if (!service || declared.has(service)) continue;
       // A declared zoho_books covers a tool named "Zoho Books": don't add Zoho CRM ("zoho") next to it.
       if (authType === 'composio_oauth' && [...declared].some(d => d.startsWith(`${service}_`))) continue;
       declared.add(service);

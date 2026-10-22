@@ -185,7 +185,7 @@ Action types:
 - pause_mission: { "type": "pause_mission", "missionId": "...", "missionTitle": "..." } — pauses the schedule (it can be resumed)
 - unschedule_mission: { "type": "unschedule_mission", "missionId": "...", "missionTitle": "..." } — removes the schedule entirely; use this when the user asks to remove, delete or stop a schedule
 - resume_mission: { "type": "resume_mission", "missionId": "...", "missionTitle": "..." }
-- suggest_connector: { "type": "suggest_connector", "provider": "gmail", "reason": "needed to send emails" }
+- suggest_connector: { "type": "suggest_connector", "provider": "Google Sheets", "reason": "to add the report as rows" } — provider is the exact product: "Google Sheets", "Google Drive", "Google Docs", "Gmail", "Google Calendar", "YouTube", "Zoho Books", "Zoho CRM", "HubSpot", "Jira"… Each Google app is a separate connection: never "Google" alone. If you can't tell which product they mean ("a doc" could be Google Docs or Word, "Zoho" could be Books or CRM), ask that one short question instead of suggesting. When they change their mind ("use Drive instead"), suggest the new app.
 - create_mission: { "type": "create_mission", "intent": "the user's full mission description with all details clarified" }
 
 RULES:
@@ -805,6 +805,20 @@ export async function POST(request: NextRequest) {
         if (actionPayload?.type === 'schedule_mission' && typeof actionPayload.cron === 'string' && typeof actionPayload.label === 'string') {
           const { alignCronToLabel } = await import('@/lib/services/cron-match');
           actionPayload.cron = alignCronToLabel(actionPayload.cron, actionPayload.label);
+        }
+
+        // A connect suggestion names exactly one app: its button connects that app and no other. A vague or
+        // unknown name gets no button (the reply asks which app).
+        if (actionPayload?.type === 'suggest_connector') {
+          const { resolveConnectorApp } = await import('@/lib/services/connector-resolve');
+          const app = typeof actionPayload.provider === 'string' ? await resolveConnectorApp(actionPayload.provider) : null;
+          if (app) {
+            actionPayload.provider = app.slug;
+            actionPayload.providerName = app.name;
+          } else {
+            console.warn('[CommandChat] Connect suggestion for an unclear app dropped:', actionPayload.provider);
+            actionPayload = null;
+          }
         }
 
         if (actionPayload?.type === 'create_mission' && actionPayload.intent) {

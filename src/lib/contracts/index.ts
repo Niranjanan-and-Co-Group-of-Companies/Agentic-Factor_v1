@@ -154,7 +154,9 @@ export interface CommandAction extends ChatAction {
   cron?: string;
   timezone?: string;
   label?: string;
+  /** suggest_connector: the exact app (a Composio toolkit slug, e.g. "googlesheets") and its display name. */
   provider?: string;
+  providerName?: string;
   reason?: string;
   intent?: string;
   question?: string;

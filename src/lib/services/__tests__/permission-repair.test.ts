@@ -24,6 +24,17 @@ describe('repairMissionPermissions', () => {
       .toEqual(['googledrive', 'googledocs', 'googlecalendar', 'gmail']);
   });
 
+  it('keeps every Google app apart, and never guesses Gmail for a tool that names no Google app', () => {
+    const agents = [{ role: 'Ops', tools: [
+      { name: 'Google Slides Builder', type: 'api' },
+      { name: 'Google Forms Reader', type: 'api' },
+      { name: 'Google Meet Scheduler', type: 'api' },
+      { name: 'Google Workspace Admin', type: 'api' },
+    ] }];
+    expect(repairMissionPermissions(agents, []).map(p => p.service))
+      .toEqual(['googleslides', 'googleforms', 'googlemeet']);
+  });
+
   it('uses the Composio slug for LinkedIn, not the legacy linkedin_oidc key', () => {
     const out = repairMissionPermissions([{ role: 'Poster', tools: [{ name: 'LinkedIn Post API', type: 'api' }] }], []);
     expect(out).toMatchObject([{ type: 'composio_oauth', service: 'linkedin' }]);
