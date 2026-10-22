@@ -3,6 +3,7 @@
 
 import type { Session } from '@supabase/supabase-js';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import Constants from 'expo-constants';
 import * as Crypto from 'expo-crypto';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
@@ -76,7 +77,9 @@ export async function signInWithGoogle(): Promise<void> {
   if (exchangeError) throw exchangeError;
 }
 
-export const appleSignInAvailable = () => Platform.OS === 'ios' && AppleAuthentication.isAvailableAsync();
+/** Not in the test copy for free Apple accounts (app.config.js), which can't use Sign in with Apple. */
+export const appleSignInAvailable = () =>
+  Platform.OS === 'ios' && Constants.expoConfig?.extra?.appleSignIn !== false && AppleAuthentication.isAvailableAsync();
 
 /** Sign in with Apple: Apple's token goes to Supabase with the nonce it was issued for. */
 export async function signInWithApple(): Promise<void> {
