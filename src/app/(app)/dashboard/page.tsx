@@ -20,6 +20,7 @@ import PendingApprovals from '@/components/runs/PendingApprovals';
 import { ApprovalRecord, type ApprovalRecordPayload } from '@/components/runs/Approval';
 import { ActionResult, PendingResult, entryType, type ActionResultEntry, type ResultKind } from '@/components/runs/ActionResult';
 import { decisionText } from '@/lib/services/approval-records';
+import type { AppActionStep } from '@/lib/contracts';
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface ChatSession { id: string; title: string; updated_at: string; }
@@ -64,6 +65,11 @@ interface ActionPayload {
   movedToChat?: boolean;
   /** What the build cost (real cost × markup; the failure rate when it failed). */
   credits?: number;
+  /** confirm_app_actions: a one-time job's steps waiting for the customer's OK. */
+  summary?: string;
+  steps?: AppActionStep[];
+  /** Set once the card's button was used. */
+  resolved?: 'applied' | 'skipped';
 }
 /** How far a build's code steps have got: one entry per agent whose code is being written. */
 interface BuildProgress { roles: string[]; ready: string[] }
@@ -132,6 +138,8 @@ function CommandCenterPageInner() {
   // Chat state
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // Bumped after each reply, so the sidebar's chat list shows a new or renamed chat.
+  const [chatsVersion, setChatsVersion] = useState(0);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -366,18 +374,26 @@ function CommandCenterPageInner() {
 
   // Reopen the conversation: the one the address names, or — back on the Command Center soon after leaving
   // it (to connect an app, open a mission…) — the one this tab had open.
+  // (A chat named in the address is opened by the effect below.)
   useEffect(() => {
-    let id = searchParams.get('chat');
-    if (!id && searchParams.get('new') !== '1') {
-      try {
-        const saved = JSON.parse(sessionStorage.getItem(LAST_CHAT_KEY) ?? 'null') as { id?: string; at?: number } | null;
-        if (saved?.id && saved.at && Date.now() - saved.at < RESUME_MS) id = saved.id;
-      } catch { /* storage unavailable */ }
-    }
+    if (searchParams.get('chat') || searchParams.get('new') === '1' || searchParams.get('fresh') === '1') return;
+    let id: string | null = null;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(LAST_CHAT_KEY) ?? 'null') as { id?: string; at?: number } | null;
+      if (saved?.id && saved.at && Date.now() - saved.at < RESUME_MS) id = saved.id;
+    } catch { /* storage unavailable */ }
     // Loaded a moment later, not inside the effect itself (it sets state).
     if (id) { const chatId = id; void Promise.resolve().then(() => loadSession(chatId)); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The sidebar links here: ?chat=… opens that conversation, ?fresh=1 starts a new one.
+  useEffect(() => {
+    const chat = searchParams.get('chat');
+    if (searchParams.get('fresh') === '1') { void Promise.resolve().then(startNewChat); return; }
+    if (chat && chat !== activeSessionId) void Promise.resolve().then(() => loadSession(chat));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // The open conversation is in the address (Back and refresh keep it) and remembered for this tab.
   useEffect(() => {
@@ -600,7 +616,7 @@ function CommandCenterPageInner() {
   };
 
   // ── Send message ───────────────────────────────────────────────────────────
-  const sendMessage = async (text: string) => {
+  const sendMessage = async (text: string, card?: { approve?: string; acceptOffer?: string }) => {
     const trimmed = text.trim();
     if (!trimmed || isStreaming) return;
     setInput('');
@@ -620,7 +636,11 @@ function CommandCenterPageInner() {
       const res = await fetch('/api/command-chat', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages, sessionId: activeSessionId }),
+        body: JSON.stringify({
+          messages: apiMessages, sessionId: activeSessionId,
+          ...(card?.approve ? { approve: { messageId: card.approve } } : {}),
+          ...(card?.acceptOffer ? { acceptOffer: { messageId: card.acceptOffer } } : {}),
+        }),
       });
 
       if (!res.ok) {
@@ -676,6 +696,7 @@ function CommandCenterPageInner() {
                 startBlueprintPolling(action.jobId);
               }
               if (evt.sessionId && !activeSessionId) { setActiveSessionId(evt.sessionId); loadSessions(); }
+              setChatsVersion(v => v + 1);
             }
             if (evt.type === 'error') {
               finished = true;
@@ -699,6 +720,35 @@ function CommandCenterPageInner() {
   };
   // The connect callbacks (set up once) send through the current sendMessage, which sees the current chat.
   useEffect(() => { sendMessageRef.current = sendMessage; });
+
+  // ── A one-time job's plan, or a mission offer: OK'd here, carried out by the server ──
+  const setCardResolved = (index: number, resolved: 'applied' | 'skipped') =>
+    setMessages(prev => prev.map((m, j) => (j === index && m.action_payload
+      ? { ...m, action_applied: true, action_payload: { ...m.action_payload, resolved } }
+      : m)));
+  const approvePlan = (index: number) => {
+    const id = messages[index]?.id;
+    if (!id || isStreaming) return;
+    setCardResolved(index, 'applied');
+    void sendMessage('Yes, go ahead.', { approve: id });
+  };
+  const acceptMissionOffer = (index: number) => {
+    const m = messages[index];
+    if (!m?.id || isStreaming) return;
+    setCardResolved(index, 'applied');
+    const label = m.action_payload?.label;
+    void sendMessage(`Yes, make it a mission${label ? ` that runs ${label}` : ''}.`, { acceptOffer: m.id });
+  };
+  const declineCard = (index: number) => {
+    const id = messages[index]?.id;
+    setCardResolved(index, 'skipped');
+    if (id) {
+      fetch('/api/chat-messages/resolve', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId: id, outcome: 'skipped' }),
+      }).catch(() => { /* shown as declined here; may show again after a reload */ });
+    }
+  };
 
   // ── Apply action card ──────────────────────────────────────────────────────
   const applyAction = async (action: ActionPayload, msgIndex: number) => {
@@ -967,6 +1017,77 @@ function CommandCenterPageInner() {
         {used ? usedNote : <button style={{ ...btnStyle, alignSelf: 'flex-start' }} onClick={() => applyAction(action, msgIndex)} disabled={applying}>{applying ? 'Working…' : 'Confirm'}</button>}
       </div>
     );
+
+    // A one-time job's steps in the customer's apps: done only after "Do it"; sending, posting and
+    // deleting go out exactly as shown here.
+    if (action.type === 'confirm_app_actions') {
+      const steps = action.steps ?? [];
+      const decided = used || !!action.resolved;
+      return (
+        <div style={{ ...card, maxWidth: 520 }}>
+          <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>{action.summary}</div>
+          <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {steps.map((s, i) => (
+              <li key={i} style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <ConnectorLogo id={s.toolkit} size={14} /> {s.what}
+                </span>
+                {s.exact && s.preview && s.preview.length > 0 && (
+                  <div style={{ marginTop: 5, padding: '7px 9px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {s.preview.map(p => (
+                      <div key={p.label} style={{ fontSize: '0.72rem', lineHeight: 1.45 }}>
+                        <span style={{ color: 'var(--text-muted)', textTransform: 'capitalize' }}>{p.label}: </span>
+                        <span style={{ color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{p.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
+          {decided ? (
+            <div style={{ fontSize: '0.74rem', fontWeight: 600, color: action.resolved === 'skipped' ? 'var(--text-muted)' : 'var(--emerald)' }}>
+              {action.resolved === 'skipped' ? 'Not done' : '✓ Approved'}
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button style={btnStyle} disabled={isStreaming} onClick={() => approvePlan(msgIndex)}>Do it</button>
+                <button style={ghostBtn} disabled={isStreaming} onClick={() => declineCard(msgIndex)}>Not now</button>
+              </div>
+              {steps.some(s => s.exact) && (
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Messages go out exactly as shown.</div>
+              )}
+            </>
+          )}
+        </div>
+      );
+    }
+
+    // After a one-time job they'll likely need again: make it a mission that runs by itself.
+    if (action.type === 'offer_mission') {
+      const decided = used || !!action.resolved;
+      return (
+        <div style={card}>
+          <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+            <Glyph e="🔁" /> Make this a mission{action.label ? ` that runs ${action.label}` : ''}?
+          </div>
+          <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+            It happens by itself, so you don&apos;t have to ask each time. You&apos;ll see its plan before anything runs.
+          </div>
+          {decided ? (
+            <div style={{ fontSize: '0.74rem', fontWeight: 600, color: action.resolved === 'skipped' ? 'var(--text-muted)' : 'var(--emerald)' }}>
+              {action.resolved === 'skipped' ? 'Not now' : '✓ Making it a mission'}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={btnStyle} disabled={isStreaming} onClick={() => acceptMissionOffer(msgIndex)}>Yes, make it a mission</button>
+              <button style={ghostBtn} disabled={isStreaming} onClick={() => declineCard(msgIndex)}>No thanks</button>
+            </div>
+          )}
+        </div>
+      );
+    }
 
     if (action.type === 'suggest_connector') {
       const slug = action.provider ?? '';
@@ -1412,7 +1533,7 @@ function CommandCenterPageInner() {
       <div className="cc-container" style={{ position: 'fixed', top: 0, left: 'var(--sidebar-width, 260px)', right: 0, bottom: 0, display: 'flex', background: 'var(--bg-primary)', zIndex: 40, fontFamily: 'var(--font-sans)' }}>
 
         {/* ── Missions Sidebar ───────────────────────────────────────────── */}
-        <MissionsSidebar />
+        <MissionsSidebar activeChatId={activeSessionId} chatsVersion={chatsVersion} />
 
         {/* ── Main Chat Area ─────────────────────────────────────────────── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>

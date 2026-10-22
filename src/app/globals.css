@@ -856,3 +856,7 @@ a { color: inherit; }
 }
 .markdown-output hr { border: none; border-top: 1px solid var(--border); margin: var(--space-md) 0; }
 .markdown-output img { max-width: 100%; border-radius: var(--radius-md); margin: var(--space-sm) 0; }
+
+/* Sidebar chats: the delete button shows on hover (and for keyboard focus) */
+.af-chat-row .af-chat-delete { opacity: 0; transition: opacity 0.12s; }
+.af-chat-row:hover .af-chat-delete, .af-chat-row .af-chat-delete:focus-visible { opacity: 1; }
