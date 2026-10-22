@@ -28,5 +28,5 @@
       "schedule": "0 3 * * *"
     }
   ],
-  "ignoreCommand": "git diff --quiet ${VERCEL_GIT_PREVIOUS_SHA:-HEAD^} HEAD -- . ':(exclude)mobile'"
+  "ignoreCommand": "[ \"$VERCEL_GIT_PREVIOUS_SHA\" != \"$VERCEL_GIT_COMMIT_SHA\" ] && git diff --quiet ${VERCEL_GIT_PREVIOUS_SHA:-HEAD^} HEAD -- . ':(exclude)mobile'"
 }
