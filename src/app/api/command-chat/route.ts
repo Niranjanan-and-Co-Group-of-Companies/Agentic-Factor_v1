@@ -3,7 +3,10 @@ import { NextRequest } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 import { calculateRealCostUsd, checkCredits, creditsForCost, deductCredits } from '@/lib/middleware/billing';
-import { TAVILY_USD_PER_CREDIT } from '@/lib/services/prices';
+import { COMPOSIO_USD_PER_CALL, TAVILY_USD_PER_CREDIT } from '@/lib/services/prices';
+import { approvalNote, CHAT_APP_TOOL_NAMES, CHAT_APP_TOOLS, checkDo, grantFor, toolkitOf, validatePlan, type AppActionPlan, type Grant } from '@/lib/services/chat-app-actions';
+import { appName, humanizeAction } from '@/lib/utils/app-name';
+import { executeTool } from '@/lib/services/tool-registry';
 import { detectApiKey, redactKey, providerLabel } from '@/lib/services/apikey-detector';
 import { verifyApiKey } from '@/lib/services/apikey-verifier';
 import { encryptToken, readDecryptedToken } from '@/lib/services/vault';
@@ -187,10 +190,20 @@ Action types:
 - resume_mission: { "type": "resume_mission", "missionId": "...", "missionTitle": "..." }
 - suggest_connector: { "type": "suggest_connector", "provider": "Google Sheets", "reason": "to add the report as rows" } — provider is the exact product: "Google Sheets", "Google Drive", "Google Docs", "Gmail", "Google Calendar", "YouTube", "Zoho Books", "Zoho CRM", "HubSpot", "Jira"… Each Google app is a separate connection: never "Google" alone. If you can't tell which product they mean ("a doc" could be Google Docs or Word, "Zoho" could be Books or CRM), ask that one short question instead of suggesting. When they change their mind ("use Drive instead"), suggest the new app.
 - create_mission: { "type": "create_mission", "intent": "the user's full mission description with all details clarified" }
+- offer_mission: { "type": "offer_mission", "intent": "the full mission description, as complete as for create_mission", "label": "every Monday at 9 AM" } — after a one-time job they'll likely need again; label is how often, if you know it
+
+═══ ONE-TIME JOBS — DO THEM HERE, NO MISSION ═══
+Most requests are one-time: "summarise today's emails", "put this week's overdue invoices in a sheet", "email the team the numbers". Do them yourself in this chat with the customer's connected apps:
+a. find_app_actions to find the action, then read_app_data (or read_app_api) to read what you need. Reading needs no OK.
+b. Before anything that creates, changes, sends, posts, deletes or pays: call propose_app_actions with the steps, then stop — the customer approves a card. Sending/posting/deleting/paying steps carry their exact arguments (recipients, subject, the full final message): they run exactly as approved. If a message needs something an earlier step makes (a sheet's link), propose the earlier steps first, and the message once you have it.
+c. After the OK, carry it out with do_app_action, then say what was done in a line or two, with links to anything created.
+d. Only apps under CONNECTED INTEGRATIONS; if one is missing, emit suggest_connector. Never say something was created, sent or changed unless do_app_action returned success.
+Build a mission (create_mission) only when they want it to happen automatically or regularly (every day or week, whenever an email arrives…), ask for a mission, agent or automation, or the job is too big for a chat (researching dozens of sources, making images or videos, long data processing) — say why it becomes a mission. If you can't tell whether they want it once or regularly, ask that one short question.
+After finishing a one-time job they'll probably need again (a weekly report, a daily summary, chasing invoices), offer to automate it with offer_mission — once per conversation, never after they declined.
 
 RULES:
 1. When user says "run [mission name]", emit run_mission with the correct missionId from the MISSIONS list below.
-2. When user asks to "create a mission" or "build an automation" or describes anything they want automated: ask AT MOST 1 clarifying question if truly needed, then emit create_mission. Never ask about details with a sensible default — which connected account or repos (all of the connected account's), where to save files (the connected Google Drive), file names or formatting the user didn't specify; put the default in the intent instead. The intent field must be complete enough to build the mission without further questions. In the reply that accompanies create_mission, describe the outcome they will get, but do NOT name a specific number of agents, specific tools, or a delivery time, and do NOT say it will run automatically on a schedule — the Mission Architect designs the exact pipeline next, and the customer sees that plan and presses Run before anything executes. If they want it recurring, say you can schedule it (schedule_mission) once it has run successfully. Never hold back create_mission to offer extras they didn't ask for (also saving to a Doc or Notion, adding recipients) — build what they asked; mention an extra in one line if useful. When you emit create_mission, the build has already started: don't end the reply with "Want me to build this now?" or any other question. Do NOT do the mission's work yourself with search_web — researching, compiling lists and writing content is what the mission's agents do; use at most one search, and only when you need a fact to write a precise intent.
+2. When user asks to "create a mission" or "build an automation", or wants something to happen regularly or automatically: ask AT MOST 1 clarifying question if truly needed, then emit create_mission. Never ask about details with a sensible default — which connected account or repos (all of the connected account's), where to save files (the connected Google Drive), file names or formatting the user didn't specify; put the default in the intent instead. The intent field must be complete enough to build the mission without further questions. In the reply that accompanies create_mission, describe the outcome they will get, but do NOT name a specific number of agents, specific tools, or a delivery time, and do NOT say it will run automatically on a schedule — the Mission Architect designs the exact pipeline next, and the customer sees that plan and presses Run before anything executes. If they want it recurring, say you can schedule it (schedule_mission) once it has run successfully. Never hold back create_mission to offer extras they didn't ask for (also saving to a Doc or Notion, adding recipients) — build what they asked; mention an extra in one line if useful. When you emit create_mission, the build has already started: don't end the reply with "Want me to build this now?" or any other question. Do NOT do the mission's work yourself with search_web — researching, compiling lists and writing content is what the mission's agents do; use at most one search, and only when you need a fact to write a precise intent.
 2b. If your previous message ends with a question from the Mission Architect and the user replies, treat the reply as the answer: emit create_mission right away with the original request and their answer folded into the intent. Do not ask anything further and do not re-pitch the mission.
 3. When showing credits/usage data, emit show_usage so a rich card is shown.
 4. When user asks about all missions, emit show_missions.
@@ -475,19 +488,27 @@ async function runCommandLoop(params: {
   tenantId: string;
   supabase: ReturnType<typeof createServiceClient>;
   send: (obj: Record<string, unknown>) => void;
-}): Promise<{ fullText: string; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; searches: number; provider: string; model: string }> {
-  const { systemPrompt, apiKey, tenantId, supabase, send } = params;
+  /** The customer's connected apps (toolkit slugs). */
+  connected: string[];
+  /** What the customer just approved, if anything: do_app_action may carry it out this turn. */
+  grant: Grant | null;
+}): Promise<{ fullText: string; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; searches: number; provider: string; model: string; proposal: AppActionPlan | null; appActions: number }> {
+  const { systemPrompt, apiKey, tenantId, supabase, send, connected, grant } = params;
   const messages = [...params.messages];
   let totalInputTokens = 0, totalOutputTokens = 0, totalCacheWrite = 0, totalCacheRead = 0, searches = 0, fullText = '';
+  // A plan put to the customer ends the turn; app actions run (reads and approved steps) are billed.
+  let proposal: AppActionPlan | null = null;
+  let appActions = 0;
   // Which model answered — recorded on the billing event so a fallback (e.g. Claude out of credit) shows up.
   let servedBy = { provider: 'anthropic', model: CHAT_MODELS[0] };
-  const MAX_ROUNDS = 8;
+  // Doing a job in the apps takes more rounds: finding actions, reading, then each approved step.
+  const MAX_ROUNDS = grant ? 14 : 10;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     // On the last round, forbid further tool calls so the customer always gets an answer
     // (otherwise a search-hungry turn ends at MAX_ROUNDS with credits spent and no reply).
     const { res, model: servedModel } = await fetchClaudeMessages({
-      max_tokens: 4096, stream: true, system: systemPrompt, tools: CC_TOOLS, messages,
+      max_tokens: 4096, stream: true, system: systemPrompt, tools: [...CC_TOOLS, ...CHAT_APP_TOOLS], messages,
       ...(round === MAX_ROUNDS - 1 ? { tool_choice: { type: 'none' } } : {}),
     }, apiKey);
     if (res.ok) servedBy = { provider: 'anthropic', model: servedModel };
@@ -566,10 +587,45 @@ async function runCommandLoop(params: {
         get_mission_details: { displayName: 'Mission Details', provider: 'system', label: 'Fetching mission details…', logoUrl: null },
         search_connectors: { displayName: 'Connector Search', provider: 'system', label: `Searching integrations for "${inp.query}"…`, logoUrl: null },
       };
+      // App tools show the app they touch: "Gmail: fetch emails", "Google Sheets: create google sheet".
+      const slug = String(inp.action_slug ?? '').toUpperCase();
+      const appSlug = slug ? toolkitOf(slug, connected) : String(inp.toolkit ?? '');
+      if (CHAT_APP_TOOL_NAMES.has(block.name!)) {
+        const app = appSlug ? appName(appSlug) : 'your apps';
+        toolMeta[block.name!] = {
+          find_app_actions: { displayName: app, provider: appSlug || 'system', label: `Looking in ${app}…`, logoUrl: null },
+          read_app_data: { displayName: app, provider: appSlug, label: `${humanizeAction(slug, connected)}…`, logoUrl: null },
+          read_app_api: { displayName: app, provider: appSlug, label: `Reading ${app}…`, logoUrl: null },
+          propose_app_actions: { displayName: 'Your OK', provider: 'system', label: 'Preparing the steps for your OK…', logoUrl: null },
+          do_app_action: { displayName: app, provider: appSlug, label: `${humanizeAction(slug, connected)}…`, logoUrl: null },
+        }[block.name!] ?? toolMeta[block.name!];
+      }
       const meta = toolMeta[block.name!] ?? { displayName: block.name!, provider: 'system', label: `Running ${block.name}…`, logoUrl: null };
       send({ type: 'tool_status', name: block.name, provider: meta.provider, displayName: meta.displayName, status: 'running', label: meta.label, logoUrl: meta.logoUrl });
 
-      const result = await executeCCTool(block.name!, inp, tenantId, supabase);
+      let result: { content: string; summary: string };
+      if (block.name === 'propose_app_actions') {
+        const checked = validatePlan(inp, connected);
+        if ('error' in checked) result = { content: checked.error, summary: 'Plan needs a fix' };
+        else {
+          proposal = checked.plan;
+          result = { content: 'Shown to the customer for their OK. Stop here.', summary: 'Waiting for your OK' };
+        }
+      } else if (block.name === 'do_app_action') {
+        const args = (inp.arguments && typeof inp.arguments === 'object' ? inp.arguments : {}) as Record<string, unknown>;
+        const allowed = checkDo(grant, slug, args, connected);
+        if (!allowed.run) result = { content: allowed.reason, summary: 'Needs your OK' };
+        else {
+          result = await executeTool(slug, allowed.args, tenantId, '', supabase);
+          appActions++;
+        }
+      } else if (CHAT_APP_TOOL_NAMES.has(block.name!)) {
+        // find_app_actions, read_app_data (refuses anything but reads), read_app_api (GET only)
+        result = await executeTool(block.name!, inp, tenantId, '', supabase);
+        if (block.name !== 'find_app_actions') appActions++;
+      } else {
+        result = await executeCCTool(block.name!, inp, tenantId, supabase);
+      }
       if (block.name === 'search_web') searches++;
 
       send({ type: 'tool_status', name: block.name, provider: meta.provider, displayName: meta.displayName, status: 'done', summary: result.summary, logoUrl: meta.logoUrl });
@@ -577,14 +633,70 @@ async function runCommandLoop(params: {
       toolResults.push({ type: 'tool_result', tool_use_id: block.id!, content: result.content });
     }
 
+    // A plan is now with the customer: the turn ends here, and their OK starts the next.
+    if (proposal) break;
+
     messages.push({ role: 'assistant', content: assistantContent });
     messages.push({ role: 'user', content: toolResults });
   }
 
-  return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, cacheWriteTokens: totalCacheWrite, cacheReadTokens: totalCacheRead, searches, ...servedBy };
+  return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, cacheWriteTokens: totalCacheWrite, cacheReadTokens: totalCacheRead, searches, ...servedBy, proposal, appActions };
 }
 
-const ACTION_TYPES = new Set(['create_mission', 'run_mission', 'show_missions', 'show_usage', 'open_mission', 'schedule_mission', 'pause_mission', 'resume_mission', 'unschedule_mission', 'suggest_connector']);
+const ACTION_TYPES = new Set(['create_mission', 'run_mission', 'show_missions', 'show_usage', 'open_mission', 'schedule_mission', 'pause_mission', 'resume_mission', 'unschedule_mission', 'suggest_connector', 'offer_mission']);
+
+async function ownsSession(supabase: ReturnType<typeof createServiceClient>, tenantId: string, sessionId: string): Promise<boolean> {
+  const { data } = await supabase.from('mission_chats').select('id')
+    .eq('id', sessionId).eq('tenant_id', tenantId).eq('mission_id', PLATFORM_CHAT_SENTINEL).maybeSingle();
+  return !!data;
+}
+
+/** A card in this account's chat that hasn't been used yet: the plan to approve, or the mission offered. */
+async function pendingCard(
+  supabase: ReturnType<typeof createServiceClient>,
+  tenantId: string,
+  sessionId: string | undefined,
+  messageId: string,
+  type: 'confirm_app_actions' | 'offer_mission',
+): Promise<Record<string, unknown> | null> {
+  if (!sessionId) return null;
+  const { data } = await supabase.from('mission_chat_messages').select('action_payload')
+    .eq('id', messageId).eq('tenant_id', tenantId).eq('chat_id', sessionId).maybeSingle();
+  const payload = data?.action_payload as Record<string, unknown> | null | undefined;
+  if (!payload || payload.type !== type || payload.resolved) return null;
+  // Taken once: only the request that flips it gets it (a double click starts nothing twice).
+  const { data: taken } = await supabase.from('mission_chat_messages')
+    .update({ action_applied: true, action_payload: { ...payload, resolved: 'applied', resolvedAt: new Date().toISOString() } })
+    .eq('id', messageId).eq('tenant_id', tenantId).is('action_payload->resolved', null)
+    .select('id');
+  return taken && taken.length > 0 ? payload : null;
+}
+
+/** Starts building a mission in the background; returns the card that follows its progress. */
+async function queueMissionBuild(
+  supabase: ReturnType<typeof createServiceClient>,
+  tenantId: string,
+  intent: string,
+  recentMessages: Array<{ role: string; content: string }>,
+): Promise<Record<string, unknown>> {
+  const jobId = crypto.randomUUID();
+  try {
+    const { inngest } = await import('@/lib/inngest/client');
+    // Questions the architect already asked in this conversation: it must not keep asking.
+    const { architectQuestionsIn } = await import('@/lib/utils/architect-question');
+    const priorQuestions = architectQuestionsIn(recentMessages as Parameters<typeof architectQuestionsIn>[0]);
+    const { customerWords } = await import('@/lib/utils/source-request');
+    const buildRequest = { intent, priorQuestions, sourceRequest: customerWords(recentMessages as Parameters<typeof customerWords>[0]) };
+    // Kept with the job, so a failed build can be tried again exactly as it was asked for.
+    const { recordJobStatus } = await import('@/lib/services/build-jobs');
+    await recordJobStatus(supabase, tenantId, jobId, 'pending', { step: 'Queued…', request: buildRequest });
+    await inngest.send({ name: 'mission/blueprint.generate', data: { jobId, tenantId, ...buildRequest } });
+    return { type: 'building_blueprint', jobId };
+  } catch (inngestErr) {
+    console.error('[command-chat] Failed to queue blueprint generation:', inngestErr);
+    return { type: 'mission_create_error', error: (inngestErr as Error).message };
+  }
+}
 
 async function ensureSession(
   supabase: ReturnType<typeof createServiceClient>,
@@ -592,7 +704,8 @@ async function ensureSession(
   sessionId: string | undefined,
   firstUserMessage: string
 ): Promise<string> {
-  if (sessionId) return sessionId;
+  // Only this account's own Command Center chat is written to — an id from elsewhere starts a new one.
+  if (sessionId && await ownsSession(supabase, tenantId, sessionId)) return sessionId;
   const title = firstUserMessage.slice(0, 60).trim() || 'Command Center chat';
   const { data, error } = await supabase
     .from('mission_chats')
@@ -613,10 +726,14 @@ export async function POST(request: NextRequest) {
   if (isAuthError(authResult)) return authResult;
   const { tenantId } = authResult;
 
-  const { messages, sessionId, isFirstLoad } = await request.json() as {
+  const { messages, sessionId, isFirstLoad, approve, acceptOffer } = await request.json() as {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>;
     sessionId?: string;
     isFirstLoad?: boolean;
+    /** The customer's OK on a plan card (its message): carry the plan out this turn. */
+    approve?: { messageId?: string };
+    /** "Yes, make it a mission" on an offer card: build it from the offer, without asking the AI again. */
+    acceptOffer?: { messageId?: string };
   };
 
   // ── First-load probe: build context, emit proactive alert, no LLM call ──
@@ -647,6 +764,42 @@ export async function POST(request: NextRequest) {
     return new Response(JSON.stringify({ error: creditCheck.reason ?? 'Insufficient credits' }), {
       status: 402, headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  // ── "Yes, make it a mission" on an offer card: built from the offer, no AI call ──
+  if (acceptOffer?.messageId) {
+    const supabase = createServiceClient();
+    const offer = await pendingCard(supabase, tenantId, sessionId, acceptOffer.messageId, 'offer_mission');
+    const label = typeof offer?.label === 'string' && offer.label.trim() ? offer.label.trim() : '';
+    const text = !offer || typeof offer.intent !== 'string'
+      ? 'That offer was already used.'
+      : `Building it as a mission now. You'll see its plan here and press Run before anything happens${label ? ` — once its first run works, I'll set it to run ${label}.` : '.'}`;
+    const action = offer && typeof offer.intent === 'string'
+      ? await queueMissionBuild(supabase, tenantId, `${offer.intent}${label ? `\n\nThe customer wants it to run ${label}.` : ''}`, messages.slice(-20))
+      : null;
+    const chatId = await ensureSession(supabase, tenantId, sessionId, messages.find(m => m.role === 'user')?.content ?? '');
+    const userMsg = messages[messages.length - 1];
+    let replyId: string | null = null;
+    try {
+      await supabase.from('mission_chat_messages').insert({ chat_id: chatId, tenant_id: tenantId, role: 'user', content: userMsg.content });
+      const { data: saved } = await supabase.from('mission_chat_messages')
+        .insert({ chat_id: chatId, tenant_id: tenantId, role: 'assistant', content: text, action_payload: action })
+        .select('id').single();
+      replyId = (saved?.id as string | undefined) ?? null;
+      await supabase.from('mission_chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
+    } catch (persistErr) {
+      console.error('[command-chat/accept-offer]', persistErr);
+    }
+    const enc = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        const send = (obj: Record<string, unknown>) => controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        send({ type: 'delta', text });
+        send({ type: 'done', credits: 0, inputTokens: 0, outputTokens: 0, sessionId: chatId, cleanText: text, action, messageId: replyId });
+        controller.close();
+      },
+    });
+    return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' } });
   }
 
   // ── API key paste detection — intercept before LLM call ─────────────────────
@@ -718,7 +871,9 @@ export async function POST(request: NextRequest) {
     return new Response(JSON.stringify({ error: 'LLM not configured' }), { status: 500 });
   }
 
-  let { systemPrompt, connectedProviders: tenantProviders } = await buildCommandContext(tenantId);
+  const context = await buildCommandContext(tenantId);
+  let systemPrompt = context.systemPrompt;
+  const tenantProviders = context.connectedProviders;
   const recentMessages = messages.slice(-20);
 
   // ── RAG: inject relevant uploaded document context ────────────────────────
@@ -730,6 +885,20 @@ export async function POST(request: NextRequest) {
   if (docListCtx) systemPrompt += `\n\n${docListCtx}`;
   if (ragCtx) systemPrompt += `\n\n${ragCtx}`;
   // ── End RAG ───────────────────────────────────────────────────────────────
+
+  // ── The customer's OK on a plan card: the plan (as saved, not as sent by the browser) is carried out
+  //    this turn — and the assistant is told exactly what was approved.
+  let grant: Grant | null = null;
+  let llmMessages = recentMessages;
+  if (approve?.messageId) {
+    const card = await pendingCard(createServiceClient(), tenantId, sessionId, approve.messageId, 'confirm_app_actions');
+    if (card) {
+      const plan: AppActionPlan = { summary: String(card.summary ?? ''), steps: (Array.isArray(card.steps) ? card.steps : []) as AppActionPlan['steps'] };
+      grant = grantFor(plan);
+      const last = recentMessages[recentMessages.length - 1];
+      llmMessages = [...recentMessages.slice(0, -1), { ...last, content: `${last.content}\n\n${approvalNote(plan)}` }];
+    }
+  }
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -739,13 +908,15 @@ export async function POST(request: NextRequest) {
 
       try {
         const supabase = createServiceClient();
-        const { fullText, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, searches, provider, model } = await runCommandLoop({
+        const { fullText, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, searches, provider, model, proposal, appActions } = await runCommandLoop({
           systemPrompt,
-          messages: recentMessages,
+          messages: llmMessages,
           apiKey,
           tenantId,
           supabase,
           send,
+          connected: tenantProviders,
+          grant,
         });
 
         // Extract <action> block
@@ -762,7 +933,7 @@ export async function POST(request: NextRequest) {
         // Fallback: detect raw action JSON even when LLM omits <action> tags or truncation cut the closing tag.
         // Walks character by character, balancing braces so nested objects/arrays don't confuse it.
         if (!actionPayload) {
-          const KNOWN_TYPES = new Set(['create_mission','run_mission','show_missions','show_usage','open_mission','schedule_mission','pause_mission','resume_mission','unschedule_mission','suggest_connector','key_connected','key_connection_failed']);
+          const KNOWN_TYPES = new Set(['create_mission','run_mission','show_missions','show_usage','open_mission','schedule_mission','pause_mission','resume_mission','unschedule_mission','suggest_connector','offer_mission','key_connected','key_connection_failed']);
           const jsonStart = fullText.indexOf('{"type":');
           if (jsonStart !== -1) {
             let depth = 0, inString = false, escaped = false, jsonEnd = -1;
@@ -790,11 +961,32 @@ export async function POST(request: NextRequest) {
         // Billed at real cost × 3: the reply's tokens (cached ones at their price) plus any web searches.
         // Awaited — a failed deduction is logged, not silently swallowed.
         const realCostUsd = calculateRealCostUsd(model, inputTokens, outputTokens, { cacheWriteTokens, cacheReadTokens }) + searches * TAVILY_USD_PER_CREDIT;
-        const credits = await creditsForCost(realCostUsd, 'chat');
+        let credits = await creditsForCost(realCostUsd, 'chat');
         try {
           await deductCredits(tenantId, credits, 'command_chat', { provider, model, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, realCostUsd, markup: 'chat' });
         } catch (deductErr) {
           console.error('[CommandChat] Credit deduction failed:', deductErr);
+        }
+        // App actions run in the chat (reads and approved steps), at their real cost × 4 like a mission's.
+        if (appActions > 0) {
+          const appCostUsd = appActions * COMPOSIO_USD_PER_CALL;
+          const appCredits = await creditsForCost(appCostUsd, 'work');
+          try {
+            await deductCredits(tenantId, appCredits, 'command_chat_app_actions', { provider: 'composio', model: `${appActions} app action${appActions === 1 ? '' : 's'}`, realCostUsd: appCostUsd, markup: 'work' });
+            credits += appCredits;
+          } catch (deductErr) {
+            console.error('[CommandChat] App action charge failed:', deductErr);
+          }
+        }
+
+        // A plan put to the customer becomes the reply's card (whatever else the text said).
+        if (proposal) {
+          actionPayload = { type: 'confirm_app_actions', summary: proposal.summary, steps: proposal.steps };
+          if (!cleanText.trim()) cleanText = 'Here\'s what I\'ll do — OK to go ahead?';
+        }
+        // A mission offer needs its full description, or there is nothing to build from.
+        if (actionPayload?.type === 'offer_mission' && (typeof actionPayload.intent !== 'string' || !actionPayload.intent.trim())) {
+          actionPayload = null;
         }
 
         // ── Handle create_mission: hand off to Inngest background job ──
@@ -822,26 +1014,7 @@ export async function POST(request: NextRequest) {
         }
 
         if (actionPayload?.type === 'create_mission' && actionPayload.intent) {
-          const jobId = crypto.randomUUID();
-          try {
-            const { inngest } = await import('@/lib/inngest/client');
-            // Questions the architect already asked in this conversation: it must not keep asking.
-            const { architectQuestionsIn } = await import('@/lib/utils/architect-question');
-            const priorQuestions = architectQuestionsIn(recentMessages);
-            const { customerWords } = await import('@/lib/utils/source-request');
-            const buildRequest = { intent: actionPayload.intent as string, priorQuestions, sourceRequest: customerWords(recentMessages) };
-            // Kept with the job, so a failed build can be tried again exactly as it was asked for.
-            const { recordJobStatus } = await import('@/lib/services/build-jobs');
-            await recordJobStatus(supabase, tenantId, jobId, 'pending', { step: 'Queued…', request: buildRequest });
-            await inngest.send({
-              name: 'mission/blueprint.generate',
-              data: { jobId, tenantId, ...buildRequest },
-            });
-            actionPayload = { type: 'building_blueprint', jobId };
-          } catch (inngestErr) {
-            console.error('[command-chat] Failed to queue blueprint generation:', inngestErr);
-            actionPayload = { type: 'mission_create_error', error: (inngestErr as Error).message };
-          }
+          actionPayload = await queueMissionBuild(supabase, tenantId, actionPayload.intent as string, recentMessages);
         }
 
         // Persist messages

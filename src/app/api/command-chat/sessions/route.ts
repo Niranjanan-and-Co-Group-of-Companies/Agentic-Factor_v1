@@ -50,7 +50,8 @@ export async function POST(request: NextRequest) {
       .eq('tenant_id', tenantId)
       .eq('mission_id', PLATFORM_CHAT_SENTINEL)
       .maybeSingle();
-    if (!chatRow) return NextResponse.json({ messages: [] });
+    // Not this account's (or deleted): the page starts a new conversation instead of writing into it.
+    if (!chatRow) return NextResponse.json({ messages: [], error: 'not_found' }, { status: 404 });
 
     const { data, error } = await supabase
       .from('mission_chat_messages')

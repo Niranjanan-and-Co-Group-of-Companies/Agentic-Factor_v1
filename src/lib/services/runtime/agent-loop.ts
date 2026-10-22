@@ -486,6 +486,21 @@ export function proxyWriteLabels(code: string): string[] {
     .map(m => `${m[1].toUpperCase()} ${m[2].toUpperCase()} ${m[3] ?? ''}`.trim());
 }
 
+/**
+ * What one app action does: reads; writes that can be undone and stay private (a draft, a sheet, a CRM
+ * record); or writes others see or that can't be undone (send, post, delete, pay, calendar invites).
+ */
+export function composioActionRisk(slug: string): ActionRisk {
+  if (isComposioRead(slug)) return 'read';
+  const parts = slug.toUpperCase().split('_');
+  const prefix = parts[0];
+  const irreversible =
+    parts.some(p => COMPOSIO_IRREVERSIBLE_TOKENS.has(p)) ||
+    prefix === 'GOOGLECALENDAR' || // event writes email the attendees
+    (COMPOSIO_COMMS_PREFIXES.has(prefix) && !parts.some(p => COMPOSIO_PRIVATE_TOKENS.has(p)));
+  return irreversible ? 'write_irreversible' : 'write_reversible';
+}
+
 function classifyComposioCalls(code: string): ActionRisk[] {
   const totalCalls = (code.match(/composio_execute\s*\(/g) ?? []).length;
   if (totalCalls === 0) return [];
@@ -495,14 +510,7 @@ function classifyComposioCalls(code: string): ActionRisk[] {
   let literalCalls = 0;
   while ((m = literal.exec(code)) !== null) {
     literalCalls++;
-    const parts = m[1].toUpperCase().split('_');
-    if (isComposioRead(m[1])) { risks.push('read'); continue; }
-    const prefix = parts[0];
-    const irreversible =
-      parts.some(p => COMPOSIO_IRREVERSIBLE_TOKENS.has(p)) ||
-      prefix === 'GOOGLECALENDAR' || // event writes email the attendees
-      (COMPOSIO_COMMS_PREFIXES.has(prefix) && !parts.some(p => COMPOSIO_PRIVATE_TOKENS.has(p)));
-    risks.push(irreversible ? 'write_irreversible' : 'write_reversible');
+    risks.push(composioActionRisk(m[1]));
   }
   // composio_execute(action_var, ...) can't be classified statically — require review.
   if (totalCalls > literalCalls) risks.push('write_reversible');

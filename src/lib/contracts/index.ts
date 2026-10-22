@@ -166,6 +166,22 @@ export interface CommandAction extends ChatAction {
   requiredConnectors?: Array<{ service: string; reason: string; connected: boolean }>;
   movedToChat?: boolean;
   credits?: number;
+  /** confirm_app_actions: a one-time job's steps, waiting for the customer's OK. */
+  summary?: string;
+  steps?: AppActionStep[];
+  /** Set once the card's button was used: 'applied' or 'skipped'. */
+  resolved?: 'applied' | 'skipped';
+}
+
+/** One step of a one-time job in a connected app, as the customer approves it. */
+export interface AppActionStep {
+  action: string;
+  /** The connected app (toolkit slug), e.g. "googlesheets". */
+  toolkit: string;
+  what: string;
+  /** Sends, posts, deletes or pays: runs exactly with the content shown in preview. */
+  exact: boolean;
+  preview?: Array<{ label: string; value: string }>;
 }
 
 /** Mission chat: run, schedule, go live, update the mission… */
