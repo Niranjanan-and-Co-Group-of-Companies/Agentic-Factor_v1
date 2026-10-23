@@ -862,8 +862,9 @@ function CommandCenterPageInner() {
       mr.ondataavailable = e => audioChunksRef.current.push(e.data);
       mr.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const fd = new FormData(); fd.append('audio', blob, 'recording.webm');
+        // Safari records mp4, Chrome webm: send the real type, the server names the file from it.
+        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || 'audio/webm' });
+        const fd = new FormData(); fd.append('audio', blob, 'recording');
         try {
           const res = await fetch('/api/whisper/transcribe', { method: 'POST', credentials: 'include', body: fd });
           if (res.ok) { const d = await res.json() as { text?: string }; if (d.text) setInput(prev => (prev + ' ' + d.text).trim()); }

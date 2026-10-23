@@ -16,4 +16,9 @@ export const icons = {
   chevron: { ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' },
   account: { ios: 'person.crop.circle', android: 'account_circle', web: 'account_circle' },
   close: { ios: 'xmark', android: 'close', web: 'close' },
+  mic: { ios: 'mic', android: 'mic', web: 'mic' },
+  voice: { ios: 'waveform', android: 'graphic_eq', web: 'graphic_eq' },
+  speaker: { ios: 'speaker.wave.2', android: 'volume_up', web: 'volume_up' },
+  stop: { ios: 'stop.fill', android: 'stop', web: 'stop' },
+  check: { ios: 'checkmark', android: 'check', web: 'check' },
 } satisfies Record<string, Name>;

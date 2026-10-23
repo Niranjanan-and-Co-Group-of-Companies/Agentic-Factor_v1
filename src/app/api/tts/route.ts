@@ -1,29 +1,47 @@
 import { NextRequest } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
+import { createServiceClient } from '@/lib/supabase/server';
 import { readDecryptedToken } from '@/lib/services/vault';
+import { chargeVoice } from '@/lib/services/voice-billing';
+import { TTS_USD_PER_CHAR } from '@/lib/services/prices';
 
 export const maxDuration = 60;
 
-// POST /api/tts
-// Converts assistant response text to speech via OpenAI TTS.
-// Uses tenant's own OpenAI key if connected; falls back to platform key.
-// OpenAI tts-1 auto-detects language from text — works for all languages.
+// POST /api/tts { text }          — the website reads a reply aloud.
+// GET  /api/tts?messageId=…        — the app plays a saved reply (an audio player can't POST): the text
+//                                     comes from this account's own saved message.
+// OpenAI tts-1 auto-detects the language from the text — it speaks Hindi, Tamil… as written.
+// Uses the tenant's own OpenAI key if connected; otherwise the platform's, billed at real cost × 3.
 export async function POST(request: NextRequest) {
   const authResult = await extractTenantContext(request);
   if (isAuthError(authResult)) return authResult;
-  const { tenantId } = authResult;
+  const { text } = await request.json().catch(() => ({})) as { text?: string };
+  return speak(authResult.tenantId, text ?? '');
+}
 
+export async function GET(request: NextRequest) {
+  const authResult = await extractTenantContext(request);
+  if (isAuthError(authResult)) return authResult;
+  const messageId = request.nextUrl.searchParams.get('messageId');
+  if (!messageId) return new Response('messageId required', { status: 400 });
+  const { data } = await createServiceClient().from('mission_chat_messages').select('content')
+    .eq('id', messageId).eq('tenant_id', authResult.tenantId).maybeSingle();
+  if (!data) return new Response('Not found', { status: 404 });
+  return speak(authResult.tenantId, String(data.content ?? ''));
+}
+
+async function speak(tenantId: string, text: string): Promise<Response> {
   try {
-    const { text } = await request.json() as { text?: string };
-    if (!text?.trim()) {
+    if (!text.trim()) {
       return new Response('No text provided', { status: 400 });
     }
 
-    // Resolve API key — tenant's own key preferred, then platform key
+    // Resolve API key — tenant's own key preferred, then platform key (billed at real cost when it's ours)
     let apiKey = process.env.OPENAI_API_KEY ?? '';
+    let ownKey = false;
     try {
       const tenantKey = await readDecryptedToken(tenantId, 'openai');
-      if (tenantKey) apiKey = tenantKey;
+      if (tenantKey) { apiKey = tenantKey; ownKey = true; }
     } catch { /* use platform key */ }
 
     if (!apiKey) {
@@ -67,6 +85,7 @@ export async function POST(request: NextRequest) {
       console.error('[tts]', err);
       return new Response('TTS failed', { status: 500 });
     }
+    if (!ownKey) await chargeVoice(tenantId, input.length * TTS_USD_PER_CHAR, 'voice_speech', 'tts-1');
 
     return new Response(ttsRes.body, {
       headers: {

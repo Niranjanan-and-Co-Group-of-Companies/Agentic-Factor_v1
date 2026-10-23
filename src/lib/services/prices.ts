@@ -90,6 +90,10 @@ export const COMPOSIO_USD_PER_CALL = 0.0005;
 export const TAVILY_USD_PER_CREDIT = 0.008;
 /** SerpAPI (search fallback), per search on the Developer plan ($75 for 5,000). */
 export const SERPAPI_USD_PER_SEARCH = 0.015;
+/** OpenAI speech to text (whisper-1), per minute of audio. */
+export const WHISPER_USD_PER_MINUTE = 0.006;
+/** OpenAI text to speech (tts-1), per character spoken ($15 per million). */
+export const TTS_USD_PER_CHAR = 15 / 1_000_000;
 
 /** What a script used beyond AI calls, as counted inside the sandbox. */
 export interface ToolUsage { composioCalls?: number; tavilyCredits?: number; serpapiSearches?: number }

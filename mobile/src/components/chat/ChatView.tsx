@@ -1,15 +1,17 @@
 // A chat: the conversation (newest at the bottom, scrolling up), replies streaming in, tool progress,
-// cards, and the message box that stays above the keyboard.
+// cards, replies read aloud, and the message box that stays above the keyboard.
 
-import { useState, type ReactNode } from 'react';
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMemo, type ReactNode } from 'react';
+import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { isEntry, type ChatItem } from '@/lib/chat';
-import { font, maxContentWidth, radius, space, useColors } from '@/theme';
+import { useSpeech } from '@/lib/useSpeech';
+import { maxContentWidth, radius, space, useColors } from '@/theme';
 
+import { Icon, icons } from '../Icon';
 import { Markdown } from '../Markdown';
 import { AppText } from '../ui';
+import { Composer, type LatestReply } from './Composer';
 
 export function ChatView({ items, loading, sending, onSend, renderCard, placeholder, empty, header, alert, keyboardOffset = 0 }: {
   items: ChatItem[];
@@ -25,15 +27,19 @@ export function ChatView({ items, loading, sending, onSend, renderCard, placehol
   keyboardOffset?: number;
 }) {
   const c = useColors();
-  const insets = useSafeAreaInsets();
-  const [text, setText] = useState('');
+  const speech = useSpeech();
   const data = [...items].reverse();
+  const last = items[items.length - 1];
+  const latest = useMemo<LatestReply | null>(() => (last?.role === 'assistant'
+    ? { key: last.key, id: last.id, done: !last.streaming && !last.agentRunning, needsTap: !!last.action && !isEntry(last.action) && !last.applied }
+    : null), [last]);
 
-  const submit = () => {
-    const t = text.trim();
-    if (!t || sending) return;
-    setText('');
-    onSend(t);
+  const listen = (item: ChatItem) => {
+    if (!item.id) return;
+    if (speech.speakingId === item.id) return speech.stop();
+    void speech.speak(item.id).then(how => {
+      if (how === 'failed') Alert.alert('Couldn’t read this aloud', 'Check your connection and try again.');
+    });
   };
 
   return (
@@ -54,40 +60,15 @@ export function ChatView({ items, loading, sending, onSend, renderCard, placehol
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.list}
-          renderItem={({ item }) => <Row item={item} card={renderCard(item)} />}
+          renderItem={({ item }) => <Row item={item} card={renderCard(item)} speaking={speech.speakingId === item.id} onListen={Platform.OS === 'web' ? undefined : () => listen(item)} />}
         />
       )}
-      <View style={[styles.composer, { borderTopColor: c.border, backgroundColor: c.bg, paddingBottom: Math.max(insets.bottom, space.sm) }]}>
-        <View style={[styles.inputWrap, { borderColor: c.border, backgroundColor: c.input }]}>
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            placeholder={placeholder}
-            placeholderTextColor={c.textMuted}
-            style={[styles.input, { color: c.text }]}
-            multiline
-            maxLength={8000}
-            accessibilityLabel="Message"
-            submitBehavior="newline"
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Send"
-            accessibilityState={{ disabled: !text.trim() || sending }}
-            disabled={!text.trim() || sending}
-            onPress={submit}
-            hitSlop={8}
-            style={({ pressed }) => [styles.send, { backgroundColor: text.trim() && !sending ? c.buttonBg : c.border, opacity: pressed ? 0.8 : 1 }]}
-          >
-            {sending ? <ActivityIndicator color={c.buttonFg} size="small" /> : <AppText weight="700" style={{ color: c.buttonFg }} maxFontSizeMultiplier={1.3}>↑</AppText>}
-          </Pressable>
-        </View>
-      </View>
+      <Composer placeholder={placeholder} sending={sending} onSend={onSend} latest={latest} speech={speech} />
     </KeyboardAvoidingView>
   );
 }
 
-function Row({ item, card }: { item: ChatItem; card: ReactNode }) {
+function Row({ item, card, speaking, onListen }: { item: ChatItem; card: ReactNode; speaking: boolean; onListen?: () => void }) {
   const c = useColors();
   const mine = item.role === 'user';
   const showText = !!item.content && !isEntry(item.action);
@@ -99,6 +80,17 @@ function Row({ item, card }: { item: ChatItem; card: ReactNode }) {
             ? <AppText style={{ color: c.userBubbleText }} selectable>{item.content}</AppText>
             : <Markdown text={item.content} />}
         </View>
+      ) : null}
+      {showText && !mine && item.id && !item.streaming && onListen ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={speaking ? 'Stop reading aloud' : 'Read aloud'}
+          onPress={onListen}
+          hitSlop={10}
+          style={({ pressed }) => [styles.listen, { opacity: pressed ? 0.5 : 1 }]}
+        >
+          <Icon name={speaking ? icons.stop : icons.speaker} size={15} color={c.textMuted} />
+        </Pressable>
       ) : null}
       {item.streaming && !item.content && !item.tools?.length ? (
         <View style={[styles.bubble, { backgroundColor: c.card, borderColor: c.border, borderWidth: 1 }]}>
@@ -128,8 +120,5 @@ const styles = StyleSheet.create({
   theirs: { alignItems: 'flex-start' },
   bubble: { maxWidth: '88%', borderRadius: radius.lg, paddingHorizontal: space.md, paddingVertical: space.sm + 2 },
   alert: { borderWidth: 1, borderRadius: radius.md, padding: space.md, alignSelf: 'stretch' },
-  composer: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: space.md, paddingTop: space.sm, alignItems: 'center' },
-  inputWrap: { flexDirection: 'row', alignItems: 'flex-end', borderWidth: 1, borderRadius: radius.xl, paddingLeft: space.md, paddingRight: 6, paddingVertical: 6, width: '100%', maxWidth: maxContentWidth },
-  input: { flex: 1, fontSize: font.md, maxHeight: 140, paddingTop: 6, paddingBottom: 6 },
-  send: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  listen: { marginTop: -2, marginLeft: 4, padding: 2 },
 });

@@ -1509,9 +1509,10 @@ export default function MissionChatPage() {
       mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mr.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // Safari records mp4, Chrome webm: send the real type, the server names the file from it.
+        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || 'audio/webm' });
         const form = new FormData();
-        form.append('audio', blob, 'voice.webm');
+        form.append('audio', blob, 'voice');
         try {
           const res = await fetch('/api/whisper/transcribe', { method: 'POST', body: form, credentials: 'include' });
           if (res.ok) {
