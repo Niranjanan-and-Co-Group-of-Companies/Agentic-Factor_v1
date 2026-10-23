@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/server';
+import { recordConnection } from '@/lib/services/app-connections';
 import { withOutcome } from '@/lib/utils/app-return';
 import { readConnectState } from '@/lib/services/connect-state';
 
@@ -57,24 +58,8 @@ export async function GET(request: NextRequest) {
   try {
     const supabase = createServiceClient();
 
-    // Write to tenant_permissions so executor knows this provider is connected.
-    // Composio manages tokens internally — we just record the connection.
-    await supabase.from('tenant_permissions').upsert({
-      tenant_id: tenantId,
-      provider,
-      access_token: 'composio_managed',
-      refresh_token: null,
-      expires_at: null,
-      scopes: [],
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'tenant_id, provider' });
-
-    // Auto-grant mission permissions for this service
-    await supabase
-      .from('permissions')
-      .update({ granted: true })
-      .eq('tenant_id', tenantId)
-      .eq('service', provider);
+    // Recorded so the platform sees the app as connected, and missions waiting for it are granted it.
+    await recordConnection(supabase, tenantId, provider);
 
     console.log(`[Composio Callback] Connected ${provider} for tenant ${tenantId}`);
 

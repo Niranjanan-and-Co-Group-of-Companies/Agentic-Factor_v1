@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { appBaseUrl } from '@/lib/utils/app-url';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { initiateComposioConnection } from '@/lib/services/composio';
 import { connectCallbackUrl } from '@/lib/services/connect-state';
@@ -38,7 +39,7 @@ export async function GET(
 
   const { tenantId } = authResult;
   const composioSlug = LEGACY_TO_COMPOSIO[provider] ?? provider;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const appUrl = appBaseUrl();
   const callbackUrl = connectCallbackUrl(appUrl, { tenantId, provider: composioSlug });
 
   try {

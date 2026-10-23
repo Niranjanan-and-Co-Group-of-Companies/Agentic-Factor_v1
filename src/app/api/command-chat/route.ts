@@ -128,6 +128,10 @@ async function buildCommandContext(tenantId: string): Promise<{
     .eq('tenant_id', tenantId)
     .single();
 
+  // Connections Composio has that weren't recorded (the connect step's callback missed) count too.
+  const { syncConnections } = await import('@/lib/services/app-connections');
+  await syncConnections(supabase, tenantId).catch(err => console.warn('[command-chat] Connection sync failed:', err));
+
   // Fetch connected providers
   const { data: providers } = await supabase
     .from('tenant_permissions')

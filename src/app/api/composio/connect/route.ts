@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { appBaseUrl } from '@/lib/utils/app-url';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { initiateComposioConnection } from '@/lib/services/composio';
 import { appReturnUrl } from '@/lib/utils/app-return';
@@ -25,7 +26,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing provider' }, { status: 400 });
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  // The end of connecting comes back to this deployment on a preview, to the site otherwise.
+  const appUrl = appBaseUrl();
   const redirectUri = connectCallbackUrl(appUrl, { tenantId, provider, returnTo: appReturnUrl(returnTo) ?? undefined });
 
   try {

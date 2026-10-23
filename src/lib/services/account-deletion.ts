@@ -189,12 +189,12 @@ export async function deleteAccount(supabase: SupabaseClient, tenantId: string, 
 export async function revokeComposioConnections(tenantId: string, dryRun: boolean): Promise<number> {
   const apiKey = process.env.COMPOSIO_API_KEY;
   if (!apiKey) return 0;
-  const base = 'https://backend.composio.dev/api/v3.1/connectedAccounts';
+  const base = 'https://backend.composio.dev/api/v3.1/connected_accounts';
   const headers = { 'x-api-key': apiKey };
   const ids: string[] = [];
   let cursor: string | undefined;
   do {
-    const res = await fetch(`${base}?user_id=${encodeURIComponent(tenantId)}&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers });
+    const res = await fetch(`${base}?user_ids=${encodeURIComponent(tenantId)}&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers });
     if (!res.ok) throw new Error(`Composio list failed (${res.status})`);
     const body = await res.json() as { items?: Array<{ id: string }>; next_cursor?: string | null };
     ids.push(...(body.items ?? []).map(i => i.id));

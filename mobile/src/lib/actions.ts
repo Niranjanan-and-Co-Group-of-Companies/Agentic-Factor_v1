@@ -60,10 +60,18 @@ export async function connectApp(provider: string): Promise<Outcome | null> {
   try {
     const { authUrl } = await api<{ authUrl: string }>('/api/composio/connect', { method: 'POST', body: { provider, returnTo } });
     const result = await WebBrowser.openAuthSessionAsync(authUrl, returnTo);
-    if (result.type !== 'success') return null; // closed by the customer
-    const { queryParams } = Linking.parse(result.url);
-    if (queryParams?.status === 'connected') return { ok: true, detail: 'Agents can use it now.' };
-    return { ok: false, error: typeof queryParams?.message === 'string' ? queryParams.message : 'The connection did not finish.' };
+    let message: string | undefined;
+    if (result.type === 'success') {
+      const { queryParams } = Linking.parse(result.url);
+      if (queryParams?.status === 'connected') return { ok: true, detail: 'Agents can use it now.' };
+      if (typeof queryParams?.message === 'string') message = queryParams.message;
+    }
+    // Closed, or the last step didn't come back (lost signal): the server asks Composio whether the
+    // connection was made, and records it if so.
+    const sync = await api<{ providerConnected?: boolean }>('/api/composio/sync', { method: 'POST', body: { provider } }).catch(() => null);
+    if (sync?.providerConnected) return { ok: true, detail: 'Agents can use it now.' };
+    if (result.type !== 'success') return null; // closed before connecting
+    return { ok: false, error: message ?? 'The connection did not finish.' };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }
