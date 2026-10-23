@@ -1,5 +1,5 @@
-// The signed-in session, and the three ways in: email and password, Google (in the phone's sign-in
-// browser) and Sign in with Apple (iOS — Apple requires it next to Google).
+// The signed-in session, and the three ways in: email and password, Google (the phone's own Google
+// sheet, or the sign-in browser) and Sign in with Apple (iOS — Apple requires it next to Google).
 
 import type { Session } from '@supabase/supabase-js';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -58,13 +58,21 @@ export async function signUpWithEmail(email: string, password: string): Promise<
   return 'created';
 }
 
-/** Google, in the phone's sign-in browser; the code it returns is exchanged for a session. */
+/** This build's Google client IDs (app.config.js): set, Google sign-in uses the phone's own Google sheet. */
+const googleIds = Constants.expoConfig?.extra?.googleSignIn as { webClientId: string; iosClientId?: string } | undefined;
+
+/**
+ * Google: the phone's own Google sign-in sheet when this build has its client IDs (no browser, no
+ * "continue to …supabase.co"); otherwise — and when the sheet can't be used here — the sign-in browser.
+ */
 export async function signInWithGoogle(): Promise<void> {
   if (Platform.OS === 'web') {
     const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: globalThis.location?.origin } });
     if (error) throw error;
     return;
   }
+  const native = googleIds?.webClientId && (Platform.OS === 'android' || googleIds.iosClientId);
+  if (native && (await signInWithGoogleSheet(googleIds)) !== 'unavailable') return;
   const redirectTo = Linking.createURL('auth-callback');
   const { data, error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo, skipBrowserRedirect: true } });
   if (error || !data.url) throw error ?? new Error('Google sign-in could not start.');
@@ -75,6 +83,36 @@ export async function signInWithGoogle(): Promise<void> {
   if (!code) throw new Error(typeof queryParams?.error_description === 'string' ? queryParams.error_description : 'Google sign-in did not finish.');
   const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
   if (exchangeError) throw exchangeError;
+}
+
+/**
+ * Google's own sheet; its token goes to Supabase. Google's iOS SDK puts its own nonce in the token and
+ * doesn't share it, so Supabase's Google provider has "Skip nonce checks" on; the token is still checked
+ * for this app's client IDs and expires within the hour.
+ */
+async function signInWithGoogleSheet(ids: { webClientId: string; iosClientId?: string }): Promise<'done' | 'cancelled' | 'unavailable'> {
+  let token: string | null;
+  try {
+    const { GoogleSignin, isSuccessResponse, isErrorWithCode, statusCodes } = await import('@react-native-google-signin/google-signin');
+    GoogleSignin.configure({ webClientId: ids.webClientId, ...(ids.iosClientId ? { iosClientId: ids.iosClientId } : {}) });
+    if (Platform.OS === 'android') await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+    try {
+      const response = await GoogleSignin.signIn();
+      if (!isSuccessResponse(response)) return 'cancelled';
+      token = response.data.idToken;
+    } catch (err) {
+      if (isErrorWithCode(err) && err.code === statusCodes.IN_PROGRESS) return 'cancelled';
+      throw err;
+    }
+  } catch (err) {
+    // Not set up for this phone (no Play services, an unregistered Android key…): use the browser instead.
+    console.warn('[auth] Google sign-in sheet unavailable:', err);
+    return 'unavailable';
+  }
+  if (!token) throw new Error('Google did not return a sign-in token.');
+  const { error } = await supabase.auth.signInWithIdToken({ provider: 'google', token });
+  if (error) throw error;
+  return 'done';
 }
 
 /** Not in the test copy for free Apple accounts (app.config.js), which can't use Sign in with Apple. */
@@ -102,4 +140,8 @@ export async function signInWithApple(): Promise<void> {
 
 export async function signOut(): Promise<void> {
   await supabase.auth.signOut();
+  // Forget the Google account too, so the next sign-in can choose another one.
+  if (googleIds && Platform.OS !== 'web') {
+    await import('@react-native-google-signin/google-signin').then(({ GoogleSignin }) => GoogleSignin.signOut()).catch(() => {});
+  }
 }

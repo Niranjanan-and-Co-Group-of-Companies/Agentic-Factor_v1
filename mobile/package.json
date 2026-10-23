@@ -4,6 +4,7 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/ui": "~58.0.21",
+    "@react-native-google-signin/google-signin": "~16.1.5",
     "@react-navigation/elements": "^2.9.45",
     "@supabase/supabase-js": "^2.109.0",
     "eslint-config-expo": "~58.0.4",
