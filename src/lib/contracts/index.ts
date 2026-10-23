@@ -198,8 +198,10 @@ export interface MissionAction extends ChatAction {
 
 /** One event of a streamed chat reply. */
 export interface ChatStreamEvent {
-  type: 'delta' | 'done' | 'error' | 'tool_status' | 'proactive_alert' | 'agent_queued';
+  /** extra_message: a message that goes just before the reply (the mission built alongside a plan). */
+  type: 'delta' | 'done' | 'error' | 'tool_status' | 'proactive_alert' | 'agent_queued' | 'extra_message';
   text?: string;
+  content?: string;
   cleanText?: string;
   action?: ChatAction | null;
   sessionId?: string;

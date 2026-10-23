@@ -164,6 +164,10 @@ export function useChat({ endpoint, sessionsPath, firstLoadAlert, resumeWithinMs
           if (evt.sessionId) setSessionId(prev => prev ?? evt.sessionId!);
           updateLast(last => ({ ...last, agentRunning: true }));
           followAgent(evt.executionId, record);
+        } else if (evt.type === 'extra_message') {
+          // The mission built alongside the plan: its card goes just before the reply.
+          const extra: ChatItem = { key: newKey(), id: evt.messageId ?? undefined, role: 'assistant', content: evt.content ?? '', action: evt.action ?? null };
+          setItems(prev => [...prev.slice(0, -1), extra, prev[prev.length - 1]]);
         } else if (evt.type === 'done') {
           finished = true;
           updateLast(last => ({

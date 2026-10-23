@@ -4,6 +4,7 @@ import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
 import { calculateRealCostUsd, checkCredits, creditsForCost, deductCredits } from '@/lib/middleware/billing';
 import { COMPOSIO_USD_PER_CALL, TAVILY_USD_PER_CREDIT } from '@/lib/services/prices';
+import { asksForRecurring, RECURRING_NOTE } from '@/lib/services/chat-intent';
 import { approvalNote, CHAT_APP_TOOL_NAMES, CHAT_APP_TOOLS, checkDo, grantFor, toolkitOf, validatePlan, type AppActionPlan, type Grant } from '@/lib/services/chat-app-actions';
 import { appName, humanizeAction } from '@/lib/utils/app-name';
 import { executeTool } from '@/lib/services/tool-registry';
@@ -496,12 +497,14 @@ async function runCommandLoop(params: {
   connected: string[];
   /** What the customer just approved, if anything: do_app_action may carry it out this turn. */
   grant: Grant | null;
-}): Promise<{ fullText: string; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; searches: number; provider: string; model: string; proposal: AppActionPlan | null; appActions: number }> {
+}): Promise<{ fullText: string; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; searches: number; provider: string; model: string; proposal: AppActionPlan | null; proposalMission: { intent: string; label?: string } | null; appActions: number }> {
   const { systemPrompt, apiKey, tenantId, supabase, send, connected, grant } = params;
   const messages = [...params.messages];
   let totalInputTokens = 0, totalOutputTokens = 0, totalCacheWrite = 0, totalCacheRead = 0, searches = 0, fullText = '';
   // A plan put to the customer ends the turn; app actions run (reads and approved steps) are billed.
   let proposal: AppActionPlan | null = null;
+  // "…and every Monday": the mission to build alongside the plan.
+  let proposalMission: { intent: string; label?: string } | null = null;
   let appActions = 0;
   // Which model answered — recorded on the billing event so a fallback (e.g. Claude out of credit) shows up.
   let servedBy = { provider: 'anthropic', model: CHAT_MODELS[0] };
@@ -613,6 +616,10 @@ async function runCommandLoop(params: {
         if ('error' in checked) result = { content: checked.error, summary: 'Plan needs a fix' };
         else {
           proposal = checked.plan;
+          const mission = inp.mission as { intent?: unknown; label?: unknown } | undefined;
+          if (mission && typeof mission.intent === 'string' && mission.intent.trim()) {
+            proposalMission = { intent: mission.intent, ...(typeof mission.label === 'string' ? { label: mission.label } : {}) };
+          }
           result = { content: 'Shown to the customer for their OK. Stop here.', summary: 'Waiting for your OK' };
         }
       } else if (block.name === 'do_app_action') {
@@ -644,7 +651,7 @@ async function runCommandLoop(params: {
     messages.push({ role: 'user', content: toolResults });
   }
 
-  return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, cacheWriteTokens: totalCacheWrite, cacheReadTokens: totalCacheRead, searches, ...servedBy, proposal, appActions };
+  return { fullText, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, cacheWriteTokens: totalCacheWrite, cacheReadTokens: totalCacheRead, searches, ...servedBy, proposal, proposalMission, appActions };
 }
 
 const ACTION_TYPES = new Set(['create_mission', 'run_mission', 'show_missions', 'show_usage', 'open_mission', 'schedule_mission', 'pause_mission', 'resume_mission', 'unschedule_mission', 'suggest_connector', 'offer_mission']);
@@ -879,6 +886,9 @@ export async function POST(request: NextRequest) {
   let systemPrompt = context.systemPrompt;
   const tenantProviders = context.connectedProviders;
   const recentMessages = messages.slice(-20);
+  const lastUserText = [...recentMessages].reverse().find(m => m.role === 'user')?.content ?? '';
+  const recurring = !approve?.messageId && asksForRecurring(lastUserText);
+  if (recurring) systemPrompt += `\n\n${RECURRING_NOTE}`;
 
   // ── RAG: inject relevant uploaded document context ────────────────────────
   const ccUserQuery = messages[messages.length - 1]?.content ?? '';
@@ -912,7 +922,7 @@ export async function POST(request: NextRequest) {
 
       try {
         const supabase = createServiceClient();
-        const { fullText, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, searches, provider, model, proposal, appActions } = await runCommandLoop({
+        const { fullText, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, searches, provider, model, proposal, proposalMission, appActions } = await runCommandLoop({
           systemPrompt,
           messages: llmMessages,
           apiKey,
@@ -983,6 +993,17 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        // "Do it now, and every Monday": the plan card for now, and the mission built at the same time
+        // (its card goes in just before the reply).
+        let alsoBuilding: { content: string; action: Record<string, unknown> } | null = null;
+        const missionToo = proposalMission ?? (proposal && actionPayload?.type === 'create_mission' && typeof actionPayload.intent === 'string'
+          ? { intent: actionPayload.intent, label: typeof actionPayload.label === 'string' ? actionPayload.label : undefined }
+          : null);
+        if (proposal && missionToo) {
+          const action = await queueMissionBuild(supabase, tenantId, `${missionToo.intent}${missionToo.label ? `\n\nThe customer wants it to run ${missionToo.label}.` : ''}`, recentMessages);
+          alsoBuilding = { content: `And so it happens by itself${missionToo.label ? ` ${missionToo.label}` : ''}, I'm building it as a mission — its plan will appear here before anything runs.`, action };
+        }
+
         // A plan put to the customer becomes the reply's card (whatever else the text said).
         if (proposal) {
           actionPayload = { type: 'confirm_app_actions', summary: proposal.summary, steps: proposal.steps };
@@ -991,6 +1012,12 @@ export async function POST(request: NextRequest) {
         // A mission offer needs its full description, or there is nothing to build from.
         if (actionPayload?.type === 'offer_mission' && (typeof actionPayload.intent !== 'string' || !actionPayload.intent.trim())) {
           actionPayload = null;
+        }
+        // Safety net: a recurring request never ends as a one-off answer — unless the reply asks a question
+        // (once or regularly? something missing?), the customer gets the mission with one tap.
+        if (recurring && !actionPayload && !alsoBuilding && !cleanText.trim().endsWith('?')) {
+          const { customerWords } = await import('@/lib/utils/source-request');
+          actionPayload = { type: 'offer_mission', intent: customerWords(recentMessages) || lastUserText };
         }
 
         // ── Handle create_mission: hand off to Inngest background job ──
@@ -1035,6 +1062,13 @@ export async function POST(request: NextRequest) {
           });
           if (ue) console.error('[command-chat/persist user]', ue);
           else {
+            // The mission being built alongside the plan: its card sits just before the reply.
+            if (alsoBuilding) {
+              const { data: extra } = await supabase.from('mission_chat_messages').insert({
+                chat_id: chatId, tenant_id: tenantId, role: 'assistant', content: alsoBuilding.content, action_payload: alsoBuilding.action,
+              }).select('id').single();
+              send({ type: 'extra_message', content: alsoBuilding.content, action: alsoBuilding.action, messageId: (extra?.id as string | undefined) ?? null });
+            }
             const { data: saved, error: ae } = await supabase.from('mission_chat_messages').insert({
               chat_id: chatId, tenant_id: tenantId, role: 'assistant', content: cleanText,
               action_payload: actionPayload, input_tokens: inputTokens,

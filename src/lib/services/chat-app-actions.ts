@@ -73,6 +73,12 @@ export const CHAT_APP_TOOLS = [
             required: ['action_slug', 'what'],
           },
         },
+        mission: {
+          type: 'object' as const,
+          description: 'Only when they also want this to happen regularly ("…and every Monday"): the mission to build at the same time — intent as complete as for create_mission, label how often.',
+          properties: { intent: str, label: str },
+          required: ['intent'],
+        },
       },
       required: ['summary', 'steps'] as string[],
     },

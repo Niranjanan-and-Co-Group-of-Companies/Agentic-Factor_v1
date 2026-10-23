@@ -667,7 +667,7 @@ function CommandCenterPageInner() {
           if (!line.startsWith('data: ')) continue;
           try {
             const evt = JSON.parse(line.slice(6)) as {
-              type: string; text?: string; message?: string; cleanText?: string;
+              type: string; text?: string; message?: string; cleanText?: string; content?: string;
               action?: ActionPayload; sessionId?: string; messageId?: string | null;
               credits?: number; inputTokens?: number; outputTokens?: number;
             };
@@ -685,6 +685,12 @@ function CommandCenterPageInner() {
                 processingAction = m ? m[1] : 'pending';
               }
               setMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: displayText, isStreaming: true, processingAction }; return u; });
+            }
+            if (evt.type === 'extra_message') {
+              // The mission built alongside the plan: its card goes just before the reply.
+              const extra: ChatMessage = { id: evt.messageId ?? undefined, role: 'assistant', content: evt.content ?? '', action_payload: evt.action ?? null, ts: Date.now() };
+              setMessages(prev => [...prev.slice(0, -1), extra, prev[prev.length - 1]]);
+              if (evt.action?.type === 'building_blueprint' && evt.action.jobId) startBlueprintPolling(evt.action.jobId);
             }
             if (evt.type === 'done') {
               finished = true;
