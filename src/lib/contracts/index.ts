@@ -1,5 +1,6 @@
 // The shapes the API sends and receives — shared by the website (src/) and the mobile app (mobile/),
-// so the two can never disagree about them. Types only: nothing here may import server or browser code.
+// so the two can never disagree about them. Types and small pure helpers only: nothing here may import
+// anything (the app bundles these files as they are).
 
 // ── Live runs (GET /api/missions/:id/live) ──
 
@@ -290,3 +291,6 @@ export interface StoreProductInfo {
   credits: number;
   maxActiveMissions?: number;
 }
+
+export * from './voice';
+export * from './markdown';

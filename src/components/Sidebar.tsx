@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 import { MessagesSquare, Plug, ChartColumn, Tag, KeyRound, ScrollText, Users, LifeBuoy, Sun, Moon, UserRound, LogOut, PanelLeftClose, PanelLeftOpen, Plus, X } from "lucide-react";
 import Logo, { LogoMark } from "@/components/brand/Logo";
+import LanguageMenu from "@/components/LanguageMenu";
 import { createBrowserClient } from "@supabase/ssr";
 
 interface UserProfile { name: string; email: string; avatar: string | null; }
@@ -195,10 +196,11 @@ export default function Sidebar() {
         )}
       </div>
 
-      {/* Footer: user + theme */}
+      {/* Footer: user, language and theme */}
       <div style={{ borderTop: "1px solid var(--border)", padding: collapsed && !mobile ? "8px 4px" : "8px 10px", flexShrink: 0 }}>
         {/* Theme toggle */}
-        <div style={{ display: "flex", justifyContent: collapsed && !mobile ? "center" : "flex-end", marginBottom: 6 }}>
+        <div style={{ display: "flex", flexDirection: collapsed && !mobile ? "column" : "row", alignItems: "center", gap: 6, justifyContent: collapsed && !mobile ? "center" : "flex-end", marginBottom: 6 }}>
+          {user && <LanguageMenu compact={collapsed && !mobile} />}
           <button
             onClick={toggleTheme}
             title={isDark ? "Light mode" : "Dark mode"}

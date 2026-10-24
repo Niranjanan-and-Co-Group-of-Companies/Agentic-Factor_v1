@@ -5,7 +5,12 @@ import { jwtVerify } from 'jose';
 export interface TenantContext {
   tenantId: string;
   userId: string;
+  /** The language the customer chose (user_metadata.language, an ISO 639-1 code); unset for automatic. */
+  language?: string;
 }
+
+const languageOf = (user: { user_metadata?: Record<string, unknown> }) =>
+  typeof user.user_metadata?.language === 'string' ? { language: user.user_metadata.language } : {};
 
 export async function extractTenantContext(
   request: NextRequest
@@ -24,7 +29,7 @@ export async function extractTenantContext(
       });
       const { data: { user }, error } = await supabase.auth.getUser();
       if (user && !error) {
-        return { tenantId: user.id, userId: user.id };
+        return { tenantId: user.id, userId: user.id, ...languageOf(user) };
       }
     } catch {
       // Fall through to Bearer token check
@@ -42,7 +47,7 @@ export async function extractTenantContext(
       });
       const { data: { user }, error } = await supabase.auth.getUser(token);
       if (user && !error) {
-        return { tenantId: user.id, userId: user.id };
+        return { tenantId: user.id, userId: user.id, ...languageOf(user) };
       }
     } catch {
       // Fall through to JWT_SECRET method

@@ -17,13 +17,15 @@ export const maxDuration = 300;
 
 // Sentinel UUID used as mission_id for platform-level (non-mission) chat sessions
 import { PLATFORM_CHAT_SENTINEL } from '@/lib/services/platform-chat';
+import { catalogOverview, searchCatalog } from '@/lib/services/app-catalog';
+import { languageRule } from '@/lib/contracts';
 
 // ── Static platform capability catalog injected into every system prompt ──────
 const PLATFORM_CATALOG = `
 ═══ AGENT TYPES YOU CAN DEPLOY ═══
 • Research Agent — web search, competitive analysis, market intelligence, news monitoring, SERP analysis
 • Content Writer Agent — blog posts, social captions, ad copy, email sequences, product descriptions, newsletters
-• Image Generation Agent — DALL-E 3 images (1080×1080 social posts, banners, thumbnails, product shots)
+• Image Generation Agent — AI images (1080×1080 social posts, banners, thumbnails, product shots)
 • Social Publisher Agent — schedule & post to Instagram, Facebook, LinkedIn, Twitter/X, YouTube via Buffer or direct API
 • Email Agent — send via Gmail/Outlook, read & parse inbound emails, trigger automated sequences
 • Lead Enrichment Agent — find company data, decision-makers, LinkedIn profiles, ICP scoring (Tier 1/2/3)
@@ -37,19 +39,12 @@ const PLATFORM_CATALOG = `
 • Voice & Video Creator Agent — ElevenLabs voice synthesis, HeyGen AI avatar video, Runway ML video generation
 • Scheduler / Orchestrator Agent — coordinate multi-agent pipelines, conditional logic, retries, timing
 
-═══ INTEGRATIONS AVAILABLE (30+) ═══
-Email & Productivity : Gmail · Outlook / Microsoft 365 · Google Sheets · Google Drive · Google Calendar · Notion
-Social Media         : Instagram · Facebook (Meta Graph API) · Twitter/X · LinkedIn · YouTube · Buffer
-AI Models            : OpenAI GPT-4o + DALL-E 3 · Gemini · ElevenLabs (voice) · HeyGen (AI video) · Runway ML (video)
-CRM & Sales          : HubSpot · Salesforce · Airtable · Zoho · Asana
-Ads & Analytics      : Google Ads (Keyword Planner) · Meta Ads (Audience Insights) · Google Analytics (GA4)
-Communication        : Slack · Discord · WhatsApp Business · Microsoft Teams
-E-commerce           : Shopify · Stripe
-Dev & Project        : GitHub · Canva
+═══ INTEGRATIONS ═══
+Missions and this chat work with the apps in the APP CATALOG below (the live count, the most used apps and the categories), plus built-in web search, AI writing, AI images, voice and video. Never quote a smaller or older number of integrations, and never name the AI models behind the platform.
 
 ═══ PROVEN MISSION TEMPLATES ═══
 1. Research → Report → Email       : Research any topic → compile structured report → send via Gmail + Google Sheet
-2. Social Media Content Pipeline   : Generate captions + DALL-E 3 images → post to Instagram/Facebook on schedule
+2. Social Media Content Pipeline   : Generate captions + AI images → post to Instagram/Facebook on schedule
 3. Lead Enrichment & Outreach Prep : Enrich company list with firmographic data + decision-maker contacts + ICP scores → Google Sheet with Tier 1/2/3
 4. HR Recruitment Pipeline         : Source candidates → screen & rank → draft personalised outreach → schedule interviews → full tracker sheet
 5. Ad Copy + Email Nurture Sequence: Audience research → 5 ad variations (Google/Meta) → 5-email nurture sequence → Notion page
@@ -80,7 +75,7 @@ function buildContextualSuggestions(connectedProviders: string[]): string {
   if (has(['linkedin_oidc'])) lines.push('LinkedIn connected → immediately buildable: LinkedIn content scheduling, lead research, connection outreach');
   if (has(['youtube'])) lines.push('YouTube connected → immediately buildable: channel automation (research → script → thumbnail → upload scheduling)');
   if (has(['hubspot', 'salesforce', 'airtable'])) lines.push('CRM connected → immediately buildable: lead enrichment → auto-CRM update pipeline, pipeline stage automation');
-  if (has(['openai'])) lines.push('OpenAI connected → enables DALL-E 3 image generation, GPT-4o content writing, data analysis across all missions');
+  if (has(['openai'])) lines.push('OpenAI connected → missions can use their own OpenAI account for writing, images and analysis');
   if (has(['google_ads', 'facebook_ads', 'google_analytics'])) lines.push('Ads/Analytics connected → immediately buildable: full paid ads campaign with expert copy, audience targeting, and launch approval gate');
   if (has(['slack', 'discord', 'teams'])) lines.push('Team messaging connected → can send automated reports, run alerts, and mission completion notifications to channels');
   if (has(['shopify', 'stripe'])) lines.push('E-commerce connected → can automate: product description writing, sales reports, order notification emails');
@@ -174,6 +169,7 @@ async function buildCommandContext(tenantId: string): Promise<{
   const proactiveAlert: string | null = null;
 
   const contextualSuggestions = buildContextualSuggestions(connectedProviders);
+  const catalog = await catalogOverview().catch(() => null);
 
   // The fixed instructions come first and are cached (the same for every account); this account's
   // missions, runs and credits follow, read fresh every turn.
@@ -216,7 +212,7 @@ RULES:
 5b. An action you emit (schedule, pause, run…) only takes effect when the user clicks it. Never say a mission IS scheduled, paused or running unless the MISSIONS list below shows it — if you proposed it earlier and the list doesn't show it, propose it again.
 6. NEVER mention Composio, E2B, Supabase, or Inngest to the user.
 7. Keep replies concise and conversational. Under 150 words unless explaining a run failure or giving a capability overview.
-7b. Reply in the language the customer writes or speaks in (Hindi, Tamil, Malayalam, Kannada…); keep app names, numbers and links as they are.
+7b. Reply in the language the customer writes or speaks in (Hindi, Tamil, Malayalam, Kannada…), in that language's own script; keep app names, numbers and links as they are. If their account has a chosen language (below), use it unless they write in another one.
 8. If a mission failed, proactively explain why based on its status — don't just say it failed.
 9. For credit/plan questions, use the CREDITS & PLAN data below. Never say you don't know the balance.
 10. ADVISORY — when customer asks "what can you do?" or "what's possible?" or describes their business:
@@ -225,7 +221,8 @@ RULES:
     c. Reference their connected integrations: "Since you have X connected, I can immediately build..."
     d. Always close with an offer: "Want me to build this now?" and emit create_mission if they say yes.
 11. ADVISORY — when customer asks about a specific tool or integration (e.g., "can you use HubSpot?"):
-    Check the CONNECTED INTEGRATIONS list below and confirm exactly what's possible with it.
+    Check the CONNECTED INTEGRATIONS list below and confirm exactly what's possible with it. For apps they haven't connected, use search_connectors — it finds apps by name, by what they do ("accounting", "send WhatsApp messages") or by category, and says how many match.
+11b. When asked how many apps or integrations there are, give the APP CATALOG count ("over N apps"), mention a few categories, and offer to check any app by name.
 12. If no missions exist yet, pick 3 examples from the USE CASES section that best match what you know about them (their name, company, connected tools) and offer to build one right now.
 ${CACHE_SPLIT}Today is ${dateStr}, ${timeStr} IST.
 
@@ -237,6 +234,9 @@ ${recentRunLines}
 
 ═══ CREDITS & PLAN ═══
 ${creditsInfo}
+
+═══ APP CATALOG ═══
+${catalog ? `${catalog.total.toLocaleString('en-IN')} apps can be connected.\nMost used: ${catalog.popular.join(', ')}.${catalog.categories.length ? `\nCategories: ${catalog.categories.join(', ')}.` : ''}` : 'Over a thousand apps can be connected (the live list is unavailable right now): use search_connectors for any app.'}
 
 ═══ CONNECTED INTEGRATIONS ═══
 ${connectedProviders.length > 0 ? connectedProviders.join(', ') : 'None connected yet'}
@@ -302,11 +302,12 @@ const CC_TOOLS = [
   },
   {
     name: 'search_connectors',
-    description: 'Search the full integration catalog to check if a specific app, tool, or service is available to connect. Use whenever the customer asks about a specific connector, tool, or integration by name.',
+    description: 'Search the full app catalog: by app name ("HubSpot"), by what it does ("accounting", "e-signature", "send WhatsApp messages") or by category. Returns the matching apps (most used first), whether the customer has them connected, and how many match in total.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        query: { type: 'string' as const, description: 'App or service name to search for (e.g. "HubSpot", "Shopify", "WhatsApp")' },
+        query: { type: 'string' as const, description: 'An app name or what it should do, e.g. "Shopify", "invoicing", "CRM"' },
+        category: { type: 'string' as const, description: 'Optional: one category from the APP CATALOG list, e.g. "Accounting"' },
       },
       required: ['query'] as string[],
     },
@@ -436,48 +437,35 @@ async function executeCCTool(
 
   if (name === 'search_connectors') {
     const query = String(input.query ?? '').trim();
-    if (!query) return { content: 'No query provided.', summary: 'Missing query' };
+    const category = typeof input.category === 'string' ? input.category.trim() : '';
+    if (!query && !category) return { content: 'No query provided.', summary: 'Missing query' };
 
-    // Platform-hardcoded tools (not in Composio)
+    // Built into the platform (no catalog entry needed).
     const PLATFORM_TOOLS = ['buffer', 'openai', 'gemini', 'canva', 'elevenlabs', 'tavily'];
-
     try {
-      // 1. Search Composio live catalog
-      const apiKey = process.env.COMPOSIO_API_KEY;
-      let catalogMatches: string[] = [];
-      if (apiKey) {
-        const { default: Composio } = await import('@composio/client');
-        const client = new Composio({ apiKey });
-        const result = await (client.toolkits as unknown as { list: (opts: unknown) => Promise<{ items?: Array<{ slug: string; name: string }> }> }).list({ limit: 10, search: query } as unknown as Record<string, unknown>);
-        catalogMatches = (result.items ?? []).map((tk) => tk.name);
-      }
-
-      // 2. Check customer's connected tools
-      const { data: perms } = await supabase
-        .from('tenant_permissions')
-        .select('provider')
-        .eq('tenant_id', tenantId);
-      const connectedProviders = (perms ?? []).map((p: { provider: string }) => p.provider);
+      const [found, { data: perms }] = await Promise.all([
+        searchCatalog(query, { ...(category ? { category } : {}), limit: 12 }),
+        supabase.from('tenant_permissions').select('provider').eq('tenant_id', tenantId),
+      ]);
+      const connected = new Set((perms ?? []).map((p: { provider: string }) => p.provider.toLowerCase()));
       const q = query.toLowerCase();
-      const connectedMatch = connectedProviders.find(p => p.toLowerCase().includes(q) || q.includes(p.toLowerCase()));
-      const platformMatch = PLATFORM_TOOLS.find(t => t.includes(q) || q.includes(t));
+      const platformMatch = PLATFORM_TOOLS.find(t => q && (t.includes(q) || q.includes(t)));
 
-      if (catalogMatches.length > 0) {
-        const names = catalogMatches.slice(0, 3).join(', ');
-        const isConnected = connectedMatch || platformMatch;
+      if (found && found.apps.length > 0) {
+        const lines = found.apps.map(a => `- ${a.name}${connected.has(a.slug) ? ' (connected)' : ''}${a.description ? ` — ${a.description}` : ''}`);
+        const more = found.total > found.apps.length ? `\n…and ${found.total - found.apps.length} more matching apps in the catalog.` : '';
         return {
-          content: `Found in catalog: ${names}.${isConnected ? ` The customer already has "${isConnected}" connected.` : ' Not yet connected — customer can add it from the Connectors page.'}`,
-          summary: `Found: ${names}`,
+          content: `${found.total} app${found.total === 1 ? '' : 's'} in the catalog match${category ? ` (category ${category})` : ''}:\n${lines.join('\n')}${more}\nApps not yet connected can be added from the Connectors page (or with suggest_connector).`,
+          summary: `Found ${found.total} app${found.total === 1 ? '' : 's'}`,
         };
       }
-
       if (platformMatch) {
-        return { content: `"${platformMatch}" is available as a platform tool.${connectedMatch ? ' Already connected.' : ' Customer can add it from the Connectors page.'}`, summary: `${platformMatch} available` };
+        return { content: `"${platformMatch}" is built into the platform.${connected.has(platformMatch) ? ' Already connected.' : ' The customer can add it from the Connectors page.'}`, summary: `${platformMatch} available` };
       }
-
+      if (!found) return { content: 'The catalog could not be searched right now. Say you will check again shortly; do not guess.', summary: 'Search unavailable' };
       return {
-        content: `"${query}" is not currently available in our integration catalog. Please let the customer know they can contact the admin team to request it.`,
-        summary: `${query} not found`,
+        content: `Nothing in the catalog matches "${query || category}". Tell the customer honestly; suggest the closest apps you know are in the catalog (search again with what the app does), and that they can ask Support to add it.`,
+        summary: `${query || category} not found`,
       };
     } catch (err) {
       return { content: `Connector search failed: ${err instanceof Error ? err.message : String(err)}`, summary: 'Search failed' };
@@ -890,6 +878,8 @@ export async function POST(request: NextRequest) {
   const lastUserText = [...recentMessages].reverse().find(m => m.role === 'user')?.content ?? '';
   const recurring = !approve?.messageId && asksForRecurring(lastUserText);
   if (recurring) systemPrompt += `\n\n${RECURRING_NOTE}`;
+  const chosenLanguage = languageRule(authResult.language);
+  if (chosenLanguage) systemPrompt += `\n\n═══ LANGUAGE ═══\n${chosenLanguage}`;
 
   // ── RAG: inject relevant uploaded document context ────────────────────────
   const ccUserQuery = messages[messages.length - 1]?.content ?? '';

@@ -1,101 +1,58 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
 import { createServiceClient } from '@/lib/supabase/server';
-import { readDecryptedToken } from '@/lib/services/vault';
-import { chargeVoice } from '@/lib/services/voice-billing';
-import { TTS_USD_PER_CHAR } from '@/lib/services/prices';
+import { speechParts, synthesizeSpeech } from '@/lib/services/speech';
+import { chargeVoice, speechKeys } from '@/lib/services/voice-billing';
 
 export const maxDuration = 60;
 
-// POST /api/tts { text }          — the website reads a reply aloud.
-// GET  /api/tts?messageId=…        — the app plays a saved reply (an audio player can't POST): the text
-//                                     comes from this account's own saved message.
-// OpenAI tts-1 auto-detects the language from the text — it speaks Hindi, Tamil… as written.
-// Uses the tenant's own OpenAI key if connected; otherwise the platform's, billed at real cost × 3.
-export async function POST(request: NextRequest) {
-  const authResult = await extractTenantContext(request);
-  if (isAuthError(authResult)) return authResult;
-  const { text } = await request.json().catch(() => ({})) as { text?: string };
-  return speak(authResult.tenantId, text ?? '');
-}
-
+// Replies read aloud, in parts (a short first part, so speech starts quickly):
+//   GET  /api/tts?messageId=…&parts=1     → { parts: N }  — how many parts a saved reply has
+//   GET  /api/tts?messageId=…&part=i      → part i as audio (WAV); the text is this account's saved reply
+//   POST /api/tts { text, part? }         → part `part` (default 0) of any text, as audio
+// The engine (Google's Gemini TTS, OpenAI as fallback) reads the language from the text itself. Billed
+// at real cost × 3, unless the customer's own key paid.
 export async function GET(request: NextRequest) {
   const authResult = await extractTenantContext(request);
   if (isAuthError(authResult)) return authResult;
-  const messageId = request.nextUrl.searchParams.get('messageId');
-  if (!messageId) return new Response('messageId required', { status: 400 });
+  const params = request.nextUrl.searchParams;
+  const messageId = params.get('messageId');
+  if (!messageId) return NextResponse.json({ error: 'messageId required' }, { status: 400 });
   const { data } = await createServiceClient().from('mission_chat_messages').select('content')
     .eq('id', messageId).eq('tenant_id', authResult.tenantId).maybeSingle();
-  if (!data) return new Response('Not found', { status: 404 });
-  return speak(authResult.tenantId, String(data.content ?? ''));
+  if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const parts = speechParts(String(data.content ?? ''));
+  if (params.get('parts')) return NextResponse.json({ parts: parts.length });
+  return speak(authResult.tenantId, parts, Number(params.get('part') ?? 0));
 }
 
-async function speak(tenantId: string, text: string): Promise<Response> {
+export async function POST(request: NextRequest) {
+  const authResult = await extractTenantContext(request);
+  if (isAuthError(authResult)) return authResult;
+  const { text, part } = await request.json().catch(() => ({})) as { text?: string; part?: number };
+  return speak(authResult.tenantId, speechParts(text ?? ''), Number(part ?? 0));
+}
+
+async function speak(tenantId: string, parts: string[], index: number): Promise<Response> {
+  if (parts.length === 0) return NextResponse.json({ error: 'Nothing to read aloud' }, { status: 400 });
+  if (!Number.isInteger(index) || index < 0 || index >= parts.length) {
+    return NextResponse.json({ error: 'No such part' }, { status: 416 });
+  }
   try {
-    if (!text.trim()) {
-      return new Response('No text provided', { status: 400 });
-    }
-
-    // Resolve API key — tenant's own key preferred, then platform key (billed at real cost when it's ours)
-    let apiKey = process.env.OPENAI_API_KEY ?? '';
-    let ownKey = false;
-    try {
-      const tenantKey = await readDecryptedToken(tenantId, 'openai');
-      if (tenantKey) { apiKey = tenantKey; ownKey = true; }
-    } catch { /* use platform key */ }
-
-    if (!apiKey) {
-      return new Response('TTS requires an OpenAI API key', { status: 400 });
-    }
-
-    // Strip markdown and platform-internal tags before TTS
-    const cleaned = text
-      .replace(/<action>[\s\S]*?<\/action>/g, '')
-      .replace(/#{1,6}\s+/g, '')
-      .replace(/\*\*([^*]+)\*\*/g, '$1')
-      .replace(/\*([^*]+)\*/g, '$1')
-      .replace(/`{3}[\s\S]*?`{3}/gm, '')
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      .replace(/^[-*+]\s+/gm, '')
-      .replace(/^\d+\.\s+/gm, '')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-
-    if (!cleaned) return new Response('Nothing to speak', { status: 400 });
-
-    // Cap at 2000 chars to keep latency and cost reasonable
-    const input = cleaned.length > 2000 ? cleaned.slice(0, 2000) + '…' : cleaned;
-
-    const ttsRes = await fetch('https://api.openai.com/v1/audio/speech', {
-      method: 'POST',
+    const keys = await speechKeys(tenantId);
+    if (!keys.openai && !keys.gemini) return NextResponse.json({ error: 'Read aloud is not set up yet.' }, { status: 503 });
+    const spoken = await synthesizeSpeech(parts[index], keys);
+    if (!spoken.own) await chargeVoice(tenantId, spoken.costUsd, 'voice_speech', spoken.engine);
+    return new Response(Buffer.from(spoken.audio), {
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'tts-1',
-        voice: 'nova', // nova handles multilingual content well
-        input,
-      }),
-    });
-
-    if (!ttsRes.ok) {
-      const err = await ttsRes.text();
-      console.error('[tts]', err);
-      return new Response('TTS failed', { status: 500 });
-    }
-    if (!ownKey) await chargeVoice(tenantId, input.length * TTS_USD_PER_CHAR, 'voice_speech', 'tts-1');
-
-    return new Response(ttsRes.body, {
-      headers: {
-        'Content-Type': 'audio/mpeg',
-        'Cache-Control': 'no-cache',
+        'Content-Type': spoken.mimeType,
+        'Content-Length': String(spoken.audio.length),
+        'Cache-Control': 'private, no-store',
+        'X-Speech-Parts': String(parts.length),
       },
     });
-
   } catch (err) {
-    console.error('[tts/route]', err);
-    return new Response('TTS failed', { status: 500 });
+    console.error('[tts]', err);
+    return NextResponse.json({ error: 'Couldn’t read this aloud. Please try again.' }, { status: 500 });
   }
 }

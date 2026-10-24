@@ -90,9 +90,17 @@ export const COMPOSIO_USD_PER_CALL = 0.0005;
 export const TAVILY_USD_PER_CREDIT = 0.008;
 /** SerpAPI (search fallback), per search on the Developer plan ($75 for 5,000). */
 export const SERPAPI_USD_PER_SEARCH = 0.015;
-/** OpenAI speech to text (whisper-1), per minute of audio. */
-export const WHISPER_USD_PER_MINUTE = 0.006;
-/** OpenAI text to speech (tts-1), per character spoken ($15 per million). */
+// Voice (October 2026 list prices).
+/** OpenAI speech to text: gpt-transcribe per minute of audio, and gpt-4o-mini-transcribe (its fallback). */
+export const OPENAI_TRANSCRIBE_USD_PER_MINUTE = 0.0045;
+export const OPENAI_MINI_TRANSCRIBE_USD_PER_MINUTE = 0.003;
+/** Google gemini-3.5-transcribe, per 1M tokens: audio in (25 a second), text out. */
+export const GEMINI_TRANSCRIBE_USD_PER_M = { audioIn: 2.0, textOut: 12.0 };
+/** Google gemini-3.8-flash-tts, per 1M tokens: text in, audio out (25 a second); doubles from 2027. */
+export function geminiTtsUsdPerM(at = new Date()): { textIn: number; audioOut: number } {
+  return at < new Date('2027-01-01T00:00:00Z') ? { textIn: 0.5, audioOut: 9.0 } : { textIn: 1.0, audioOut: 18.0 };
+}
+/** OpenAI text to speech (tts-1, the fallback), per character spoken ($15 per million). */
 export const TTS_USD_PER_CHAR = 15 / 1_000_000;
 
 /** What a script used beyond AI calls, as counted inside the sandbox. */

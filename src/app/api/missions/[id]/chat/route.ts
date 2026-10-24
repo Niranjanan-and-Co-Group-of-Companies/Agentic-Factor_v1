@@ -1,3 +1,4 @@
+import { languageRule } from '@/lib/contracts';
 import { CHAT_MODELS, fetchClaudeMessages, plainSystem } from '@/lib/services/claude-chat';
 import { NextRequest } from 'next/server';
 import { extractTenantContext, isAuthError } from '@/lib/supabase/middleware';
@@ -218,6 +219,8 @@ export async function POST(
   ]);
   if (docList) systemPrompt += `\n\n${docList}`;
   if (ragContext) systemPrompt += `\n\n${ragContext}`;
+  const chosenLanguage = languageRule(authResult.language);
+  if (chosenLanguage) systemPrompt += `\n\n═══ LANGUAGE ═══\n${chosenLanguage}`;
 
   // ── Dynamic tool loading ─────────────────────────────────────────────────
   const { tools, toolMeta, needsRefresh } = await loadMissionTools(tenantId, missionId, connectedProviders);

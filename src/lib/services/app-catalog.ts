@@ -62,6 +62,41 @@ export async function getAppInfo(slug: string): Promise<AppInfo> {
   return { slug: s, name: tk.name, logo: tk.meta?.logo || `${LOGO_CDN}/${logoSlug}`, description: tk.meta?.description ?? '', known: true };
 }
 
+export interface CatalogOverview { /** Apps that can be connected. */ total: number; popular: string[]; categories: string[] }
+
+/** The whole catalog in brief — how many apps, the most used, the categories — refreshed daily. */
+export async function catalogOverview(): Promise<CatalogOverview | null> {
+  const [list, categories] = await Promise.all([
+    composioGet<{ total_items?: number; items?: Array<{ name?: string }> }>('/api/v3.1/toolkits?limit=40&sort_by=usage'),
+    composioGet<{ items?: Array<{ name?: string }> }>('/api/v3.1/toolkits/categories'),
+  ]);
+  if (!list?.total_items) return null;
+  return {
+    total: list.total_items,
+    popular: (list.items ?? []).map(i => i.name ?? '').filter(Boolean),
+    categories: (categories?.items ?? []).map(c => c.name ?? '').filter(Boolean),
+  };
+}
+
+export interface CatalogMatch { slug: string; name: string; description: string; categories: string[] }
+
+/** Apps matching a name, a purpose ("accounting", "send WhatsApp messages") or a category; and how many there are. */
+export async function searchCatalog(query: string, opts: { category?: string; limit?: number } = {}): Promise<{ total: number; apps: CatalogMatch[] } | null> {
+  const params = new URLSearchParams({ limit: String(opts.limit ?? 15), sort_by: 'usage' });
+  if (query) params.set('search', query);
+  if (opts.category) params.set('category', opts.category);
+  type Row = { slug?: string; name?: string; meta?: { description?: string; categories?: Array<{ name?: string }> } };
+  const res = await composioGet<{ total_items?: number; items?: Row[] }>(`/api/v3.1/toolkits?${params}`);
+  if (!res) return null;
+  return {
+    total: res.total_items ?? res.items?.length ?? 0,
+    apps: (res.items ?? []).filter(r => r.slug && r.name).map(r => ({
+      slug: r.slug!.toLowerCase(), name: r.name!, description: (r.meta?.description ?? '').slice(0, 140),
+      categories: (r.meta?.categories ?? []).map(c => c.name ?? '').filter(Boolean),
+    })),
+  };
+}
+
 /** An action's official title, description and app; a readable fallback from its name otherwise. */
 export async function getActionInfo(slug: string): Promise<ActionInfo> {
   const s = slug.toUpperCase();

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import OnboardingTour from '@/components/OnboardingTour';
@@ -21,6 +21,7 @@ import { ApprovalRecord, type ApprovalRecordPayload } from '@/components/runs/Ap
 import { ActionResult, PendingResult, entryType, type ActionResultEntry, type ResultKind } from '@/components/runs/ActionResult';
 import { decisionText } from '@/lib/services/approval-records';
 import type { AppActionStep } from '@/lib/contracts';
+import { DictationBar, MessageActions, VoiceButtons, VoiceModeBar, VoiceNote, replyNeedsTap, useChatVoice, type LatestReply } from '@/components/voice/ChatVoice';
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface ChatSession { id: string; title: string; updated_at: string; }
@@ -111,6 +112,9 @@ function statusDot(status: string) {
 }
 
 
+/** A message's key for read aloud (voice mode and the button agree on it). */
+const messageKey = (m: { id?: string; ts?: number }, index: number) => (m.id ? `m:${m.id}` : `i:${index}:${m.ts ?? 0}`);
+
 const QUICK_CHIPS = ['What ran today?', 'Check my credits', 'Show all missions', 'Create a new mission'];
 // The conversation this tab had open: back on the Command Center within this time (after connecting an
 // app or opening a mission), it reopens instead of starting empty.
@@ -144,15 +148,11 @@ function CommandCenterPageInner() {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [welcomeMessage, setWelcomeMessage] = useState<string>('');
-  const [toast, setToast] = useState<string | null>(null);
   const [applyingAction, setApplyingAction] = useState<number | null>(null);
   // The mission whose run was last started from here: its progress shows in the strip.
   const [trackedMissionId, setTrackedMissionId] = useState<string | null>(null);
 
   // Voice
-  const [isRecording, setIsRecording] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
 
   // File upload
   const [pendingFile, setPendingFile] = useState<{ name: string; assetId?: string; uploading: boolean; error?: string } | null>(null);
@@ -178,8 +178,6 @@ function CommandCenterPageInner() {
   // Connecting from a "connect this app" card: once connected, the conversation carries on by itself.
   const continueAfterConnectRef = useRef<string | null>(null);
   const sendMessageRef = useRef<((text: string) => Promise<void>) | null>(null);
-
-  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -727,6 +725,18 @@ function CommandCenterPageInner() {
   // The connect callbacks (set up once) send through the current sendMessage, which sees the current chat.
   useEffect(() => { sendMessageRef.current = sendMessage; });
 
+  // ── Voice: speak into the box, voice mode, read aloud ──
+  const lastMessage = messages[messages.length - 1];
+  const latestReply = useMemo<LatestReply | null>(() => (lastMessage?.role === 'assistant'
+    ? { key: messageKey(lastMessage, messages.length - 1), id: lastMessage.id, done: !lastMessage.isStreaming, needsTap: replyNeedsTap(lastMessage.action_payload as { type?: string; resolved?: string } | null, lastMessage.action_applied) }
+    : null), [lastMessage, messages.length]);
+  const voice = useChatVoice({
+    onSend: text => { void sendMessageRef.current?.(text); },
+    onDictated: text => setInput(prev => (prev.trim() ? `${prev.trim()} ${text}` : text)),
+    latest: latestReply,
+    sending: isStreaming,
+  });
+
   // ── A one-time job's plan, or a mission offer: OK'd here, carried out by the server ──
   const setCardResolved = (index: number, resolved: 'applied' | 'skipped') =>
     setMessages(prev => prev.map((m, j) => (j === index && m.action_payload
@@ -850,28 +860,6 @@ function CommandCenterPageInner() {
     } catch {
       setPendingFile({ name: file.name, uploading: false, error: 'Upload failed' });
     }
-  };
-
-  const toggleVoice = async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop(); setIsRecording(false); return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream); audioChunksRef.current = [];
-      mr.ondataavailable = e => audioChunksRef.current.push(e.data);
-      mr.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        // Safari records mp4, Chrome webm: send the real type, the server names the file from it.
-        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || 'audio/webm' });
-        const fd = new FormData(); fd.append('audio', blob, 'recording');
-        try {
-          const res = await fetch('/api/whisper/transcribe', { method: 'POST', credentials: 'include', body: fd });
-          if (res.ok) { const d = await res.json() as { text?: string }; if (d.text) setInput(prev => (prev + ' ' + d.text).trim()); }
-        } catch { /* non-fatal */ }
-      };
-      mr.start(); mediaRecorderRef.current = mr; setIsRecording(true);
-    } catch { showToast('Microphone access denied.'); }
   };
 
   // ── Action Card Renderer ───────────────────────────────────────────────────
@@ -1530,12 +1518,6 @@ function CommandCenterPageInner() {
       )}
 
       {/* Toast */}
-      {toast && (
-        <div style={{ position: 'fixed', top: 20, right: 20, zIndex: 9998, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px 18px', fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-primary)', boxShadow: '0 4px 24px rgba(0,0,0,0.15)', animation: 'slideIn 0.2s ease' }}>
-          {toast}
-        </div>
-      )}
-
       {/* Full-screen layout pinned past the app sidebar */}
       <div className="cc-container" style={{ position: 'fixed', top: 0, left: 'var(--sidebar-width, 260px)', right: 0, bottom: 0, display: 'flex', background: 'var(--bg-primary)', zIndex: 40, fontFamily: 'var(--font-sans)' }}>
 
@@ -1651,6 +1633,11 @@ function CommandCenterPageInner() {
                     {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
                     {msg.isStreaming && !msg.processingAction && <span style={{ display: 'inline-block', width: 8, height: 16, background: 'var(--accent)', marginLeft: 3, borderRadius: 2, animation: 'pulse 1s infinite', verticalAlign: 'text-bottom' }} />}
                   </div>
+                  {!msg.isStreaming && msg.content.trim() && (
+                    msg.role === 'user'
+                      ? <MessageActions text={msg.content} align="right" />
+                      : <MessageActions text={msg.content} voice={voice} speakKey={msg.id ? messageKey(msg, i) : undefined} source={msg.id ? { messageId: msg.id } : undefined} />
+                  )}
                   {msg.role === 'assistant' && msg.isStreaming && msg.processingAction && renderProcessingCard(msg.processingAction)}
                   {msg.role === 'assistant' && msg.action_payload && !msg.isStreaming && renderActionCard(msg.action_payload as ActionPayload, i)}
                 </div>
@@ -1689,6 +1676,7 @@ function CommandCenterPageInner() {
                 </div>
               )}
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                {voice.mode === 'voice' ? <VoiceModeBar voice={voice} /> : (<>
                 {/* Hidden file input */}
                 <input
                   type="file"
@@ -1704,6 +1692,7 @@ function CommandCenterPageInner() {
                   title="Attach a file"
                   style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: 'var(--bg-card)', border: '1px solid var(--border)', cursor: 'pointer', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: isStreaming ? 0.4 : 1, transition: 'all 0.15s' }}
                 ><Glyph e="📎" /></button>
+                {voice.mode === 'dictating' || voice.mode === 'transcribing' ? <DictationBar voice={voice} /> : (
                 <textarea
                   ref={inputRef}
                   value={input}
@@ -1714,17 +1703,17 @@ function CommandCenterPageInner() {
                   style={{ flex: 1, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: '0.88rem', color: 'var(--text-primary)', resize: 'none', outline: 'none', fontFamily: 'var(--font-sans)', lineHeight: 1.55, minHeight: 42, maxHeight: 140, transition: 'border-color 0.15s' }}
                   disabled={isStreaming}
                 />
-                <button
-                  onClick={toggleVoice}
-                  style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: isRecording ? 'var(--rose)' : 'var(--bg-card)', border: '1px solid var(--border)', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s', animation: isRecording ? 'pulse 1s infinite' : 'none' }}
-                  title="Voice input"
-                ><Glyph e="🎤" /></button>
+                )}
+                {voice.mode === 'idle' && <VoiceButtons voice={voice} disabled={isStreaming} />}
                 <button
                   onClick={() => sendMessage(input)}
-                  disabled={!input.trim() || isStreaming}
+                  disabled={!input.trim() || isStreaming || voice.mode !== 'idle'}
+                  aria-label="Send"
                   style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: input.trim() && !isStreaming ? 'var(--accent)' : 'var(--bg-card)', border: '1px solid var(--border)', cursor: input.trim() && !isStreaming ? 'pointer' : 'not-allowed', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: input.trim() && !isStreaming ? 1 : 0.4, transition: 'all 0.15s' }}
                 >↑</button>
+                </>)}
               </div>
+              <VoiceNote voice={voice} />
             </div>
           </div>
         </div>

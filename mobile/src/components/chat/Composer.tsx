@@ -1,6 +1,10 @@
 // The message box: typing; the microphone (speak, check the words, then send); and voice mode — a
 // hands-free conversation that listens, sends when you pause, reads the reply aloud, and listens again.
+//
+// Only real speech counts (the speech detector in @contracts): silence, a fan or a knock is never sent
+// to be transcribed, because transcription engines invent sentences from silence.
 
+import { loudness, newVad, VAD, vadStep, type VadState } from '@contracts';
 import { useAudioRecorderState } from 'expo-audio';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -25,13 +29,46 @@ export interface LatestReply {
 
 const VOICE = Platform.OS !== 'web';
 const MAX_DICTATION_MS = 3 * 60_000;
-const PAUSE_MS = 1500;        // a pause this long ends what was said
-const NOTHING_MS = 20_000;    // nothing heard for this long: voice mode turns off
-const MAX_TURN_MS = 60_000;
+const TICK_MS = 100;
+/** After a reply is read aloud, a moment before listening, so its last sound isn't heard as speech. */
+const AFTER_SPEAKING_MS = 400;
+const NO_SPEECH = 'I didn’t catch any speech — try again a little closer to the phone.';
 
-/** Recording level in dB as 0–1, for the moving dot and circle. */
-const loudness = (db: number | undefined) => db === undefined ? 0 : Math.min(1, Math.max(0, (db + 60) / 50));
 const clock = (ms: number) => `${Math.floor(ms / 60_000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+
+/** Follows a recording's level ten times a second through the speech detector. */
+function useSpeechDetector(recorder: ReturnType<typeof useRecorder>['recorder'], active: boolean, onEvent: (event: 'end' | 'nothing', vad: VadState) => void) {
+  const vad = useRef<VadState>(newVad());
+  const [level, setLevel] = useState(0);
+  const handler = useRef(onEvent);
+  useEffect(() => { handler.current = onEvent; });
+  useEffect(() => {
+    if (!active) return;
+    vad.current = newVad();
+    let lastMs = 0;
+    const timer = setInterval(() => {
+      const s = recorder.getStatus();
+      if (!s.isRecording) return;
+      const dt = Math.max(TICK_MS, s.durationMillis - lastMs);
+      lastMs = s.durationMillis;
+      if (s.metering === undefined) {
+        // No level on this phone: it all counts as voice, and the circle (or the time limit) sends it.
+        const elapsedMs = vad.current.elapsedMs + dt;
+        vad.current = { ...vad.current, elapsedMs, voicedMs: vad.current.voicedMs + dt, heard: true };
+        if (elapsedMs >= VAD.maxMs) handler.current('end', vad.current);
+        return;
+      }
+      const r = vadStep(vad.current, s.metering, dt);
+      vad.current = r.state;
+      setLevel(loudness(s.metering));
+      if (r.event !== 'none') handler.current(r.event, r.state);
+    }, TICK_MS);
+    return () => clearInterval(timer);
+  }, [active, recorder]);
+  /** Voice and length measured so far. */
+  const measured = useCallback(() => ({ voicedMs: vad.current.voicedMs, durationMs: vad.current.elapsedMs }), []);
+  return { level, measured };
+}
 
 export function Composer({ placeholder, sending, onSend, latest, speech }: {
   placeholder: string;
@@ -61,8 +98,9 @@ export function Composer({ placeholder, sending, onSend, latest, speech }: {
       ) : (
         <View style={[styles.inputWrap, { borderColor: c.border, backgroundColor: c.input }]}>
           {mode === 'dictate' ? (
-            <Dictation onDone={words => {
+            <Dictation onDone={(words, why) => {
               setMode('type');
+              setNote(why ?? null);
               if (words) setText(t => (t.trim() ? `${t.trim()} ${words}` : words));
             }} />
           ) : (
@@ -110,24 +148,29 @@ export function Composer({ placeholder, sending, onSend, latest, speech }: {
 }
 
 /** Recording into the message box: ✕ throws it away, ✓ turns it into text to check before sending. */
-function Dictation({ onDone }: { onDone: (words: string | null) => void }) {
+function Dictation({ onDone }: { onDone: (words: string | null, why?: string) => void }) {
   const c = useColors();
   const { recorder, start, stop, cancel } = useRecorder();
-  const status = useAudioRecorderState(recorder, 100);
+  const status = useAudioRecorderState(recorder, 250);
   const [busy, setBusy] = useState(false);
   const done = useRef(onDone);
   useEffect(() => { done.current = onDone; });
+  // Measures the voice in the recording (nothing ends a dictation but ✓ or the 3-minute cap).
+  const { level, measured } = useSpeechDetector(recorder, status.isRecording && !busy, () => {});
 
   const finish = useCallback(async () => {
     setBusy(true);
+    const sofar = measured();
     const uri = await stop();
     try {
-      done.current(uri ? await transcribe(uri) : null);
+      const heard = uri ? await transcribe(uri, sofar) : null;
+      if (!heard || heard.noSpeech || !heard.text) done.current(null, NO_SPEECH);
+      else done.current(heard.text);
     } catch (err) {
       Alert.alert("Couldn't hear that", (err as Error).message);
       done.current(null);
     }
-  }, [stop]);
+  }, [measured, stop]);
 
   useEffect(() => {
     let live = true;
@@ -146,7 +189,6 @@ function Dictation({ onDone }: { onDone: (words: string | null) => void }) {
     return () => { live = false; clearTimeout(cap); void cancel(); };
   }, [start, finish, cancel]);
 
-  const level = loudness(status.metering);
   return (
     <View style={styles.bar}>
       <Pressable accessibilityRole="button" accessibilityLabel="Cancel recording" disabled={busy} onPress={() => done.current(null)} hitSlop={6} style={({ pressed }) => [styles.round, { opacity: pressed || busy ? 0.5 : 1 }]}>
@@ -202,7 +244,7 @@ function VoiceMode({ sending, onSend, latest, speech, onEnd }: {
   const { recorder, start, stop, cancel } = useRecorder();
   const { speak, stop: stopSpeaking } = speech;
   const [step, setStep] = useState<Step>('listening');
-  const [level, setLevel] = useState(0);
+  const [unclear, setUnclear] = useState(false);
   const now = useRef<Step>('listening');
   /** The reply before this turn's message: the answer is the next one. */
   const before = useRef<string | null>(null);
@@ -223,31 +265,42 @@ function VoiceMode({ sending, onSend, latest, speech, onEnd }: {
 
   const listen = useCallback(async () => {
     go('listening');
-    setLevel(0);
     try {
       if (!(await start())) return end(null);
     } catch {
       return end("Couldn't start the microphone. Try again in a moment.");
     }
-    if (now.current !== 'listening') void cancel(); // ended while starting
-  }, [cancel, end, go, start]);
+    if (!at('listening')) void cancel(); // ended while starting
+  }, [at, cancel, end, go, start]);
 
-  const send = useCallback(async () => {
-    if (now.current !== 'listening') return;
+  /** The turn is over: transcribe it — or, with too little real voice, just listen again. */
+  const send = useCallback(async (vad: VadState | null) => {
+    if (!at('listening')) return;
     go('hearing');
     const uri = await stop();
     let words = '';
     try {
-      words = uri ? await transcribe(uri) : '';
+      // Tapping the circle sends what was recorded; the server still checks there was voice in it.
+      const heard = uri ? await transcribe(uri, { voicedMs: vad?.voicedMs ?? 1000, durationMs: vad?.elapsedMs ?? 0 }) : null;
+      words = heard && !heard.noSpeech ? heard.text : '';
     } catch (err) {
       return end((err as Error).message);
     }
     if (!at('hearing')) return;
-    if (!words) return void listen();
+    if (!words) {
+      setUnclear(true);
+      return void listen();
+    }
+    setUnclear(false);
     before.current = latestProps.current.latest?.key ?? null;
     go('thinking');
     latestProps.current.onSend(words);
   }, [at, end, go, listen, stop]);
+
+  const { level } = useSpeechDetector(recorder, step === 'listening', (event, vad) => {
+    if (event === 'end') void send(vad);
+    else end('Voice mode is off: I didn’t hear anything.');
+  });
 
   // Start listening as soon as voice mode opens; stop everything when it closes.
   useEffect(() => {
@@ -261,37 +314,6 @@ function VoiceMode({ sending, onSend, latest, speech, onEnd }: {
     return () => sub.remove();
   }, [end]);
 
-  // While listening: follow the level; a pause after speech sends it. The floor adapts to a noisy room.
-  useEffect(() => {
-    if (step !== 'listening') return;
-    const heard = { floor: Infinity, speech: false, quietSince: 0 };
-    const timer = setInterval(() => {
-      const s = recorder.getStatus();
-      if (!s.isRecording) return;
-      const db = s.metering;
-      if (db === undefined) {
-        // No level on this phone: tap the circle to send.
-        if (s.durationMillis > MAX_TURN_MS) void send();
-        return;
-      }
-      setLevel(loudness(db));
-      heard.floor = Math.min(db, heard.floor + 0.05);
-      const speakingAt = Math.max(-40, heard.floor + 15);
-      if (db > speakingAt) {
-        heard.speech = true;
-        heard.quietSince = 0;
-      } else if (db > speakingAt - 6) {
-        heard.quietSince = 0;
-      } else if (heard.speech) {
-        heard.quietSince ||= Date.now();
-        if (Date.now() - heard.quietSince > PAUSE_MS) void send();
-      }
-      if (!heard.speech && s.durationMillis > NOTHING_MS) end('Voice mode is off: I didn’t hear anything.');
-      else if (s.durationMillis > MAX_TURN_MS) void send();
-    }, 100);
-    return () => clearInterval(timer);
-  }, [step, recorder, send, end]);
-
   // The answer has finished: read it aloud, then listen again — or pause when it has a card to tap.
   useEffect(() => {
     if (step !== 'thinking' || sending || !latest?.done || latest.key === before.current) return;
@@ -301,21 +323,23 @@ function VoiceMode({ sending, onSend, latest, speech, onEnd }: {
       go('speaking');
       if (reply.id) await speak(reply.id);
       if (!at('speaking')) return;
-      if (reply.needsTap) end('Voice mode paused so you can check the card above.');
-      else void listen();
+      if (reply.needsTap) return end('Voice mode paused so you can check the card above.');
+      await new Promise(r => setTimeout(r, AFTER_SPEAKING_MS));
+      if (at('speaking')) void listen();
     });
   }, [step, sending, latest, at, end, go, listen, speak]);
 
   const onOrb = () => {
-    if (step === 'listening') void send();
+    if (step === 'listening') void send(null);
     else if (step === 'speaking') stopSpeaking();
   };
   const working = step === 'hearing' || step === 'thinking';
+  const label = step === 'listening' && unclear ? 'Didn’t catch that — say it again' : STEP_LABEL[step];
   return (
     <View style={[styles.inputWrap, styles.voice, { borderColor: c.border, backgroundColor: c.input }]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={step === 'listening' ? 'Send what I said' : step === 'speaking' ? 'Stop speaking' : STEP_LABEL[step]}
+        accessibilityLabel={step === 'listening' ? 'Send what I said' : step === 'speaking' ? 'Stop speaking' : label}
         disabled={step !== 'listening' && step !== 'speaking'}
         onPress={onOrb}
         style={[styles.orb, { backgroundColor: c.buttonBg, transform: [{ scale: step === 'listening' ? 1 + level * 0.3 : 1 }] }]}
@@ -324,7 +348,7 @@ function VoiceMode({ sending, onSend, latest, speech, onEnd }: {
           ? <ActivityIndicator color={c.buttonFg} size="small" />
           : <Icon name={step === 'speaking' ? icons.speaker : icons.voice} size={20} color={c.buttonFg} />}
       </Pressable>
-      <AppText tone="secondary" style={styles.voiceLabel} accessibilityLiveRegion="polite">{STEP_LABEL[step]}</AppText>
+      <AppText tone="secondary" style={styles.voiceLabel} accessibilityLiveRegion="polite">{label}</AppText>
       <Pressable accessibilityRole="button" accessibilityLabel="End voice mode" onPress={() => end(null)} hitSlop={8} style={({ pressed }) => [styles.round, { backgroundColor: c.border, opacity: pressed ? 0.7 : 1 }]}>
         <Icon name={icons.close} size={18} color={c.text} />
       </Pressable>

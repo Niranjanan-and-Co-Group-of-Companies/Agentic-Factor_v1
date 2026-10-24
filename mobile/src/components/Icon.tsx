@@ -21,4 +21,6 @@ export const icons = {
   speaker: { ios: 'speaker.wave.2', android: 'volume_up', web: 'volume_up' },
   stop: { ios: 'stop.fill', android: 'stop', web: 'stop' },
   check: { ios: 'checkmark', android: 'check', web: 'check' },
+  copy: { ios: 'doc.on.doc', android: 'content_copy', web: 'content_copy' },
+  language: { ios: 'globe', android: 'language', web: 'language' },
 } satisfies Record<string, Name>;

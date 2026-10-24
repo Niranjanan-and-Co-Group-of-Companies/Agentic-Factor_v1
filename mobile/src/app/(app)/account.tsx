@@ -1,3 +1,4 @@
+import { LANGUAGES, languageOf } from '@contracts';
 import Constants from 'expo-constants';
 import { router, useFocusEffect } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -10,6 +11,7 @@ import { AppText, Button, Card } from '@/components/ui';
 import { api } from '@/lib/api';
 import { signOut, useAuth } from '@/lib/auth';
 import { API_URL } from '@/lib/config';
+import { supabase } from '@/lib/supabase';
 import { loadThemeChoice, setThemeChoice, type ThemeChoice } from '@/lib/theme-preference';
 import { font, maxContentWidth, radius, space, useColors } from '@/theme';
 
@@ -90,6 +92,8 @@ export default function Account() {
         {Platform.OS !== 'web' ? <Button label="Buy credits" onPress={() => router.push('/buy-credits')} style={{ marginTop: space.sm, alignSelf: 'flex-start' }} /> : null}
       </Card>
 
+      <LanguageCard current={typeof session?.user.user_metadata?.language === 'string' ? session.user.user_metadata.language : null} />
+
       {Platform.OS !== 'web' ? (
         <Card>
           <AppText size="sm" tone="muted">Appearance</AppText>
@@ -150,6 +154,56 @@ export default function Account() {
   );
 }
 
+/** The language you speak and get replies in — saved in the account, so the website uses it too. */
+function LanguageCard({ current }: { current: string | null }) {
+  const c = useColors();
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
+  const choose = async (code: string | null) => {
+    setSaving(code ?? 'auto');
+    const { error } = await supabase.auth.updateUser({ data: { language: code } });
+    setSaving(null);
+    if (error) return Alert.alert('Could not change the language', error.message);
+    setOpen(false);
+  };
+  const chosen = languageOf(current);
+  const options: { code: string | null; label: string }[] = [
+    { code: null, label: 'Automatic' },
+    ...LANGUAGES.map(l => ({ code: l.code, label: l.native === l.name ? l.name : `${l.native} · ${l.name}` })),
+  ];
+  return (
+    <Card>
+      <AppText size="sm" tone="muted">Language</AppText>
+      <View style={styles.languageRow}>
+        <AppText weight="700" size="lg" style={{ flex: 1 }}>{chosen ? `${chosen.native}${chosen.native === chosen.name ? '' : ` · ${chosen.name}`}` : 'Automatic'}</AppText>
+        <Button label={open ? 'Close' : 'Change'} variant="ghost" onPress={() => setOpen(o => !o)} />
+      </View>
+      <AppText size="xs" tone="muted">
+        {chosen ? `Speak in ${chosen.name}, and replies come in ${chosen.name} — written and read aloud.` : 'Replies follow the language you write or speak in. Choosing one makes voice input more accurate.'}
+      </AppText>
+      {open ? (
+        <View accessibilityRole="radiogroup" style={styles.chips}>
+          {options.map(o => {
+            const on = (o.code ?? null) === (chosen?.code ?? null);
+            return (
+              <Pressable
+                key={o.code ?? 'auto'}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: on, busy: saving === (o.code ?? 'auto') }}
+                disabled={!!saving}
+                onPress={() => void choose(o.code)}
+                style={[styles.chip, { borderColor: on ? c.text : c.border, backgroundColor: on ? c.bgSecondary : c.card }]}
+              >
+                <AppText size="sm" weight={on ? '700' : '500'}>{o.label}</AppText>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
 const styles = StyleSheet.create({
   wrap: { padding: space.lg, gap: space.md, width: '100%', maxWidth: maxContentWidth, alignSelf: 'center', paddingBottom: space.xxl * 2 },
   input: { minHeight: 44, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: space.md, fontSize: font.md },
@@ -157,4 +211,7 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs, marginLeft: -space.sm },
   segment: { flexDirection: 'row', borderWidth: 1, borderRadius: radius.md, padding: 3, gap: 3 },
   segmentItem: { flex: 1, minHeight: 40, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  languageRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.xs },
+  chip: { borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: space.md, minHeight: 36, justifyContent: 'center' },
 });

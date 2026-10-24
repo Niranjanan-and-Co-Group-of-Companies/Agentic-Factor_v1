@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -19,6 +19,7 @@ import { ActionResult, PendingResult, ThreadNote, entryType, type ActionResultEn
 import type { ThreadNote as ThreadNoteEntry } from '@/lib/services/build-jobs';
 import { appNameNow } from '@/components/apps/useAppInfo';
 import { describeNextRun } from '@/lib/services/cron-match';
+import { DictationBar, MessageActions, VoiceButtons, VoiceModeBar, VoiceNote, replyNeedsTap, useChatVoice, type LatestReply } from '@/components/voice/ChatVoice';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ChatSession {
@@ -38,6 +39,9 @@ interface BlueprintStep {
   label: string;
   status: 'pending' | 'active' | 'done';
 }
+
+/** A message's key for read aloud (voice mode and the button agree on it). */
+const messageKey = (m: { id?: string; ts?: number }, index: number) => (m.id ? `m:${m.id}` : `i:${index}:${m.ts ?? 0}`);
 
 interface ChatMessage {
   id?: string;
@@ -363,8 +367,6 @@ export default function MissionChatPage() {
   const [quickChips, setQuickChips] = useState<string[]>(QUICK_CHIPS_DEFAULT);
   const [detectedKey, setDetectedKey] = useState<{ provider: string; label: string; key: string } | null>(null);
   const [savingKey, setSavingKey] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [applyingAction, setApplyingAction] = useState<number | null>(null);
   const [toolStatusLines, setToolStatusLines] = useState<Array<{ name: string; provider: string; displayName: string; status: 'running' | 'done' | 'error'; label: string; summary?: string; logoUrl?: string | null }>>([]);
 
@@ -390,57 +392,9 @@ export default function MissionChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
   // Inngest / Realtime execution state
   const waitingForInngestRef = useRef(false);
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
-  // TTS / voice-response state
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const lastInputWasVoiceRef = useRef(false);
-  const [playingMsgIdx, setPlayingMsgIdx] = useState<number | null>(null);
-
-
-  const stopSpeaking = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = '';
-      audioRef.current = null;
-    }
-    setPlayingMsgIdx(null);
-  }, []);
-
-  const speakText = useCallback(async (text: string, msgIdx: number) => {
-    // Stop anything currently playing
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = '';
-      audioRef.current = null;
-    }
-    setPlayingMsgIdx(msgIdx); // show as loading/playing immediately
-
-    try {
-      const res = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ text }),
-      });
-      if (!res.ok) { setPlayingMsgIdx(null); return; }
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioRef.current = audio;
-
-      audio.onended = () => { URL.revokeObjectURL(url); audioRef.current = null; setPlayingMsgIdx(null); };
-      audio.onerror = () => { URL.revokeObjectURL(url); audioRef.current = null; setPlayingMsgIdx(null); };
-      await audio.play();
-    } catch {
-      setPlayingMsgIdx(null);
-    }
-  }, []);
-
   // ── Load mission title, status, and required connectors ──────
   useEffect(() => {
     const supabase = getSupabase();
@@ -632,10 +586,6 @@ export default function MissionChatPage() {
       if (realtimeChannelRef.current) {
         getSupabase().removeChannel(realtimeChannelRef.current);
         realtimeChannelRef.current = null;
-      }
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
       }
     };
   }, []);
@@ -860,13 +810,9 @@ export default function MissionChatPage() {
     const trimmed = text.trim();
     if (!trimmed || isStreaming) return;
 
-    stopSpeaking(); // stop any playing audio before sending
     setInput('');
     setDetectedKey(null);
     setProactiveAlert(null);
-    setVoiceError(null);
-    // Index where the assistant reply will land: current messages + user msg
-    const willBeAtIdx = messages.length + 1;
 
     const attachment = pendingFile && !pendingFile.uploading && !pendingFile.error ? pendingFile : null;
     const finalText = attachment ? `[Attached: ${attachment.name}]\n\n${trimmed}` : trimmed;
@@ -891,10 +837,6 @@ export default function MissionChatPage() {
       }
       waitingForInngestRef.current = false;
 
-      // Capture auto-speak intent before clearing the flag
-      const shouldAutoSpeak = lastInputWasVoiceRef.current;
-      lastInputWasVoiceRef.current = false;
-
       const finalText = stripActionTags(cleanText);
 
       // Capture current tool cards atomically and clear in one update to avoid stale closure
@@ -912,7 +854,6 @@ export default function MissionChatPage() {
       });
       setIsStreaming(false);
 
-      if (shouldAutoSpeak) speakText(finalText, willBeAtIdx);
 
       if (sid && !activeSessionId) setActiveSessionId(sid);
       if (action?.type === 'suggest_connector') setQuickChips(QUICK_CHIPS_AFTER_CONNECT);
@@ -1136,12 +1077,6 @@ export default function MissionChatPage() {
               else if (streamedText.toLowerCase().includes('fail') || streamedText.toLowerCase().includes('error'))
                 setQuickChips(QUICK_CHIPS_AFTER_FAIL);
               else setQuickChips(QUICK_CHIPS_DEFAULT);
-
-              // Auto-speak if the user sent this via voice
-              if (lastInputWasVoiceRef.current) {
-                lastInputWasVoiceRef.current = false;
-                speakText(ft, willBeAtIdx);
-              }
             }
 
             if (evt.type === 'error') {
@@ -1494,47 +1429,23 @@ export default function MissionChatPage() {
     }
   };
 
-  // ── Voice recording ───────────────────────────────────────────
-  const toggleVoice = async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-      return;
+  // ── Voice: speak into the box, voice mode, read aloud ──
+  const lastMessage = messages[messages.length - 1];
+  const latestReply = useMemo<LatestReply | null>(() => (lastMessage?.role === 'assistant'
+    ? {
+      key: messageKey(lastMessage, messages.length - 1), id: lastMessage.id,
+      done: !lastMessage.isStreaming && !lastMessage.isAgentRunning,
+      needsTap: replyNeedsTap(lastMessage.action_payload as { type?: string; resolved?: string } | null, lastMessage.action_applied),
     }
-    setVoiceError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-      mr.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        // Safari records mp4, Chrome webm: send the real type, the server names the file from it.
-        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || 'audio/webm' });
-        const form = new FormData();
-        form.append('audio', blob, 'voice');
-        try {
-          const res = await fetch('/api/whisper/transcribe', { method: 'POST', body: form, credentials: 'include' });
-          if (res.ok) {
-            const data = await res.json() as { text?: string };
-            if (data.text) {
-              setInput(prev => (prev + ' ' + data.text).trim());
-              lastInputWasVoiceRef.current = true; // flag: respond in voice
-            }
-          } else {
-            setVoiceError('Voice transcription failed. Please type your message instead.');
-          }
-        } catch {
-          setVoiceError('Voice transcription failed. Please type your message instead.');
-        }
-      };
-      mr.start();
-      mediaRecorderRef.current = mr;
-      setIsRecording(true);
-    } catch {
-      setVoiceError('Microphone access denied. Please allow microphone access in your browser settings.');
-    }
-  };
+    : null), [lastMessage, messages.length]);
+  const sendRef = useRef(sendMessage);
+  useEffect(() => { sendRef.current = sendMessage; });
+  const voice = useChatVoice({
+    onSend: text => { void sendRef.current(text); },
+    onDictated: text => setInput(prev => (prev.trim() ? `${prev.trim()} ${text}` : text)),
+    latest: latestReply,
+    sending: isStreaming,
+  });
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); }
@@ -1892,20 +1803,9 @@ export default function MissionChatPage() {
                             {new Date(msg.ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}
                           </span>
                         )}
-                        {msg.role === 'assistant' && msg.content && (
-                          <button
-                            onClick={() => playingMsgIdx === i ? stopSpeaking() : speakText(msg.content, i)}
-                            title={playingMsgIdx === i ? 'Stop' : 'Listen'}
-                            style={{
-                              background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px',
-                              fontSize: '0.78rem', lineHeight: 1,
-                              color: playingMsgIdx === i ? 'var(--accent)' : 'var(--text-muted)',
-                              transition: 'color 0.15s',
-                            }}
-                          >
-                            <Glyph e={playingMsgIdx === i ? '⏹' : '🔊'} size={14} />
-                          </button>
-                        )}
+                        {msg.content.trim() && (msg.role === 'assistant'
+                          ? <MessageActions text={msg.content} voice={voice} speakKey={msg.id ? messageKey(msg, i) : undefined} source={msg.id ? { messageId: msg.id } : undefined} />
+                          : <MessageActions text={msg.content} align="right" />)}
                       </div>
                     )}
 
@@ -2051,11 +1951,6 @@ export default function MissionChatPage() {
                 </div>
               )}
 
-              {/* Voice error */}
-              {voiceError && (
-                <div style={{ fontSize: '0.75rem', color: 'var(--rose)', marginBottom: 8, paddingLeft: 4 }}>{voiceError}</div>
-              )}
-
               {/* File attachment chip */}
               {pendingFile && (
                 <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2081,6 +1976,7 @@ export default function MissionChatPage() {
               />
 
               {/* Input row */}
+              {voice.mode === 'voice' ? <div style={{ display: 'flex' }}><VoiceModeBar voice={voice} /></div> : (
               <div style={{
                 display: 'flex', alignItems: 'flex-end', gap: 10,
                 background: 'var(--bg-input)', border: '1px solid var(--border)',
@@ -2096,16 +1992,7 @@ export default function MissionChatPage() {
                   <Glyph e="📎" size={16} />
                 </button>
 
-                <button onClick={toggleVoice} title={isRecording ? 'Stop recording' : 'Voice input'}
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0,
-                    fontSize: '1.1rem', lineHeight: 1, paddingBottom: 2,
-                    color: isRecording ? 'var(--rose)' : 'var(--text-muted)',
-                    animation: isRecording ? 'blink 1s step-end infinite' : 'none',
-                  }}>
-                  <Glyph e="🎤" size={16} />
-                </button>
-
+                {voice.mode === 'dictating' || voice.mode === 'transcribing' ? <DictationBar voice={voice} /> : (
                 <textarea
                   ref={inputRef}
                   value={input}
@@ -2123,19 +2010,23 @@ export default function MissionChatPage() {
                     const el = e.target as HTMLTextAreaElement;
                     el.style.height = 'auto';
                     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
-                    lastInputWasVoiceRef.current = false; // user is typing — no auto-speak
                   }}
                 />
+                )}
+
+                {voice.mode === 'idle' && <VoiceButtons voice={voice} disabled={isStreaming} />}
 
                 <button
                   onClick={() => sendMessage(input)}
-                  disabled={!input.trim() || isStreaming}
+                  disabled={!input.trim() || isStreaming || voice.mode !== 'idle'}
                   className="btn btn-primary btn-sm"
                   style={{ flexShrink: 0, padding: '6px 14px', borderRadius: 'var(--radius-md)', fontSize: '0.82rem', opacity: (!input.trim() || isStreaming) ? 0.4 : 1 }}
                 >
                   {isStreaming ? '…' : 'Send'}
                 </button>
               </div>
+              )}
+              <VoiceNote voice={voice} />
 
               <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: 8 }}>
                 Enter to send · Shift+Enter for a new line · attach a file or use voice
