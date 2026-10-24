@@ -1433,7 +1433,7 @@ export default function MissionChatPage() {
   const lastMessage = messages[messages.length - 1];
   const latestReply = useMemo<LatestReply | null>(() => (lastMessage?.role === 'assistant'
     ? {
-      key: messageKey(lastMessage, messages.length - 1), id: lastMessage.id,
+      key: messageKey(lastMessage, messages.length - 1), id: lastMessage.id, text: lastMessage.content,
       done: !lastMessage.isStreaming && !lastMessage.isAgentRunning,
       needsTap: replyNeedsTap(lastMessage.action_payload as { type?: string; resolved?: string } | null, lastMessage.action_applied),
     }
@@ -1804,7 +1804,7 @@ export default function MissionChatPage() {
                           </span>
                         )}
                         {msg.content.trim() && (msg.role === 'assistant'
-                          ? <MessageActions text={msg.content} voice={voice} speakKey={msg.id ? messageKey(msg, i) : undefined} source={msg.id ? { messageId: msg.id } : undefined} />
+                          ? <MessageActions text={msg.content} voice={voice} speakKey={messageKey(msg, i)} />
                           : <MessageActions text={msg.content} align="right" />)}
                       </div>
                     )}

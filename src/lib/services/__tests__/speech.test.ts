@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { newVad, vadStep, VAD, languageRule, type VadState } from '@/lib/contracts';
-import { speakableText, speechParts, synthesizeSpeech, transcribeSpeech, wavFromPcm } from '../speech';
+import { speakableText, speechParts, streamSpeech, synthesizeSpeech, transcribeSpeech, wavFromPcm } from '../speech';
 
 /** Feeds a level for a while, 100 ms at a time; returns the state and the first event. */
 function feed(state: VadState, db: number, ms: number) {
@@ -154,5 +154,38 @@ describe('speaking', () => {
     const spoken = await synthesizeSpeech('Hello', keys, fetchImpl as never);
     expect(spoken.engine).toBe('tts-1');
     expect(spoken.costUsd).toBeCloseTo(5 * 15 / 1e6, 12);
+  });
+});
+
+describe('speaking as a stream', () => {
+  const read = async (stream: ReadableStream<Uint8Array>) => {
+    const out: number[] = [];
+    const reader = stream.getReader();
+    for (;;) { const { done, value } = await reader.read(); if (done) break; out.push(...value); }
+    return out;
+  };
+  const sse = (events: unknown[]) => new Response(events.map(e => `data: ${JSON.stringify(e)}\n\n`).join(''), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+
+  it('passes Google’s streamed audio on as it comes, and bills its usage', async () => {
+    const chunk = (bytes: number[]) => ({ event_type: 'step.delta', delta: { type: 'audio', data: Buffer.from(bytes).toString('base64') } });
+    const fetchImpl = vi.fn(async () => sse([chunk([1, 2, 3, 4]), chunk([5, 6]), { event_type: 'interaction.complete', interaction: { usage: { total_input_tokens: 10, total_output_tokens: 50 } } }]));
+    const paid = vi.fn();
+    expect(await read(streamSpeech('Hello there.', keys, paid, fetchImpl as never))).toEqual([1, 2, 3, 4, 5, 6]);
+    const body = JSON.parse((fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.stream).toBe(true);
+    expect(body.response_format).toMatchObject({ mime_type: 'audio/l16', sample_rate: 24000 });
+    expect(paid.mock.calls[0][0]).toMatchObject({ engine: 'gemini-3.8-flash-tts', own: false });
+    expect(paid.mock.calls[0][0].costUsd).toBeCloseTo((10 * 0.5 + 50 * 9) / 1e6, 10);
+  });
+
+  it('uses OpenAI’s voice when Google fails before any sound', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response('quota', { status: 429 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([9, 9]), { status: 200 }));
+    const paid = vi.fn();
+    expect(await read(streamSpeech('Hi.', keys, paid, fetchImpl as never))).toEqual([9, 9]);
+    expect(paid.mock.calls[0][0].engine).toBe('tts-1');
+    const body = JSON.parse((fetchImpl.mock.calls[1] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.response_format).toBe('pcm');
   });
 });

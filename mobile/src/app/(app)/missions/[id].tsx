@@ -156,6 +156,7 @@ export default function MissionChat() {
         headerRight: () => <Button label={mission?.rehearsal ? 'Rehearse' : 'Run'} variant="ghost" onPress={() => run('Run this mission')} />,
       }} />
       <ChatView
+        missionId={missionId}
         items={chat.items}
         loading={chat.loading}
         sending={chat.sending}

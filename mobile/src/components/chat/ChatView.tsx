@@ -15,7 +15,7 @@ import { Markdown } from '../Markdown';
 import { AppText } from '../ui';
 import { Composer, type LatestReply } from './Composer';
 
-export function ChatView({ items, loading, sending, onSend, renderCard, placeholder, empty, header, alert, keyboardOffset = 0 }: {
+export function ChatView({ items, loading, sending, onSend, renderCard, placeholder, empty, header, alert, keyboardOffset = 0, missionId }: {
   items: ChatItem[];
   loading: boolean;
   sending: boolean;
@@ -27,19 +27,20 @@ export function ChatView({ items, loading, sending, onSend, renderCard, placehol
   header?: ReactNode;
   alert?: string | null;
   keyboardOffset?: number;
+  /** A mission's chat: files shared here belong to the mission. */
+  missionId?: string;
 }) {
   const c = useColors();
   const speech = useSpeech();
   const data = [...items].reverse();
   const last = items[items.length - 1];
   const latest = useMemo<LatestReply | null>(() => (last?.role === 'assistant'
-    ? { key: last.key, id: last.id, done: !last.streaming && !last.agentRunning, needsTap: !!last.action && !isEntry(last.action) && !last.applied }
+    ? { key: last.key, id: last.id, text: last.content, done: !last.streaming && !last.agentRunning, needsTap: !!last.action && !isEntry(last.action) && !last.applied }
     : null), [last]);
 
   const listen = (item: ChatItem) => {
-    if (!item.id) return;
-    if (speech.speakingId === item.id) return speech.stop();
-    void speech.speak(item.id).then(how => {
+    const voice = speech.toggle(item.key, item.content);
+    void voice?.done.then(how => {
       if (how === 'failed') Alert.alert('Couldn’t read this aloud', 'Check your connection and try again.');
     });
   };
@@ -62,15 +63,22 @@ export function ChatView({ items, loading, sending, onSend, renderCard, placehol
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.list}
-          renderItem={({ item }) => <Row item={item} card={renderCard(item)} speaking={speech.speakingId === item.id} onListen={Platform.OS === 'web' ? undefined : () => listen(item)} />}
+          renderItem={({ item }) => (
+            <Row
+              item={item}
+              card={renderCard(item)}
+              speaking={speech.speaking?.key === item.key ? (speech.speaking.playing ? 'playing' : 'preparing') : null}
+              onListen={Platform.OS === 'web' ? undefined : () => listen(item)}
+            />
+          )}
         />
       )}
-      <Composer placeholder={placeholder} sending={sending} onSend={onSend} latest={latest} speech={speech} />
+      <Composer placeholder={placeholder} sending={sending} onSend={onSend} latest={latest} speech={speech} missionId={missionId} />
     </KeyboardAvoidingView>
   );
 }
 
-function Row({ item, card, speaking, onListen }: { item: ChatItem; card: ReactNode; speaking: boolean; onListen?: () => void }) {
+function Row({ item, card, speaking, onListen }: { item: ChatItem; card: ReactNode; speaking: 'preparing' | 'playing' | null; onListen?: () => void }) {
   const c = useColors();
   const mine = item.role === 'user';
   const showText = !!item.content && !isEntry(item.action);
@@ -86,15 +94,19 @@ function Row({ item, card, speaking, onListen }: { item: ChatItem; card: ReactNo
       {showText && !item.streaming ? (
         <View style={[styles.actions, mine && styles.actionsMine]}>
           <CopyButton text={item.content} />
-          {!mine && item.id && onListen ? (
+          {!mine && onListen ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={speaking ? 'Stop reading aloud' : 'Read aloud'}
+              accessibilityLabel={speaking === 'preparing' ? 'Preparing to read aloud — tap to cancel' : speaking ? 'Stop reading aloud' : 'Read aloud'}
               onPress={onListen}
               hitSlop={10}
-              style={({ pressed }) => [styles.action, { opacity: pressed ? 0.5 : 1 }]}
+              style={({ pressed }) => [styles.action, styles.listen, { opacity: pressed ? 0.5 : 1 }]}
             >
-              <Icon name={speaking ? icons.stop : icons.speaker} size={15} color={c.textMuted} />
+              {speaking === 'preparing'
+                ? <ActivityIndicator size="small" color={c.textMuted} style={{ transform: [{ scale: 0.7 }] }} />
+                : speaking
+                  ? <><Icon name={icons.stop} size={12} color={c.text} /><AppText size="xs" weight="700">Stop</AppText></>
+                  : <Icon name={icons.speaker} size={15} color={c.textMuted} />}
             </Pressable>
           ) : null}
         </View>
@@ -157,4 +169,5 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: space.md, marginTop: -2, paddingHorizontal: 4 },
   actionsMine: { justifyContent: 'flex-end' },
   action: { padding: 2 },
+  listen: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 22, minHeight: 22 },
 });

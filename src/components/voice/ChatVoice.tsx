@@ -1,8 +1,8 @@
 'use client';
 // Voice and copy for the website's chats (Command Center and mission chat), as in the app:
-//   • 🎙 speak into the message box (check the words, then send);
-//   • voice mode — hands-free: listens, sends when you pause, reads the answer aloud, listens again;
-//     it pauses when a reply has a card, so approvals stay a click;
+//   • 🎙 speak into the message box: it stops by itself after a pause (or ✓), then you check and send;
+//   • voice mode — hands-free: listens, sends when you pause, speaks the answer while it is being
+//     written, listens again; it pauses when a reply has a card, so approvals stay a click;
 //   • under each message: copy, and read aloud.
 // Only real speech counts (the speech detector in @/lib/contracts/voice): silence and noise are never
 // sent to be transcribed, because transcription engines invent sentences from silence.
@@ -10,20 +10,23 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { AudioLines, Check, Copy, LoaderCircle, Mic, Square, Volume2, X } from 'lucide-react';
 
-import { MicTurn, ReplySpeaker, transcribeRecording, type SpeechSource } from '@/lib/voice/web-voice';
+import { VAD, type ReplyVoice } from '@/lib/contracts';
+import { MicTurn, replyVoice, transcribeRecording, unlockAudio } from '@/lib/voice/web-voice';
 
-/** The chat's latest reply, which voice mode reads aloud once it has finished. */
+/** The chat's latest reply, which voice mode speaks while it is being written. */
 export interface LatestReply {
   key: string;
   id?: string;
+  /** Its text so far. */
+  text: string;
   done: boolean;
   /** It carries a card to check and click (a plan to approve, an app to connect…). */
   needsTap: boolean;
 }
 
 type Step = 'listening' | 'hearing' | 'thinking' | 'speaking' | 'ended';
+type Mode = 'idle' | 'starting' | 'dictating' | 'transcribing' | 'voice';
 
-const MAX_DICTATION_S = 180;
 const AFTER_SPEAKING_MS = 400;
 const NO_SPEECH = 'I didn’t catch any speech — try again a little closer to the microphone.';
 const NO_MIC = 'Allow the microphone for this site in your browser to talk instead of typing.';
@@ -51,49 +54,64 @@ export function useChatVoice({ onSend, onDictated, latest, sending }: {
   latest: LatestReply | null;
   sending: boolean;
 }) {
-  const speaker = useRef<ReplySpeaker | null>(null);
   const mic = useRef<MicTurn | null>(null);
-  const [mode, setMode] = useState<'idle' | 'dictating' | 'transcribing' | 'voice'>('idle');
+  const [mode, setMode] = useState<Mode>('idle');
+  const modeRef = useRef<Mode>('idle');
   const [step, setStep] = useState<Step>('ended');
   const now = useRef<Step>('ended');
   const [level, setLevel] = useState(0);
   const [seconds, setSeconds] = useState(0);
   const [note, setNote] = useState<string | null>(null);
   const [unclear, setUnclear] = useState(false);
-  const [speakingKey, setSpeakingKey] = useState<string | null>(null);
-  const speakingRef = useRef<string | null>(null);
+  /** The reply being read aloud, and whether its first words are still being prepared. */
+  const [speaking, setSpeaking] = useState<{ key: string; playing: boolean } | null>(null);
+  const reading = useRef<{ key: string; voice: ReplyVoice } | null>(null);
+  /** Voice mode: this turn's answer, spoken while it is written. */
+  const answer = useRef<{ voice: ReplyVoice } | null>(null);
   const before = useRef<string | null>(null);
   const latestProps = useRef({ onSend, onDictated, latest });
   useEffect(() => { latestProps.current = { onSend, onDictated, latest }; });
 
-  const getSpeaker = useCallback(() => (speaker.current ??= new ReplySpeaker()), []);
   const go = useCallback((next: Step) => { now.current = next; setStep(next); }, []);
-  /** Where voice mode is now (it moves on while awaiting). */
   const at = useCallback((s: Step) => now.current === s, []);
+  const enter = useCallback((next: Mode) => { modeRef.current = next; setMode(next); }, []);
+  /** Which mode it is now (it moves on while awaiting). */
+  const inMode = useCallback((m: Mode) => modeRef.current === m, []);
 
-  // ── Read aloud ──
-  const toggleSpeak = useCallback(async (key: string, source: SpeechSource) => {
-    const s = getSpeaker();
-    if (speakingRef.current === key) {
-      s.stop();
-      speakingRef.current = null;
-      setSpeakingKey(null);
-      return;
-    }
-    s.unlock();
-    speakingRef.current = key;
-    setSpeakingKey(key);
-    const how = await s.speak(source);
-    if (speakingRef.current === key) { speakingRef.current = null; setSpeakingKey(null); }
-    if (how === 'failed') setNote('Couldn’t read that aloud. Please try again.');
-  }, [getSpeaker]);
+  // ── Reading aloud ──
+  const stopReading = useCallback(() => {
+    reading.current?.voice.stop();
+    reading.current = null;
+    setSpeaking(null);
+  }, []);
+
+  /** Starts reading a reply aloud; `done` resolves when it ends. */
+  const read = useCallback((key: string) => {
+    reading.current?.voice.stop();
+    setSpeaking({ key, playing: false });
+    const voice = replyVoice(() => setSpeaking(s => (s && s.key === key && !s.playing ? { key, playing: true } : s)));
+    reading.current = { key, voice };
+    void voice.done.then(how => {
+      if (reading.current?.voice !== voice) return;
+      reading.current = null;
+      setSpeaking(null);
+      if (how === 'failed') setNote('Couldn’t read that aloud. Please try again.');
+    });
+    return voice;
+  }, []);
+
+  const toggleSpeak = useCallback((key: string, text: string) => {
+    if (reading.current?.key === key) return stopReading();
+    unlockAudio();
+    read(key).finish(text);
+  }, [read, stopReading]);
 
   // ── Speaking into the message box ──
   const finishDictation = useCallback(async () => {
     const m = mic.current;
-    if (!m) return;
+    if (!m || modeRef.current !== 'dictating') return;
     mic.current = null;
-    setMode('transcribing');
+    enter('transcribing');
     const rec = await m.stop();
     try {
       const heard = rec ? await transcribeRecording(rec) : null;
@@ -102,33 +120,39 @@ export function useChatVoice({ onSend, onDictated, latest, sending }: {
     } catch (err) {
       setNote((err as Error).message);
     }
-    setMode('idle');
-  }, []);
-
-  const startDictation = useCallback(async () => {
-    setNote(null);
-    getSpeaker().stop();
-    const m = new MicTurn();
-    mic.current = m;
-    setSeconds(0);
-    try {
-      await m.start(l => {
-        setLevel(l);
-        setSeconds(Math.floor(m.seconds));
-        if (m.seconds > MAX_DICTATION_S && mic.current === m) void finishDictation();
-      });
-      setMode('dictating');
-    } catch {
-      mic.current = null;
-      setNote(NO_MIC);
-    }
-  }, [finishDictation, getSpeaker]);
+    enter('idle');
+  }, [enter]);
 
   const cancelDictation = useCallback(() => {
     mic.current?.cancel();
     mic.current = null;
-    setMode('idle');
-  }, []);
+    enter('idle');
+  }, [enter]);
+
+  const startDictation = useCallback(async () => {
+    if (modeRef.current !== 'idle') return; // already starting or recording
+    setNote(null);
+    stopReading();
+    enter('starting');
+    const m = new MicTurn();
+    setSeconds(0);
+    try {
+      await m.start((l, event) => {
+        if (mic.current !== m) return;
+        setLevel(l);
+        setSeconds(Math.floor(m.seconds));
+        if (event === 'end') void finishDictation();
+        else if (event === 'nothing') { cancelDictation(); setNote(NO_SPEECH); }
+      }, { pauseMs: VAD.dictationPauseMs, maxMs: VAD.dictationMaxMs });
+      if (!inMode('starting')) return m.cancel(); // cancelled while the browser was asking
+      mic.current = m;
+      enter('dictating');
+    } catch {
+      m.cancel();
+      enter('idle');
+      setNote(NO_MIC);
+    }
+  }, [cancelDictation, enter, finishDictation, inMode, stopReading]);
 
   // ── Voice mode ──
   const endVoice = useCallback((message: string | null) => {
@@ -136,33 +160,33 @@ export function useChatVoice({ onSend, onDictated, latest, sending }: {
     go('ended');
     mic.current?.cancel();
     mic.current = null;
-    getSpeaker().stop();
-    speakingRef.current = null;
-    setSpeakingKey(null);
-    setMode('idle');
+    stopReading();
+    enter('idle');
     setNote(message);
-  }, [getSpeaker, go]);
+  }, [enter, go, stopReading]);
 
   const finishTurn = useRef<(m: MicTurn) => Promise<void>>(async () => {});
   const listen = useCallback(async () => {
     go('listening');
     const m = new MicTurn();
-    mic.current = m;
     try {
       await m.start((l, event) => {
-        if (now.current !== 'listening' || mic.current !== m) return;
+        if (!at('listening') || mic.current !== m) return;
         setLevel(l);
         if (event === 'end') void finishTurn.current(m);
         else if (event === 'nothing') endVoice('Voice mode is off: I didn’t hear anything.');
       });
+      if (!at('listening')) return m.cancel();
+      mic.current = m;
     } catch {
+      m.cancel();
       endVoice(NO_MIC);
     }
-  }, [endVoice, go]);
+  }, [at, endVoice, go]);
 
   useEffect(() => {
     finishTurn.current = async (m: MicTurn) => {
-      if (now.current !== 'listening' || mic.current !== m) return;
+      if (!at('listening') || mic.current !== m) return;
       mic.current = null;
       go('hearing');
       const rec = await m.stop();
@@ -180,46 +204,63 @@ export function useChatVoice({ onSend, onDictated, latest, sending }: {
       }
       setUnclear(false);
       before.current = latestProps.current.latest?.key ?? null;
+      answer.current = null;
       go('thinking');
       latestProps.current.onSend(words);
     };
   }, [at, endVoice, go, listen]);
 
   const startVoice = useCallback(() => {
+    if (modeRef.current !== 'idle') return;
     setNote(null);
     setUnclear(false);
-    const s = getSpeaker();
-    s.unlock();
-    s.stop();
-    setMode('voice');
+    unlockAudio(); // inside the click: lets the page listen and speak from now on
+    stopReading();
+    enter('voice');
     void listen();
-  }, [getSpeaker, listen]);
+  }, [enter, listen, stopReading]);
 
   /** The circle: send now while listening, stop the reading while speaking. */
   const tapOrb = useCallback(() => {
-    if (now.current === 'listening' && mic.current) void finishTurn.current(mic.current);
-    else if (now.current === 'speaking') getSpeaker().stop();
-  }, [getSpeaker]);
+    if (at('listening') && mic.current) void finishTurn.current(mic.current);
+    else if (at('speaking') || at('thinking')) reading.current?.voice.stop();
+  }, [at]);
 
-  // The answer has finished: read it aloud, then listen again — or pause when it has a card to click.
+  // The answer is being written: speak it as it comes, then listen again — or pause at a card. One
+  // answer per turn: the reply after the one that was last when you spoke (its key changes once saved).
   useEffect(() => {
-    if (mode !== 'voice' || step !== 'thinking' || sending || !latest?.done || latest.key === before.current) return;
-    const reply = latest;
-    void Promise.resolve().then(async () => {
-      if (now.current !== 'thinking') return;
-      go('speaking');
-      if (reply.id) {
-        speakingRef.current = reply.key;
-        setSpeakingKey(reply.key);
-        await getSpeaker().speak({ messageId: reply.id });
-        if (speakingRef.current === reply.key) { speakingRef.current = null; setSpeakingKey(null); }
+    if (mode !== 'voice' || !latest || latest.key === before.current) return;
+    if (!at('thinking') && !at('speaking')) return;
+    const { key, text } = latest;
+    const final = latest.done && !sending;
+    const current = answer.current;
+    if (current) {
+      if (final) current.voice.finish(text);
+      else current.voice.update(text);
+      if (reading.current?.voice === current.voice && reading.current.key !== key) {
+        reading.current.key = key;
+        void Promise.resolve().then(() => setSpeaking(sp => (sp ? { ...sp, key } : sp)));
       }
-      if (!at('speaking')) return;
-      if (reply.needsTap) return endVoice('Voice mode paused so you can check the card above.');
-      await new Promise(r => setTimeout(r, AFTER_SPEAKING_MS));
-      if (at('speaking')) void listen();
+      return;
+    }
+    if (!at('thinking') || (!text.trim() && !final)) return;
+    void Promise.resolve().then(() => {
+      if (answer.current || !at('thinking')) return;
+      const voice = read(key);
+      answer.current = { voice };
+      go('speaking');
+      void voice.done.then(async how => {
+        if (answer.current?.voice !== voice) return;
+        answer.current = null;
+        if (!at('speaking')) return;
+        if (how !== 'stopped' && latestProps.current.latest?.needsTap) return endVoice('Voice mode paused so you can check the card above.');
+        await new Promise(r => setTimeout(r, AFTER_SPEAKING_MS));
+        if (at('speaking')) void listen();
+      });
+      if (final) voice.finish(text);
+      else voice.update(text);
     });
-  }, [mode, step, sending, latest, at, endVoice, getSpeaker, go, listen]);
+  }, [mode, step, sending, latest, at, endVoice, go, listen, read]);
 
   // Keep the screen on in voice mode; stop everything when the chat closes.
   useEffect(() => {
@@ -229,10 +270,10 @@ export function useChatVoice({ onSend, onDictated, latest, sending }: {
       .wakeLock.request('screen').then(l => { lock = l; }).catch(() => {});
     return () => { void lock?.release().catch(() => {}); };
   }, [mode]);
-  useEffect(() => () => { now.current = 'ended'; mic.current?.cancel(); speaker.current?.stop(); }, []);
+  useEffect(() => () => { now.current = 'ended'; mic.current?.cancel(); reading.current?.voice.stop(); }, []);
 
   return {
-    mode, step, level, seconds, note, unclear, speakingKey,
+    mode, step, level, seconds, note, unclear, speaking,
     label: step === 'listening' && unclear ? 'Didn’t catch that — say it again' : STEP_LABEL[step],
     setNote, toggleSpeak, startDictation, finishDictation, cancelDictation, startVoice, endVoice, tapOrb,
   };
@@ -244,16 +285,15 @@ export type ChatVoice = ReturnType<typeof useChatVoice>;
 
 const iconButton: CSSProperties = {
   background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4,
-  display: 'inline-flex', alignItems: 'center', borderRadius: 6,
+  display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 6, fontSize: '0.72rem',
 };
 
 /** Copy and read aloud, under a message. */
-export function MessageActions({ text, voice, speakKey, source, align = 'left' }: {
+export function MessageActions({ text, voice, speakKey, align = 'left' }: {
   text: string;
   voice?: ChatVoice;
-  /** Read aloud (replies only): this message's key and what to speak. */
+  /** Read aloud (replies only): this message's key. */
   speakKey?: string;
-  source?: SpeechSource;
   align?: 'left' | 'right';
 }) {
   const [copied, setCopied] = useState(false);
@@ -268,15 +308,26 @@ export function MessageActions({ text, voice, speakKey, source, align = 'left' }
       setCopied(true);
     } catch { /* the browser refused */ }
   };
-  const speaking = !!speakKey && voice?.speakingKey === speakKey;
+  const mine = !!speakKey && voice?.speaking?.key === speakKey;
+  const preparing = mine && !voice?.speaking?.playing;
   return (
     <div style={{ display: 'flex', gap: 2, marginTop: 2, justifyContent: align === 'right' ? 'flex-end' : 'flex-start' }}>
       <button type="button" onClick={() => void copy()} title={copied ? 'Copied' : 'Copy'} aria-label={copied ? 'Copied' : 'Copy'} style={{ ...iconButton, color: copied ? 'var(--emerald)' : 'var(--text-muted)' }}>
         {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.75} />}
       </button>
-      {voice && speakKey && source ? (
-        <button type="button" onClick={() => void voice.toggleSpeak(speakKey, source)} title={speaking ? 'Stop reading' : 'Read aloud'} aria-label={speaking ? 'Stop reading aloud' : 'Read aloud'} style={{ ...iconButton, color: speaking ? 'var(--accent)' : 'var(--text-muted)' }}>
-          {speaking ? <Square size={13} strokeWidth={2} /> : <Volume2 size={14} strokeWidth={1.75} />}
+      {voice && speakKey ? (
+        <button
+          type="button"
+          onClick={() => voice.toggleSpeak(speakKey, text)}
+          title={mine ? 'Stop reading' : 'Read aloud'}
+          aria-label={preparing ? 'Preparing to read aloud — click to cancel' : mine ? 'Stop reading aloud' : 'Read aloud'}
+          style={{ ...iconButton, color: mine ? 'var(--text-primary)' : 'var(--text-muted)' }}
+        >
+          {preparing
+            ? <LoaderCircle size={14} style={{ animation: 'spin 1s linear infinite' }} />
+            : mine
+              ? <><Square size={11} fill="currentColor" strokeWidth={0} /><span>Stop</span></>
+              : <Volume2 size={14} strokeWidth={1.75} />}
         </button>
       ) : null}
     </div>
@@ -291,12 +342,13 @@ const squareButton = (active = false): CSSProperties => ({
 
 /** 🎙 (speak into the box) and voice mode, next to the message box. */
 export function VoiceButtons({ voice, disabled }: { voice: ChatVoice; disabled?: boolean }) {
+  const off = disabled || voice.mode !== 'idle';
   return (
     <>
-      <button type="button" onClick={() => void voice.startDictation()} disabled={disabled} title="Speak your message" aria-label="Speak your message" style={{ ...squareButton(), opacity: disabled ? 0.4 : 1 }}>
+      <button type="button" onClick={() => void voice.startDictation()} disabled={off} title="Speak your message" aria-label="Speak your message" style={{ ...squareButton(), opacity: off ? 0.4 : 1 }}>
         <Mic size={17} strokeWidth={1.75} />
       </button>
-      <button type="button" onClick={voice.startVoice} disabled={disabled} title="Voice mode: talk hands-free" aria-label="Voice mode: talk hands-free" style={{ ...squareButton(true), opacity: disabled ? 0.4 : 1 }}>
+      <button type="button" onClick={voice.startVoice} disabled={off} title="Voice mode: talk hands-free" aria-label="Voice mode: talk hands-free" style={{ ...squareButton(true), opacity: off ? 0.4 : 1 }}>
         <AudioLines size={17} strokeWidth={1.75} />
       </button>
     </>
@@ -308,19 +360,20 @@ const bar: CSSProperties = {
   background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
 };
 
-/** Recording into the message box: ✕ throws it away, ✓ turns it into text. */
+/** Recording into the message box: ✕ throws it away, ✓ (or a pause) turns it into text. */
 export function DictationBar({ voice }: { voice: ChatVoice }) {
-  const busy = voice.mode === 'transcribing';
+  const busy = voice.mode === 'transcribing' || voice.mode === 'starting';
   return (
     <div style={bar} role="group" aria-label="Recording">
-      <button type="button" onClick={voice.cancelDictation} disabled={busy} title="Cancel" aria-label="Cancel recording" style={{ ...iconButton, opacity: busy ? 0.4 : 1 }}><X size={16} /></button>
+      <button type="button" onClick={voice.cancelDictation} disabled={voice.mode === 'transcribing'} title="Cancel" aria-label="Cancel recording" style={{ ...iconButton, opacity: voice.mode === 'transcribing' ? 0.4 : 1 }}><X size={16} /></button>
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
         {busy ? (
-          <><LoaderCircle size={15} style={{ animation: 'spin 1s linear infinite' }} /> Writing it down…</>
+          <><LoaderCircle size={15} style={{ animation: 'spin 1s linear infinite' }} /> {voice.mode === 'starting' ? 'Starting the microphone…' : 'Writing it down…'}</>
         ) : (
           <>
             <span style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--rose)', opacity: 0.45 + voice.level * 0.55, transform: `scale(${1 + voice.level * 0.5})`, transition: 'transform 0.1s' }} />
             {Math.floor(voice.seconds / 60)}:{String(voice.seconds % 60).padStart(2, '0')}
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>· stops when you pause</span>
           </>
         )}
       </div>

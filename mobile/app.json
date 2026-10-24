@@ -46,11 +46,24 @@
       "expo-apple-authentication",
       "expo-web-browser",
       [
-        "expo-audio",
+        "react-native-audio-api",
         {
-          "microphonePermission": "Agentic Factor uses the microphone so you can talk to your assistant instead of typing.",
-          "enableBackgroundPlayback": false,
-          "enableBackgroundRecording": false
+          "iosMicrophonePermission": "Agentic Factor uses the microphone so you can talk to your assistant instead of typing.",
+          "iosBackgroundMode": false,
+          "androidForegroundService": false,
+          "androidPermissions": [
+            "android.permission.RECORD_AUDIO",
+            "android.permission.MODIFY_AUDIO_SETTINGS"
+          ],
+          "disableFFmpeg": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Agentic Factor lets you share photos with your assistant — an invoice, a receipt or a business card to add to your apps.",
+          "cameraPermission": "Agentic Factor lets you take a photo for your assistant — an invoice, a receipt or a business card to add to your apps.",
+          "microphonePermission": false
         }
       ]
     ],

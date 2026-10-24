@@ -69,8 +69,11 @@ export const VAD = {
   onsetMs: 180,
   /** Voice in total before the recording counts as speech. */
   minSpeechMs: 450,
-  /** A pause this long after speech ends the turn. */
+  /** A pause this long after speech ends the turn (voice mode). */
   pauseMs: 1300,
+  /** Speaking into the message box stops after a longer pause (the words are then checked, not sent). */
+  dictationPauseMs: 2500,
+  dictationMaxMs: 180_000,
   /** Short bursts that never added up to speech are forgotten after this much quiet. */
   forgetMs: 1500,
   /** Nothing said for this long: voice mode stops listening. */
@@ -103,8 +106,12 @@ export const newVad = (): VadState => ({ elapsedMs: 0, floorDb: Infinity, runMs:
 /**
  * Feeds one level reading (dBFS, e.g. −160 to 0) taken `dtMs` after the last. Returns the new state and
  * whether the turn ended: 'end' after speech and a pause (send it), 'nothing' when no speech came.
+ * Speaking into the message box passes a longer pause and time limit.
  */
-export function vadStep(prev: VadState, db: number, dtMs: number): { state: VadState; event: VadEvent } {
+export function vadStep(
+  prev: VadState, db: number, dtMs: number,
+  { pauseMs = VAD.pauseMs, maxMs = VAD.maxMs }: { pauseMs?: number; maxMs?: number } = {},
+): { state: VadState; event: VadEvent } {
   const s: VadState = { ...prev, elapsedMs: prev.elapsedMs + dtMs };
   const level = Number.isFinite(db) ? Math.max(db, -100) : -100;
   if (s.elapsedMs <= VAD.calibrateMs) {
@@ -127,8 +134,8 @@ export function vadStep(prev: VadState, db: number, dtMs: number): { state: VadS
     if (!s.heard && s.voicedMs > 0 && s.quietMs >= VAD.forgetMs) s.voicedMs = 0;
   }
   s.heard = s.heard || s.voicedMs >= VAD.minSpeechMs;
-  if (s.heard && (s.quietMs >= VAD.pauseMs || s.elapsedMs >= VAD.maxMs)) return { state: s, event: 'end' };
-  if (!s.heard && (s.elapsedMs >= VAD.nothingMs || s.elapsedMs >= VAD.maxMs)) return { state: s, event: 'nothing' };
+  if (s.heard && (s.quietMs >= pauseMs || s.elapsedMs >= maxMs)) return { state: s, event: 'end' };
+  if (!s.heard && (s.elapsedMs >= VAD.nothingMs || s.elapsedMs >= maxMs)) return { state: s, event: 'nothing' };
   return { state: s, event: 'none' };
 }
 

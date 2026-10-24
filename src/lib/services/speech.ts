@@ -213,6 +213,133 @@ export async function synthesizeSpeech(text: string, keys: EngineKeys, fetchImpl
   throw lastError;
 }
 
+// ── Speaking as a stream (a piece of a reply at a time, played back to back by the device) ──
+
+type Emit = (pcm: Uint8Array) => void;
+
+/** The base64 audio in one streamed event, wherever this API version puts it. */
+function audioIn(evt: Record<string, unknown>): string | null {
+  const delta = evt.delta as { type?: string; data?: string } | undefined;
+  if (delta?.type === 'audio' && typeof delta.data === 'string') return delta.data;
+  const content = (evt.content ?? (evt.step as { content?: unknown } | undefined)?.content) as Array<{ type?: string; data?: string }> | undefined;
+  const audio = Array.isArray(content) ? content.find(c => c.type === 'audio' && typeof c.data === 'string') : undefined;
+  return audio?.data ?? null;
+}
+
+async function geminiSpeakStream(text: string, key: EngineKey, emit: Emit, signal: AbortSignal, fetchImpl: Fetch): Promise<Paid> {
+  const res = await fetchImpl(GEMINI_INTERACTIONS, {
+    method: 'POST',
+    headers: { 'x-goog-api-key': key.key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: GEMINI_TTS_MODEL,
+      input: [{ type: 'user_input', content: [{ type: 'text', text, annotations: [{ type: 'speech_metadata', style: SPEECH_STYLE }] }] }],
+      response_format: { type: 'audio', mime_type: 'audio/l16', sample_rate: 24_000 },
+      generation_config: { speech_config: [{ voice: GEMINI_VOICE }] },
+      stream: true,
+    }),
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`Google speech ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`);
+  let bytes = 0;
+  let usage: { input: number; output: number } | null = null;
+  let first = true;
+  const send = (b64: string) => {
+    let pcm: Uint8Array = Buffer.from(b64, 'base64');
+    // A WAV header (if the format was ignored) is not sound.
+    if (first && pcm.length > 44 && Buffer.from(pcm.subarray(0, 4)).toString() === 'RIFF') pcm = pcm.subarray(44);
+    first = false;
+    if (pcm.length) { emit(pcm); bytes += pcm.length; }
+  };
+  const handle = (json: string) => {
+    if (!json || json === '[DONE]') return;
+    try {
+      const evt = JSON.parse(json) as Record<string, unknown>;
+      const audio = audioIn(evt);
+      if (audio) send(audio);
+      for (const s of Array.isArray(evt.steps) ? evt.steps as Array<Record<string, unknown>> : []) {
+        const a = audioIn(s);
+        if (a) send(a);
+      }
+      usage = usageOf(evt) ?? usageOf((evt.interaction ?? {}) as Record<string, unknown>) ?? usage;
+    } catch { /* not an event */ }
+  };
+  if ((res.headers.get('content-type') ?? '').includes('application/json')) {
+    // Answered in one piece after all.
+    handle(await res.text());
+  } else {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (line.startsWith('data:')) handle(line.slice(5).trim());
+      }
+    }
+    if (buffer.trim().startsWith('data:')) handle(buffer.trim().slice(5).trim());
+  }
+  if (bytes === 0) throw new Error('Google speech stream had no audio.');
+  const prices = geminiTtsUsdPerM();
+  const used = usage as { input: number; output: number } | null;
+  const costUsd = used
+    ? (used.input * prices.textIn + used.output * prices.audioOut) / 1_000_000
+    : ((bytes / 48_000) * 25 * prices.audioOut + (text.length / 4) * prices.textIn) / 1_000_000;
+  return { costUsd, own: key.own, engine: GEMINI_TTS_MODEL };
+}
+
+async function openaiSpeakStream(text: string, key: EngineKey, emit: Emit, signal: AbortSignal, fetchImpl: Fetch): Promise<Paid> {
+  const res = await fetchImpl('https://api.openai.com/v1/audio/speech', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key.key}`, 'Content-Type': 'application/json' },
+    // pcm: 24 kHz, 16-bit little-endian mono — the same as Google's stream.
+    body: JSON.stringify({ model: 'tts-1', voice: 'nova', input: text, response_format: 'pcm' }),
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`OpenAI speech ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`);
+  const reader = res.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value?.length) emit(value);
+  }
+  return { costUsd: text.length * TTS_USD_PER_CHAR, own: key.own, engine: 'tts-1' };
+}
+
+/**
+ * A piece of a reply spoken as a stream of raw 16-bit PCM (24 kHz mono), sent on as it is made. Google
+ * first; OpenAI if Google fails before any sound was sent. `paid` gets the real cost once it is known.
+ */
+export function streamSpeech(text: string, keys: EngineKeys, paid: (p: Paid) => Promise<void> | void, fetchImpl: Fetch = fetch): ReadableStream<Uint8Array> {
+  const abort = new AbortController();
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let sent = 0;
+      const emit: Emit = pcm => { sent += pcm.length; controller.enqueue(pcm); };
+      for (const engine of [
+        keys.gemini ? () => geminiSpeakStream(text, keys.gemini!, emit, abort.signal, fetchImpl) : null,
+        keys.openai ? () => openaiSpeakStream(text, keys.openai!, emit, abort.signal, fetchImpl) : null,
+      ]) {
+        if (!engine) continue;
+        try {
+          await paid(await engine());
+          break;
+        } catch (err) {
+          if (abort.signal.aborted) break;
+          console.error('[speech] streaming failed:', err);
+          if (sent > 0) break; // part was already heard: don't start again in another voice
+        }
+      }
+      try { controller.close(); } catch { /* cancelled */ }
+    },
+    cancel() { abort.abort(); },
+  });
+}
+
 // ── What gets spoken ──
 
 const FIRST_PART = 220;

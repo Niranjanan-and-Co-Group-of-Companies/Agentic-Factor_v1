@@ -294,3 +294,4 @@ export interface StoreProductInfo {
 
 export * from './voice';
 export * from './markdown';
+export * from './speech';

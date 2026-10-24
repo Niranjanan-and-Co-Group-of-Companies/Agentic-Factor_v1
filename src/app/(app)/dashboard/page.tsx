@@ -728,7 +728,7 @@ function CommandCenterPageInner() {
   // ── Voice: speak into the box, voice mode, read aloud ──
   const lastMessage = messages[messages.length - 1];
   const latestReply = useMemo<LatestReply | null>(() => (lastMessage?.role === 'assistant'
-    ? { key: messageKey(lastMessage, messages.length - 1), id: lastMessage.id, done: !lastMessage.isStreaming, needsTap: replyNeedsTap(lastMessage.action_payload as { type?: string; resolved?: string } | null, lastMessage.action_applied) }
+    ? { key: messageKey(lastMessage, messages.length - 1), id: lastMessage.id, text: lastMessage.content, done: !lastMessage.isStreaming, needsTap: replyNeedsTap(lastMessage.action_payload as { type?: string; resolved?: string } | null, lastMessage.action_applied) }
     : null), [lastMessage, messages.length]);
   const voice = useChatVoice({
     onSend: text => { void sendMessageRef.current?.(text); },
@@ -1636,7 +1636,7 @@ function CommandCenterPageInner() {
                   {!msg.isStreaming && msg.content.trim() && (
                     msg.role === 'user'
                       ? <MessageActions text={msg.content} align="right" />
-                      : <MessageActions text={msg.content} voice={voice} speakKey={msg.id ? messageKey(msg, i) : undefined} source={msg.id ? { messageId: msg.id } : undefined} />
+                      : <MessageActions text={msg.content} voice={voice} speakKey={messageKey(msg, i)} />
                   )}
                   {msg.role === 'assistant' && msg.isStreaming && msg.processingAction && renderProcessingCard(msg.processingAction)}
                   {msg.role === 'assistant' && msg.action_payload && !msg.isStreaming && renderActionCard(msg.action_payload as ActionPayload, i)}

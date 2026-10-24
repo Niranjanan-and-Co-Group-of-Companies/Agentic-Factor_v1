@@ -1,9 +1,23 @@
-// Voice in the browser: the microphone (one turn at a time, measured by the same speech detector as the
-// app, @/lib/contracts/voice) and replies read aloud part by part. Browser-only.
+// Voice in the browser: one audio system for the page (unlocked by the click that starts voice, as Safari
+// requires), the microphone one turn at a time (measured by the speech detector shared with the app), and
+// replies spoken smoothly — streamed sentence by sentence and played back to back (@/lib/contracts/speech).
+// Browser-only.
 
-import { loudness, newVad, vadStep, type TranscriptionResult, type VadEvent, type VadState } from '@/lib/contracts';
+import {
+  loudness, newVad, ReplyVoice, SPEECH_SAMPLE_RATE, vadStep,
+  type SpeechSink, type SpeechStream, type TranscriptionResult, type VadEvent, type VadState,
+} from '@/lib/contracts';
 
 const TICK_MS = 100;
+
+let shared: AudioContext | null = null;
+
+/** The page's audio system. Call it inside a click first (Safari only lets sound start from one). */
+export function unlockAudio(): AudioContext {
+  shared ??= new AudioContext();
+  if (shared.state === 'suspended') void shared.resume().catch(() => {});
+  return shared;
+}
 
 export interface Recording { blob: Blob; voicedMs: number; durationMs: number }
 
@@ -11,23 +25,27 @@ export interface Recording { blob: Blob; voicedMs: number; durationMs: number }
 export class MicTurn {
   private stream: MediaStream | null = null;
   private recorder: MediaRecorder | null = null;
+  private source: MediaStreamAudioSourceNode | null = null;
   private chunks: Blob[] = [];
-  private context: AudioContext | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private startedAt = 0;
   private vad: VadState = newVad();
 
-  /** Opens the microphone and records; `onTick` gets the level (0–1) and the detector's event. */
-  async start(onTick: (level: number, event: VadEvent) => void): Promise<void> {
+  /**
+   * Opens the microphone and records; `onTick` gets the level (0–1) and the detector's event. Speaking
+   * into the message box passes a longer pause and time limit.
+   */
+  async start(onTick: (level: number, event: VadEvent) => void, limits?: { pauseMs?: number; maxMs?: number }): Promise<void> {
+    const context = unlockAudio();
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     this.recorder = new MediaRecorder(this.stream);
     this.chunks = [];
     this.recorder.ondataavailable = e => { if (e.data.size > 0) this.chunks.push(e.data); };
     this.recorder.start(250);
-    this.context = new AudioContext();
-    const analyser = this.context.createAnalyser();
+    const analyser = context.createAnalyser();
     analyser.fftSize = 2048;
-    this.context.createMediaStreamSource(this.stream).connect(analyser);
+    this.source = context.createMediaStreamSource(this.stream);
+    this.source.connect(analyser);
     const samples = new Float32Array(analyser.fftSize);
     this.vad = newVad();
     this.startedAt = performance.now();
@@ -38,7 +56,7 @@ export class MicTurn {
       for (const v of samples) sum += v * v;
       const db = 20 * Math.log10(Math.sqrt(sum / samples.length) || 1e-8);
       const now = performance.now();
-      const r = vadStep(this.vad, db, now - last);
+      const r = vadStep(this.vad, db, now - last, limits);
       last = now;
       this.vad = r.state;
       onTick(loudness(db), r.event);
@@ -51,10 +69,12 @@ export class MicTurn {
   async stop(): Promise<Recording | null> {
     const recorder = this.recorder;
     const measured = { voicedMs: this.vad.voicedMs, durationMs: performance.now() - this.startedAt };
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
     if (recorder && recorder.state !== 'inactive') {
       const stopped = new Promise<void>(resolve => { recorder.onstop = () => resolve(); });
       recorder.stop();
-      await stopped;
+      await Promise.race([stopped, new Promise(r => setTimeout(r, 2000))]);
     }
     const type = recorder?.mimeType || 'audio/webm';
     this.release();
@@ -71,10 +91,10 @@ export class MicTurn {
   private release(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.source?.disconnect();
+    this.source = null;
     this.stream?.getTracks().forEach(t => t.stop());
     this.stream = null;
-    void this.context?.close().catch(() => {});
-    this.context = null;
   }
 }
 
@@ -91,79 +111,58 @@ export async function transcribeRecording(rec: Recording): Promise<Transcription
   return { text: (data.text ?? '').trim(), language: data.language ?? null, ...(data.noSpeech ? { noSpeech: true } : {}) };
 }
 
-export type SpeechEnd = 'finished' | 'stopped' | 'failed';
-export type SpeechSource = { messageId: string } | { text: string };
+// ── Speaking ──
 
-// A moment of silence: playing it during a click lets the page play replies later (Safari's rule).
-const SILENCE = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
-
-/** Reads replies aloud through one audio element, part by part, fetching the next part while one plays. */
-export class ReplySpeaker {
-  private audio: HTMLAudioElement | null = null;
-  private run = 0;
-  private wake: (() => void) | null = null;
-  /** Parts of saved replies already fetched (messageId:part → object URL), so replaying is free. */
-  private cache = new Map<string, { url: string; parts: number }>();
-
-  private element(): HTMLAudioElement {
-    this.audio ??= new Audio();
-    return this.audio;
-  }
-
-  /** Call inside a click (Speak, Voice mode): lets later replies play without one. */
-  unlock(): void {
-    const a = this.element();
-    if (a.src && !a.src.startsWith('data:')) return;
-    a.src = SILENCE;
-    void a.play().catch(() => {});
-  }
-
-  stop(): void {
-    this.run++;
-    this.audio?.pause();
-    this.wake?.();
-    this.wake = null;
-  }
-
-  private async part(source: SpeechSource, index: number): Promise<{ url: string; parts: number }> {
-    const key = 'messageId' in source ? `${source.messageId}:${index}` : null;
-    const hit = key ? this.cache.get(key) : undefined;
-    if (hit) return hit;
-    const res = 'messageId' in source
-      ? await fetch(`/api/tts?messageId=${encodeURIComponent(source.messageId)}&part=${index}`, { credentials: 'include' })
-      : await fetch('/api/tts', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: source.text, part: index }) });
-    if (!res.ok) throw new Error(`Read aloud failed (${res.status})`);
-    const got = { url: URL.createObjectURL(await res.blob()), parts: Number(res.headers.get('X-Speech-Parts') ?? '1') || 1 };
-    if (key) this.cache.set(key, got);
-    return got;
-  }
-
-  /** Speaks a saved reply (by id) or any text, stopping anything playing; resolves when it ends. */
-  async speak(source: SpeechSource): Promise<SpeechEnd> {
-    this.stop();
-    const mine = ++this.run;
-    try {
-      const first = await this.part(source, 0);
-      let next = first.parts > 1 ? this.part(source, 1).catch(() => null) : null;
-      for (let i = 0; i < first.parts; i++) {
-        const current = i === 0 ? first : await next;
-        if (mine !== this.run) return 'stopped';
-        if (!current) return 'failed';
-        if (i > 0 && i + 1 < first.parts) next = this.part(source, i + 1).catch(() => null);
-        const a = this.element();
-        a.src = current.url;
-        await new Promise<void>(resolve => {
-          this.wake = resolve;
-          a.onended = () => resolve();
-          a.onerror = () => resolve();
-          a.play().catch(() => resolve());
-        });
-        if (!('messageId' in source)) URL.revokeObjectURL(current.url);
-        if (mine !== this.run) return 'stopped';
-      }
-      return 'finished';
-    } catch {
-      return mine === this.run ? 'failed' : 'stopped';
+/** The voice for a piece of text, as it is made (raw 16-bit PCM, 24 kHz). */
+const fetchSpeech: SpeechStream = async (text, signal) => {
+  const res = await fetch('/api/tts/stream', {
+    method: 'POST', credentials: 'include', signal,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (res.status === 204 || !res.body) return (async function* () { /* nothing to say */ })();
+  if (!res.ok) throw new Error(`Read aloud failed (${res.status})`);
+  const reader = res.body.getReader();
+  return (async function* () {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      if (value?.length) yield value;
     }
+  })();
+};
+
+/** Plays samples back to back on the page's audio system. */
+class PageSink implements SpeechSink {
+  private next = 0;
+  private sources = new Set<AudioBufferSourceNode>();
+  constructor(private context: AudioContext, private onSound: () => void) {}
+
+  play(samples: Float32Array): void {
+    const ctx = this.context;
+    const buffer = ctx.createBuffer(1, samples.length, SPEECH_SAMPLE_RATE);
+    buffer.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    const at = Math.max(this.next, ctx.currentTime + 0.05);
+    source.start(at);
+    this.next = at + buffer.duration;
+    this.sources.add(source);
+    source.onended = () => this.sources.delete(source);
+    this.onSound();
   }
+
+  rest(seconds: number): void { this.next = Math.max(this.next, this.context.currentTime) + seconds; }
+  remaining(): number { return Math.max(0, this.next - this.context.currentTime); }
+  clear(): void {
+    for (const s of this.sources) { try { s.stop(); } catch { /* already ended */ } }
+    this.sources.clear();
+    this.next = 0;
+  }
+}
+
+/** Speaks one reply on the page: feed it the text as it is written (`update`), then `finish`. */
+export function replyVoice(onSound: () => void): ReplyVoice {
+  return new ReplyVoice(fetchSpeech, new PageSink(unlockAudio(), onSound));
 }

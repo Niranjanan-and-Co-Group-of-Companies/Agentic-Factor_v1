@@ -23,4 +23,9 @@ export const icons = {
   check: { ios: 'checkmark', android: 'check', web: 'check' },
   copy: { ios: 'doc.on.doc', android: 'content_copy', web: 'content_copy' },
   language: { ios: 'globe', android: 'language', web: 'language' },
+  plus: { ios: 'plus', android: 'add', web: 'add' },
+  camera: { ios: 'camera', android: 'photo_camera', web: 'photo_camera' },
+  photo: { ios: 'photo', android: 'image', web: 'image' },
+  file: { ios: 'doc', android: 'description', web: 'description' },
+  attachment: { ios: 'paperclip', android: 'attach_file', web: 'attach_file' },
 } satisfies Record<string, Name>;
